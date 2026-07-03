@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Maydin Admin</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header>
+      <div class="row">
+        <h1>플랫폼 Admin</h1>
+        <button class="secondary" onclick="logout()">로그아웃</button>
+        <a href="/">홈</a>
+      </div>
+    </header>
+    <main>
+      <section class="card" id="loginCard">
+        <h2>Admin 로그인</h2>
+        <form id="loginForm">
+          <label>이메일 <input name="email" value="admin@maydin.kr" /></label>
+          <label>비밀번호 <input name="password" type="password" value="admin1234" /></label>
+          <button>로그인</button>
+        </form>
+      </section>
+
+      <section class="grid">
+        <article class="card">
+          <h2>전체 현황</h2>
+          <div id="summary"></div>
+        </article>
+        <article class="card">
+          <h2>약국 생성</h2>
+          <form id="pharmacyForm">
+            <label>약국 코드 <input name="pharmacy_code" value="B001" required /></label>
+            <label>약국명 <input name="pharmacy_name" value="B약국" required /></label>
+            <label>대표자명 <input name="owner_name" value="김대표" required /></label>
+            <label>사업자등록번호 <input name="business_number" value="222-22-22222" /></label>
+            <label>약국 전화번호 <input name="phone" value="02-2222-2222" /></label>
+            <label>주소 <input name="address" value="서울시 테스트구 2" /></label>
+            <label>쇼핑몰 주소 Slug <input name="store_slug" value="b-pharmacy" required /></label>
+            <label>운영자 이메일 <input name="owner_email" value="owner@bpharmacy.kr" required /></label>
+            <label>운영자 휴대폰 <input name="owner_phone" value="010-2222-3333" /></label>
+            <label>임시 비밀번호 <input name="owner_password" value="owner1234" /></label>
+            <label>수수료율 <input name="commission_rate" type="number" value="5" /></label>
+            <button>약국 생성</button>
+          </form>
+        </article>
+      </section>
+
+      <section class="card">
+        <h2>약국 목록</h2>
+        <div id="pharmacies"></div>
+      </section>
+      <pre id="message" class="notice"></pre>
+    </main>
+    <script src="/app.js"></script>
+    <script>
+      async function loadAdmin() {
+        try {
+          const summary = await api.request('/admin/summary');
+          $('#summary').innerHTML = `
+            <p>전체 약국: ${summary.totals.pharmacy_count}</p>
+            <p>활성 약국: ${summary.totals.active_pharmacy_count}</p>
+            <p>전체 고객: ${summary.totals.customer_count}</p>
+            <p>전체 주문: ${summary.totals.order_count}</p>
+            <p>전체 매출: ${money(summary.totals.total_sales)}</p>
+          `;
+
+          const data = await api.request('/admin/pharmacies');
+          $('#pharmacies').innerHTML = `
+            <table>
+              <thead><tr><th>약국</th><th>코드</th><th>QR 가입 URL</th><th>고객/상품/주문</th><th>매출</th></tr></thead>
+              <tbody>
+                ${data.pharmacies.map((p) => `
+                  <tr>
+                    <td>${p.pharmacy_name}</td>
+                    <td>${p.pharmacy_code}</td>
+                    <td><a href="${p.qr_url}">${p.qr_url}</a><br />스캔 ${p.scan_count} / 가입 ${p.signup_count}</td>
+                    <td>${p.customer_count} / ${p.product_count} / ${p.order_count}</td>
+                    <td>${money(p.sales)}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          `;
+        } catch (error) {
+          message(error.message);
+        }
+      }
+
+      $('#loginForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try {
+          const data = await api.login($('#loginForm').email.value, $('#loginForm').password.value);
+          saveSession(data);
+          message('로그인되었습니다.');
+          loadAdmin();
+        } catch (error) {
+          message(error.message);
+        }
+      });
+
+      $('#pharmacyForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try {
+          const data = await api.request('/admin/pharmacies', {
+            method: 'POST',
+            body: serializeForm(event.target)
+          });
+          message(`${data.pharmacy.pharmacy_name} 생성 완료`);
+          loadAdmin();
+        } catch (error) {
+          message(error.message);
+        }
+      });
+
+      if (currentUser()?.role === 'ADMIN') loadAdmin();
+    </script>
+  </body>
+</html>

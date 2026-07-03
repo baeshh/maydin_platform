@@ -1,0 +1,884 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>약국 쇼핑몰</title>
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+    <style>
+      :root {
+        --toss-blue: #3182f6;
+        --toss-blue-light: #e8f3ff;
+        --bg-main: #fff;
+        --bg-sub: #f2f4f6;
+        --text-main: #191f28;
+        --text-sub: #4e5968;
+        --text-muted: #8b95a1;
+        --border: #f2f4f6;
+        --danger: #f04452;
+        --card-shadow: 0 8px 20px rgba(0, 0, 0, 0.04);
+      }
+
+      * {
+        box-sizing: border-box;
+        font-family: "Pretendard", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+        margin: 0;
+        padding: 0;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      body {
+        background: var(--bg-main);
+        color: var(--text-main);
+        padding-bottom: 110px;
+      }
+
+      header {
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        background: rgba(255, 255, 255, 0.86);
+        border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+        position: sticky;
+        top: 0;
+        z-index: 100;
+      }
+
+      .header-inner {
+        align-items: center;
+        display: flex;
+        justify-content: space-between;
+        margin: 0 auto;
+        max-width: 768px;
+        padding: 14px 20px;
+      }
+
+      .logo {
+        font-size: 20px;
+        font-weight: 800;
+        letter-spacing: -0.5px;
+      }
+
+      .logo span {
+        color: var(--toss-blue);
+      }
+
+      .header-actions {
+        align-items: center;
+        display: flex;
+        gap: 14px;
+      }
+
+      .text-link {
+        color: var(--text-sub);
+        font-size: 13px;
+        font-weight: 700;
+        text-decoration: none;
+      }
+
+      .icon-btn {
+        align-items: center;
+        background: none;
+        border: none;
+        cursor: pointer;
+        display: flex;
+        position: relative;
+      }
+
+      .icon-btn svg {
+        height: 24px;
+        stroke: var(--text-main);
+        width: 24px;
+      }
+
+      .cart-badge {
+        align-items: center;
+        background: var(--danger);
+        border-radius: 50%;
+        color: #fff;
+        display: flex;
+        font-size: 11px;
+        font-weight: 800;
+        height: 16px;
+        justify-content: center;
+        min-width: 16px;
+        padding: 0 4px;
+        position: absolute;
+        right: -7px;
+        top: -5px;
+      }
+
+      main {
+        display: flex;
+        flex-direction: column;
+        gap: 40px;
+        margin: 0 auto;
+        max-width: 768px;
+      }
+
+      .hero-section {
+        padding: 20px 20px 0;
+      }
+
+      .hero-banner {
+        background: linear-gradient(135deg, #1b64da 0%, #3182f6 100%);
+        border-radius: 24px;
+        box-shadow: 0 16px 32px rgba(49, 130, 246, 0.2);
+        color: #fff;
+        overflow: hidden;
+        padding: 32px 24px;
+        position: relative;
+      }
+
+      .hero-banner::after {
+        background: rgba(255, 255, 255, 0.12);
+        border-radius: 50%;
+        bottom: -20px;
+        content: "";
+        filter: blur(20px);
+        height: 120px;
+        position: absolute;
+        right: -20px;
+        width: 120px;
+      }
+
+      .hero-tag {
+        backdrop-filter: blur(10px);
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 20px;
+        display: inline-block;
+        font-size: 13px;
+        font-weight: 800;
+        margin-bottom: 12px;
+        padding: 6px 12px;
+      }
+
+      .hero-banner h2 {
+        font-size: clamp(24px, 6vw, 28px);
+        font-weight: 800;
+        letter-spacing: -0.5px;
+        line-height: 1.3;
+        margin-bottom: 8px;
+      }
+
+      .hero-banner p {
+        font-size: 15px;
+        opacity: 0.92;
+      }
+
+      .category-scroll {
+        overflow-x: auto;
+        padding: 0 20px;
+        scrollbar-width: none;
+        white-space: nowrap;
+      }
+
+      .category-scroll::-webkit-scrollbar,
+      .horizontal-products::-webkit-scrollbar {
+        display: none;
+      }
+
+      .chip-list {
+        display: flex;
+        gap: 8px;
+      }
+
+      .chip {
+        background: var(--bg-sub);
+        border: none;
+        border-radius: 100px;
+        color: var(--text-sub);
+        cursor: pointer;
+        font-size: 15px;
+        font-weight: 700;
+        padding: 12px 20px;
+        transition: 0.2s;
+      }
+
+      .chip.active {
+        background: var(--text-main);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        color: #fff;
+      }
+
+      .section-header {
+        align-items: flex-end;
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 16px;
+        padding: 0 20px;
+      }
+
+      .section-header h3 {
+        font-size: 20px;
+        font-weight: 800;
+        letter-spacing: -0.5px;
+      }
+
+      .section-header a {
+        color: var(--text-muted);
+        font-size: 14px;
+        font-weight: 700;
+        text-decoration: none;
+      }
+
+      .horizontal-products {
+        display: flex;
+        gap: 16px;
+        overflow-x: auto;
+        padding: 0 20px 20px;
+        scroll-snap-type: x mandatory;
+        scrollbar-width: none;
+      }
+
+      .h-card {
+        cursor: pointer;
+        min-width: 160px;
+        scroll-snap-align: start;
+      }
+
+      .img-box {
+        align-items: center;
+        background: var(--bg-sub);
+        display: flex;
+        justify-content: center;
+        overflow: hidden;
+        position: relative;
+      }
+
+      .img-box img {
+        height: 100%;
+        object-fit: cover;
+        width: 100%;
+      }
+
+      .placeholder {
+        color: var(--text-muted);
+        font-size: 12px;
+      }
+
+      .h-card .img-box {
+        aspect-ratio: 1 / 1;
+        border-radius: 20px;
+        margin-bottom: 12px;
+        width: 100%;
+      }
+
+      .rank-badge {
+        align-items: center;
+        backdrop-filter: blur(4px);
+        background: rgba(0, 0, 0, 0.72);
+        border-radius: 8px;
+        color: #fff;
+        display: flex;
+        font-size: 12px;
+        font-weight: 800;
+        height: 24px;
+        justify-content: center;
+        left: 10px;
+        position: absolute;
+        top: 10px;
+        width: 24px;
+      }
+
+      .h-card h4 {
+        font-size: 15px;
+        font-weight: 700;
+        margin-bottom: 4px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .price {
+        font-size: 16px;
+        font-weight: 800;
+      }
+
+      .product-grid {
+        display: grid;
+        gap: 22px 16px;
+        grid-template-columns: repeat(2, 1fr);
+        padding: 0 20px;
+      }
+
+      .v-card {
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .v-card .img-box {
+        aspect-ratio: 1 / 1;
+        border-radius: 20px;
+        margin-bottom: 14px;
+        transition: 0.2s;
+        width: 100%;
+      }
+
+      .v-card:active .img-box {
+        transform: scale(0.98);
+      }
+
+      .badge-wrap {
+        bottom: 10px;
+        display: flex;
+        gap: 4px;
+        left: 10px;
+        position: absolute;
+      }
+
+      .tag {
+        backdrop-filter: blur(4px);
+        background: rgba(255, 255, 255, 0.92);
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 800;
+        padding: 4px 8px;
+      }
+
+      .tag.blue {
+        color: var(--toss-blue);
+      }
+
+      .tag.red {
+        color: var(--danger);
+      }
+
+      .brand {
+        color: var(--text-muted);
+        font-size: 12px;
+        font-weight: 700;
+        margin-bottom: 2px;
+      }
+
+      .v-card h4 {
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        display: -webkit-box;
+        font-size: 15px;
+        font-weight: 700;
+        line-height: 1.4;
+        margin-bottom: 8px;
+        overflow: hidden;
+      }
+
+      .price-wrap {
+        align-items: center;
+        display: flex;
+        gap: 6px;
+        margin-top: auto;
+      }
+
+      .discount {
+        color: var(--danger);
+        font-size: 17px;
+        font-weight: 800;
+      }
+
+      .add-btn {
+        background: var(--text-main);
+        border: none;
+        border-radius: 12px;
+        color: #fff;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 800;
+        margin-top: 10px;
+        padding: 11px 12px;
+      }
+
+      .customer-panel {
+        background: #fff;
+        border-top: 10px solid var(--bg-sub);
+        padding: 28px 20px 0;
+      }
+
+      .panel-card {
+        background: #fff;
+        border: 1px solid var(--border);
+        border-radius: 22px;
+        box-shadow: var(--card-shadow);
+        margin-bottom: 16px;
+        padding: 18px;
+      }
+
+      .cart-row,
+      .order-row {
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        gap: 12px;
+        justify-content: space-between;
+        padding: 12px 0;
+      }
+
+      .cart-row:last-child,
+      .order-row:last-child {
+        border-bottom: none;
+      }
+
+      .muted {
+        color: var(--text-muted);
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      .order-form {
+        display: grid;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .order-form input {
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        font-size: 15px;
+        height: 48px;
+        padding: 0 14px;
+      }
+
+      .order-submit {
+        background: var(--toss-blue);
+        border: none;
+        border-radius: 16px;
+        color: #fff;
+        cursor: pointer;
+        font-size: 16px;
+        font-weight: 800;
+        height: 54px;
+      }
+
+      .bottom-nav {
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        background: rgba(25, 31, 40, 0.92);
+        border-radius: 100px;
+        bottom: 20px;
+        box-shadow: 0 16px 32px rgba(0, 0, 0, 0.2);
+        display: flex;
+        gap: 40px;
+        left: 50%;
+        padding: 12px 32px;
+        position: fixed;
+        transform: translateX(-50%);
+        z-index: 100;
+      }
+
+      .nav-item {
+        align-items: center;
+        color: rgba(255, 255, 255, 0.55);
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        text-decoration: none;
+        transition: 0.2s;
+      }
+
+      .nav-item.active {
+        color: #fff;
+      }
+
+      .nav-item svg {
+        fill: none;
+        height: 24px;
+        stroke: currentColor;
+        stroke-width: 2;
+        width: 24px;
+      }
+
+      .nav-item span {
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .toast {
+        background: rgba(25, 31, 40, 0.94);
+        border-radius: 999px;
+        bottom: 96px;
+        color: #fff;
+        font-size: 14px;
+        font-weight: 700;
+        left: 50%;
+        opacity: 0;
+        padding: 12px 18px;
+        pointer-events: none;
+        position: fixed;
+        transform: translate(-50%, 10px);
+        transition: 0.2s;
+        white-space: nowrap;
+        z-index: 200;
+      }
+
+      .toast.show {
+        opacity: 1;
+        transform: translate(-50%, 0);
+      }
+
+      @media (max-width: 420px) {
+        .header-inner {
+          padding: 13px 16px;
+        }
+
+        .header-actions {
+          gap: 10px;
+        }
+
+        .text-link {
+          display: none;
+        }
+
+        .product-grid {
+          gap: 20px 12px;
+          padding: 0 16px;
+        }
+
+        .hero-section,
+        .section-header,
+        .category-scroll,
+        .horizontal-products,
+        .customer-panel {
+          padding-left: 16px;
+          padding-right: 16px;
+        }
+
+        .bottom-nav {
+          bottom: 14px;
+          gap: 32px;
+          padding: 11px 28px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="header-inner">
+        <div class="logo"><span id="pharmacyLogo">약국</span> <span>쇼핑몰</span></div>
+        <div class="header-actions">
+          <a class="text-link" id="joinLink" href="#">가입</a>
+          <a class="text-link" id="loginLink" href="#">로그인</a>
+          <button class="icon-btn" type="button" onclick="scrollToProducts()" aria-label="상품 검색">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+          </button>
+          <button class="icon-btn" type="button" onclick="scrollToCart()" aria-label="장바구니">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="9" cy="21" r="1"></circle>
+              <circle cx="20" cy="21" r="1"></circle>
+              <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+            </svg>
+            <span class="cart-badge" id="cartBadge">0</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero-section">
+        <div class="hero-banner">
+          <span class="hero-tag" id="heroTag">약국 단독 혜택</span>
+          <h2>환절기 면역력,<br />하루 한 알로 챙기세요</h2>
+          <p>약국 운영자가 직접 등록한 건강기능식품과 의약외품을 만나보세요.</p>
+        </div>
+      </section>
+
+      <section class="category-scroll">
+        <div class="chip-list" id="categoryChips"></div>
+      </section>
+
+      <section>
+        <div class="section-header">
+          <h3>지금 가장 많이 담는 상품</h3>
+        </div>
+        <div class="horizontal-products" id="bestProducts"></div>
+      </section>
+
+      <section id="productsSection">
+        <div class="section-header">
+          <h3 id="recommendTitle">맞춤 추천</h3>
+          <a href="#" onclick="filterCategory('전체'); return false;">전체보기</a>
+        </div>
+        <div class="product-grid" id="productGrid"></div>
+      </section>
+
+      <section class="customer-panel" id="cartSection">
+        <div class="section-header" style="padding: 0; margin-bottom: 14px;">
+          <h3>장바구니</h3>
+        </div>
+        <div class="panel-card" id="cart"></div>
+        <div class="panel-card">
+          <h3>배송지 입력</h3>
+          <form id="orderForm" class="order-form">
+            <input name="receiver_name" placeholder="수령인" required />
+            <input name="receiver_phone" placeholder="연락처" required />
+            <input name="zip_code" placeholder="우편번호" />
+            <input name="address" placeholder="주소" required />
+            <input name="address_detail" placeholder="상세주소" />
+            <button class="order-submit">모의 결제 및 주문하기</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="customer-panel" id="ordersSection">
+        <div class="section-header" style="padding: 0; margin-bottom: 14px;">
+          <h3>주문 내역</h3>
+        </div>
+        <div class="panel-card" id="orders"></div>
+      </section>
+    </main>
+
+    <nav class="bottom-nav">
+      <a href="#" class="nav-item active" onclick="window.scrollTo({ top: 0, behavior: 'smooth' }); return false;">
+        <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+        <span>홈</span>
+      </a>
+      <a href="#" class="nav-item" onclick="scrollToOrders(); return false;">
+        <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+        <span>주문내역</span>
+      </a>
+      <a href="#" class="nav-item" id="myLink">
+        <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+        <span>마이</span>
+      </a>
+    </nav>
+
+    <div id="message" class="toast"></div>
+
+    <script src="/app.js"></script>
+    <script>
+      const params = new URLSearchParams(location.search);
+      const pharmacyCode = params.get('pharmacyCode') || 'A001';
+      let pharmacy = null;
+      let products = [];
+      let selectedCategory = '전체';
+
+      $('#joinLink').href = `/join.html?pharmacyCode=${encodeURIComponent(pharmacyCode)}`;
+      $('#loginLink').href = `/login.html?pharmacyCode=${encodeURIComponent(pharmacyCode)}`;
+      $('#myLink').href = `/login.html?pharmacyCode=${encodeURIComponent(pharmacyCode)}`;
+
+      function toast(text) {
+        const target = $('#message');
+        target.textContent = text;
+        target.classList.add('show');
+        window.clearTimeout(window.__toastTimer);
+        window.__toastTimer = window.setTimeout(() => target.classList.remove('show'), 2200);
+      }
+
+      function safeCategory(product) {
+        return product.category_name || '추천상품';
+      }
+
+      function salePrice(product) {
+        return Number(product.discount_price || product.price || 0);
+      }
+
+      function discountRate(product) {
+        if (!product.discount_price || Number(product.discount_price) >= Number(product.price)) return null;
+        return Math.round((1 - Number(product.discount_price) / Number(product.price)) * 100);
+      }
+
+      function imageBox(product, extra = '') {
+        const img = product.thumbnail_url ? `<img src="${product.thumbnail_url}" alt="${product.product_name}" />` : '<span class="placeholder">상품 이미지</span>';
+        return `<div class="img-box">${extra}${img}</div>`;
+      }
+
+      function filterCategory(category) {
+        selectedCategory = category;
+        renderCategories();
+        renderProductGrid();
+        scrollToProducts();
+      }
+
+      function renderCategories() {
+        const categories = ['전체', ...new Set(products.map(safeCategory))];
+        $('#categoryChips').innerHTML = categories.map((category) => `
+          <button class="chip ${category === selectedCategory ? 'active' : ''}" onclick="filterCategory('${category.replace(/'/g, "\\'")}')">${category}</button>
+        `).join('');
+      }
+
+      function renderBestProducts() {
+        const best = [...products]
+          .sort((a, b) => Number(b.stock_quantity > 0) - Number(a.stock_quantity > 0) || salePrice(b) - salePrice(a))
+          .slice(0, 5);
+
+        $('#bestProducts').innerHTML = best.length
+          ? best.map((product, index) => `
+              <article class="h-card" onclick="addCart(${product.id})">
+                ${imageBox(product, `<span class="rank-badge">${index + 1}</span>`)}
+                <h4>${product.product_name}</h4>
+                <div class="price">${money(salePrice(product))}</div>
+              </article>
+            `).join('')
+          : '<p class="muted" style="padding: 0 20px;">등록된 상품이 없습니다. 약국 운영자 화면에서 상품을 등록해주세요.</p>';
+      }
+
+      function renderProductGrid() {
+        const visible = selectedCategory === '전체'
+          ? products
+          : products.filter((product) => safeCategory(product) === selectedCategory);
+
+        $('#productGrid').innerHTML = visible.length
+          ? visible.map((product, index) => {
+              const rate = discountRate(product);
+              const soldOut = product.status === 'SOLD_OUT' || Number(product.stock_quantity) <= 0;
+              return `
+                <article class="v-card">
+                  ${imageBox(product, `
+                    <div class="badge-wrap">
+                      ${index < 2 ? '<span class="tag blue">BEST</span>' : ''}
+                      ${salePrice(product) >= 50000 ? '<span class="tag red">무료배송</span>' : ''}
+                      ${soldOut ? '<span class="tag red">품절</span>' : ''}
+                    </div>
+                  `)}
+                  <div class="brand">${safeCategory(product)}</div>
+                  <h4>${product.product_name}</h4>
+                  <div class="price-wrap">
+                    ${rate ? `<span class="discount">${rate}%</span>` : ''}
+                    <span class="price">${money(salePrice(product))}</span>
+                  </div>
+                  <button class="add-btn" onclick="addCart(${product.id})" ${soldOut ? 'disabled' : ''}>${soldOut ? '품절' : '장바구니 담기'}</button>
+                </article>
+              `;
+            }).join('')
+          : '<p class="muted">선택한 카테고리에 상품이 없습니다.</p>';
+      }
+
+      function isCustomerInThisStore() {
+        const user = currentUser();
+        return user?.role === 'CUSTOMER' && pharmacy && Number(user.pharmacy_id) === Number(pharmacy.id);
+      }
+
+      async function loadStore() {
+        try {
+          const pharmacyData = await api.request(`/pharmacies/by-code/${encodeURIComponent(pharmacyCode)}`);
+          pharmacy = pharmacyData.pharmacy;
+          document.title = `${pharmacy.pharmacy_name} 쇼핑몰`;
+          $('#pharmacyLogo').textContent = pharmacy.pharmacy_name;
+          $('#heroTag').textContent = `${pharmacy.pharmacy_name} 단독 혜택`;
+          $('#recommendTitle').textContent = `${pharmacy.pharmacy_name} 맞춤 추천`;
+
+          const productData = await api.request(`/products/public?pharmacyCode=${encodeURIComponent(pharmacyCode)}`);
+          products = productData.products;
+          renderCategories();
+          renderBestProducts();
+          renderProductGrid();
+
+          if (isCustomerInThisStore()) {
+            await loadCart();
+            await loadOrders();
+          } else {
+            $('#cartBadge').textContent = '0';
+            $('#cart').innerHTML = `<p class="muted">장바구니를 이용하려면 이 약국몰에 가입하거나 로그인해주세요.</p>`;
+            $('#orders').innerHTML = `<p class="muted">로그인 후 주문 내역을 확인할 수 있습니다.</p>`;
+          }
+        } catch (error) {
+          toast(error.message);
+        }
+      }
+
+      async function loadCart() {
+        const data = await api.request('/cart');
+        const total = data.items.reduce((sum, item) => sum + item.sale_price * item.quantity, 0);
+        const deliveryFee = total >= 50000 || total === 0 ? 0 : 3000;
+        $('#cartBadge').textContent = data.items.reduce((sum, item) => sum + Number(item.quantity), 0);
+        $('#cart').innerHTML = data.items.length
+          ? `
+            ${data.items.map((item) => `
+              <div class="cart-row">
+                <div>
+                  <strong>${item.product_name}</strong>
+                  <p class="muted">${item.quantity}개 · ${money(item.sale_price * item.quantity)}</p>
+                </div>
+                <button class="add-btn" style="margin: 0; padding: 8px 10px;" onclick="removeCart(${item.id})">삭제</button>
+              </div>
+            `).join('')}
+            <div class="cart-row">
+              <strong>결제 예정 금액</strong>
+              <strong>${money(total + deliveryFee)}</strong>
+            </div>
+            <p class="muted">상품금액 ${money(total)} · 배송비 ${money(deliveryFee)}</p>
+          `
+          : '<p class="muted">장바구니가 비어 있습니다.</p>';
+      }
+
+      async function loadOrders() {
+        const data = await api.request('/orders');
+        $('#orders').innerHTML = data.orders.length
+          ? data.orders.map((order) => `
+              <div class="order-row">
+                <div>
+                  <strong>${order.order_number}</strong>
+                  <p class="muted">${order.order_status} · ${order.delivery_status}</p>
+                  <p class="muted">${order.receiver_name || ''} ${order.address || ''}</p>
+                </div>
+                <strong>${money(order.final_amount)}</strong>
+              </div>
+            `).join('')
+          : '<p class="muted">아직 주문 내역이 없습니다.</p>';
+      }
+
+      async function addCart(productId) {
+        if (!isCustomerInThisStore()) {
+          toast('먼저 이 약국몰에 가입하거나 로그인해주세요.');
+          window.setTimeout(() => {
+            location.href = `/login.html?pharmacyCode=${encodeURIComponent(pharmacyCode)}`;
+          }, 700);
+          return;
+        }
+
+        try {
+          await api.request('/cart', { method: 'POST', body: { product_id: productId, quantity: 1 } });
+          toast('장바구니에 담았습니다.');
+          await loadCart();
+        } catch (error) {
+          toast(error.message);
+        }
+      }
+
+      async function removeCart(id) {
+        await api.request(`/cart/${id}`, { method: 'DELETE' });
+        await loadCart();
+      }
+
+      function scrollToProducts() {
+        $('#productsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+
+      function scrollToCart() {
+        $('#cartSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+
+      function scrollToOrders() {
+        $('#ordersSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+
+      $('#orderForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        if (!isCustomerInThisStore()) {
+          toast('주문하려면 먼저 로그인해주세요.');
+          location.href = `/login.html?pharmacyCode=${encodeURIComponent(pharmacyCode)}`;
+          return;
+        }
+
+        try {
+          await api.request('/orders', {
+            method: 'POST',
+            body: {
+              payment_method: 'MOCK_CARD',
+              delivery: serializeForm(event.target)
+            }
+          });
+          toast('주문과 모의 결제가 완료되었습니다.');
+          event.target.reset();
+          await loadCart();
+          await loadOrders();
+          await loadStore();
+        } catch (error) {
+          toast(error.message);
+        }
+      });
+
+      loadStore();
+    </script>
+  </body>
+</html>

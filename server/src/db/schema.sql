@@ -1,0 +1,217 @@
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS pharmacies (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_code TEXT NOT NULL UNIQUE,
+  pharmacy_name TEXT NOT NULL,
+  owner_name TEXT NOT NULL,
+  business_number TEXT,
+  phone TEXT,
+  address TEXT,
+  store_slug TEXT NOT NULL UNIQUE,
+  store_url TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  commission_rate REAL NOT NULL DEFAULT 5,
+  settlement_bank TEXT,
+  settlement_account TEXT,
+  delivery_policy TEXT,
+  default_courier TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  name TEXT NOT NULL,
+  phone TEXT,
+  role TEXT NOT NULL CHECK (role IN ('CUSTOMER', 'PHARMACY_OWNER', 'ADMIN')),
+  pharmacy_id INTEGER REFERENCES pharmacies(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS customers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  phone TEXT,
+  email TEXT NOT NULL,
+  default_address_id INTEGER,
+  marketing_agree INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS addresses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  receiver_name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  zip_code TEXT,
+  address TEXT NOT NULL,
+  address_detail TEXT,
+  is_default INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS categories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  category_name TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  UNIQUE(pharmacy_id, category_name)
+);
+
+CREATE TABLE IF NOT EXISTS products (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+  product_name TEXT NOT NULL,
+  description TEXT,
+  price INTEGER NOT NULL,
+  discount_price INTEGER,
+  stock_quantity INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'ON_SALE',
+  thumbnail_url TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS product_images (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  image_url TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS carts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  quantity INTEGER NOT NULL CHECK (quantity > 0),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, product_id)
+);
+
+CREATE TABLE IF NOT EXISTS orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_number TEXT NOT NULL UNIQUE,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
+  total_product_amount INTEGER NOT NULL,
+  delivery_fee INTEGER NOT NULL DEFAULT 0,
+  discount_amount INTEGER NOT NULL DEFAULT 0,
+  final_amount INTEGER NOT NULL,
+  payment_status TEXT NOT NULL DEFAULT 'PAID',
+  order_status TEXT NOT NULL DEFAULT 'PAYMENT_COMPLETED',
+  delivery_status TEXT NOT NULL DEFAULT 'NOT_SHIPPED',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS order_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+  product_name TEXT NOT NULL,
+  quantity INTEGER NOT NULL,
+  price INTEGER NOT NULL,
+  total_price INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS payments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL UNIQUE REFERENCES orders(id) ON DELETE CASCADE,
+  payment_method TEXT NOT NULL DEFAULT 'MOCK_CARD',
+  payment_provider TEXT NOT NULL DEFAULT 'MOCK',
+  payment_status TEXT NOT NULL DEFAULT 'PAID',
+  paid_amount INTEGER NOT NULL,
+  paid_at TEXT,
+  canceled_at TEXT,
+  refunded_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS deliveries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL UNIQUE REFERENCES orders(id) ON DELETE CASCADE,
+  courier TEXT,
+  tracking_number TEXT,
+  receiver_name TEXT NOT NULL,
+  receiver_phone TEXT NOT NULL,
+  zip_code TEXT,
+  address TEXT NOT NULL,
+  address_detail TEXT,
+  delivery_status TEXT NOT NULL DEFAULT 'NOT_SHIPPED',
+  shipped_at TEXT,
+  delivered_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS inventory_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  change_type TEXT NOT NULL,
+  quantity_before INTEGER NOT NULL,
+  quantity_after INTEGER NOT NULL,
+  reason TEXT,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS settlements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  settlement_period TEXT NOT NULL,
+  total_sales INTEGER NOT NULL DEFAULT 0,
+  refund_amount INTEGER NOT NULL DEFAULT 0,
+  pg_fee INTEGER NOT NULL DEFAULT 0,
+  platform_fee INTEGER NOT NULL DEFAULT 0,
+  settlement_amount INTEGER NOT NULL DEFAULT 0,
+  settlement_status TEXT NOT NULL DEFAULT 'PENDING',
+  settled_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS inquiries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+  title TEXT NOT NULL,
+  content TEXT NOT NULL,
+  answer TEXT,
+  status TEXT NOT NULL DEFAULT 'OPEN',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  answered_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS qr_codes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_id INTEGER NOT NULL UNIQUE REFERENCES pharmacies(id) ON DELETE CASCADE,
+  qr_url TEXT NOT NULL,
+  qr_image_url TEXT,
+  scan_count INTEGER NOT NULL DEFAULT 0,
+  signup_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS admin_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  action TEXT NOT NULL,
+  target_type TEXT,
+  target_id INTEGER,
+  description TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_role_pharmacy ON users(role, pharmacy_id);
+CREATE INDEX IF NOT EXISTS idx_products_pharmacy ON products(pharmacy_id);
+CREATE INDEX IF NOT EXISTS idx_orders_pharmacy ON orders(pharmacy_id);
+CREATE INDEX IF NOT EXISTS idx_carts_user ON carts(user_id, pharmacy_id);
