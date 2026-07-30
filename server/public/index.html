@@ -3,49 +3,1103 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Maydin 폐쇄몰 MVP</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <title>Maydin — 약국 전용 폐쇄몰</title>
+    <link
+      rel="stylesheet"
+      as="style"
+      crossorigin
+      href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css"
+    />
+    <style>
+      :root {
+        --blue: #3182f6;
+        --blue-deep: #1b64da;
+        --blue-soft: #e8f3ff;
+        --blue-softer: #f2f8ff;
+        --text: #191f28;
+        --text-sub: #4e5968;
+        --text-muted: #8b95a1;
+        --line: #e5e8eb;
+        --bg: #ffffff;
+        --bg-gray: #f9fafb;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Pretendard", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        word-break: keep-all;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      button {
+        font: inherit;
+      }
+
+      .wrap {
+        margin: 0 auto;
+        max-width: 1040px;
+        padding: 0 24px;
+      }
+
+      /* Header */
+      .topbar {
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+        background: rgba(255, 255, 255, 0.82);
+        border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+        position: sticky;
+        top: 0;
+        z-index: 50;
+      }
+
+      .topbar-inner {
+        align-items: center;
+        display: flex;
+        height: 64px;
+        justify-content: space-between;
+        margin: 0 auto;
+        max-width: 1040px;
+        padding: 0 24px;
+      }
+
+      .logo {
+        color: var(--text);
+        font-size: 22px;
+        font-weight: 800;
+        letter-spacing: -0.05em;
+      }
+
+      .top-cta {
+        background: var(--blue);
+        border: 0;
+        border-radius: 12px;
+        color: #fff;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 700;
+        padding: 10px 16px;
+        transition: background 0.2s ease, transform 0.2s ease;
+      }
+
+      .top-cta:hover {
+        background: var(--blue-deep);
+        transform: translateY(-1px);
+      }
+
+      /* Hero */
+      .hero {
+        overflow: hidden;
+        padding: 88px 0 72px;
+        position: relative;
+      }
+
+      .hero::before {
+        background:
+          radial-gradient(circle at 15% 20%, rgba(49, 130, 246, 0.14), transparent 36%),
+          radial-gradient(circle at 90% 10%, rgba(49, 130, 246, 0.08), transparent 28%);
+        content: "";
+        inset: 0;
+        pointer-events: none;
+        position: absolute;
+      }
+
+      .hero .wrap {
+        position: relative;
+        z-index: 1;
+      }
+
+      .hero-brand {
+        animation: fadeUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+        color: var(--blue);
+        font-size: 15px;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        margin-bottom: 20px;
+      }
+
+      .hero h1 {
+        animation: fadeUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.05s both;
+        font-size: clamp(36px, 7.2vw, 64px);
+        font-weight: 800;
+        letter-spacing: -0.05em;
+        line-height: 1.18;
+        margin-bottom: 22px;
+        max-width: 12em;
+      }
+
+      .hero h1 em {
+        color: var(--blue);
+        font-style: normal;
+      }
+
+      .hero-lead {
+        animation: fadeUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.12s both;
+        color: var(--text-sub);
+        font-size: clamp(17px, 2.4vw, 20px);
+        font-weight: 500;
+        line-height: 1.7;
+        margin-bottom: 32px;
+        max-width: 34em;
+      }
+
+      .hero-actions {
+        animation: fadeUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.18s both;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-bottom: 56px;
+      }
+
+      .btn-primary,
+      .btn-secondary {
+        border: 0;
+        border-radius: 14px;
+        cursor: pointer;
+        display: inline-flex;
+        font-size: 16px;
+        font-weight: 700;
+        padding: 15px 22px;
+        transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+      }
+
+      .btn-primary {
+        background: var(--blue);
+        color: #fff;
+        box-shadow: 0 10px 24px rgba(49, 130, 246, 0.28);
+      }
+
+      .btn-primary:hover {
+        background: var(--blue-deep);
+        transform: translateY(-1px);
+      }
+
+      .btn-secondary {
+        background: var(--blue-soft);
+        color: var(--blue);
+      }
+
+      .btn-secondary:hover {
+        background: #dbeafe;
+        transform: translateY(-1px);
+      }
+
+      .hero-stage {
+        animation: fadeUp 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.24s both;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.2)),
+          linear-gradient(135deg, #eaf3ff 0%, #dcecff 100%);
+        border: 1px solid rgba(49, 130, 246, 0.12);
+        border-radius: 28px;
+        box-shadow: 0 24px 60px rgba(25, 50, 100, 0.08);
+        overflow: hidden;
+        padding: 28px;
+        position: relative;
+      }
+
+      .hero-stage::after {
+        animation: floatGlow 5s ease-in-out infinite;
+        background: radial-gradient(circle, rgba(49, 130, 246, 0.22), transparent 65%);
+        content: "";
+        height: 220px;
+        pointer-events: none;
+        position: absolute;
+        right: -50px;
+        top: -70px;
+        width: 220px;
+      }
+
+      .stage-grid {
+        display: grid;
+        gap: 14px;
+        position: relative;
+        z-index: 1;
+      }
+
+      @media (min-width: 760px) {
+        .stage-grid {
+          grid-template-columns: 1.2fr 0.8fr;
+        }
+      }
+
+      .stage-main {
+        background: rgba(255, 255, 255, 0.9);
+        border: 1px solid rgba(255, 255, 255, 0.8);
+        border-radius: 22px;
+        padding: 28px 24px;
+      }
+
+      .stage-main strong {
+        color: var(--blue);
+        display: block;
+        font-size: 13px;
+        font-weight: 800;
+        margin-bottom: 12px;
+      }
+
+      .stage-main h2 {
+        font-size: clamp(24px, 4vw, 32px);
+        font-weight: 800;
+        letter-spacing: -0.04em;
+        line-height: 1.3;
+        margin-bottom: 14px;
+      }
+
+      .stage-main p {
+        color: var(--text-sub);
+        font-size: 15px;
+        line-height: 1.65;
+      }
+
+      .stage-side {
+        display: grid;
+        gap: 12px;
+      }
+
+      .stage-chip {
+        background: rgba(255, 255, 255, 0.88);
+        border: 1px solid rgba(255, 255, 255, 0.75);
+        border-radius: 18px;
+        color: var(--text);
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        padding: 18px 18px;
+      }
+
+      .stage-chip span {
+        color: var(--blue);
+        display: block;
+        font-size: 12px;
+        font-weight: 800;
+        margin-bottom: 6px;
+      }
+
+      /* Sections */
+      section {
+        padding: 96px 0;
+      }
+
+      .section-label {
+        color: var(--blue);
+        font-size: 15px;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        margin-bottom: 16px;
+      }
+
+      .section-title {
+        font-size: clamp(28px, 5vw, 44px);
+        font-weight: 800;
+        letter-spacing: -0.045em;
+        line-height: 1.25;
+        margin-bottom: 20px;
+        max-width: 14em;
+      }
+
+      .section-title em {
+        color: var(--blue);
+        font-style: normal;
+      }
+
+      .section-desc {
+        color: var(--text-sub);
+        font-size: 18px;
+        font-weight: 500;
+        line-height: 1.75;
+        max-width: 38em;
+      }
+
+      .section-desc + .section-desc {
+        margin-top: 16px;
+      }
+
+      .bg-soft {
+        background: var(--bg-gray);
+      }
+
+      .bg-blue {
+        background: linear-gradient(180deg, #f4f9ff 0%, #eef5ff 100%);
+      }
+
+      /* Problem list */
+      .problem-list {
+        display: grid;
+        gap: 18px;
+        margin-top: 48px;
+      }
+
+      .problem-item {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        padding: 28px 26px;
+        transition: transform 0.25s ease, box-shadow 0.25s ease;
+      }
+
+      .problem-item:hover {
+        box-shadow: 0 16px 36px rgba(25, 31, 40, 0.06);
+        transform: translateY(-2px);
+      }
+
+      .problem-item h3 {
+        font-size: 20px;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+        margin-bottom: 10px;
+      }
+
+      .problem-item p {
+        color: var(--text-sub);
+        font-size: 16px;
+        line-height: 1.7;
+      }
+
+      @media (min-width: 800px) {
+        .problem-list {
+          grid-template-columns: repeat(3, 1fr);
+        }
+      }
+
+      /* Solution */
+      .solution-panel {
+        background: #fff;
+        border: 1px solid rgba(49, 130, 246, 0.12);
+        border-radius: 28px;
+        box-shadow: 0 20px 48px rgba(49, 130, 246, 0.08);
+        margin-top: 48px;
+        overflow: hidden;
+        padding: 36px 28px;
+      }
+
+      .solution-grid {
+        display: grid;
+        gap: 28px;
+      }
+
+      @media (min-width: 860px) {
+        .solution-grid {
+          align-items: center;
+          grid-template-columns: 1fr 1fr;
+          gap: 40px;
+        }
+      }
+
+      .solution-copy h3 {
+        font-size: clamp(24px, 3.5vw, 32px);
+        font-weight: 800;
+        letter-spacing: -0.04em;
+        line-height: 1.3;
+        margin-bottom: 16px;
+      }
+
+      .solution-copy p {
+        color: var(--text-sub);
+        font-size: 16px;
+        line-height: 1.75;
+      }
+
+      .solution-copy p + p {
+        margin-top: 14px;
+      }
+
+      .flow {
+        display: grid;
+        gap: 12px;
+      }
+
+      .flow-step {
+        align-items: flex-start;
+        background: var(--blue-softer);
+        border-radius: 18px;
+        display: flex;
+        gap: 14px;
+        padding: 18px 16px;
+      }
+
+      .flow-num {
+        align-items: center;
+        background: var(--blue);
+        border-radius: 999px;
+        color: #fff;
+        display: inline-flex;
+        flex-shrink: 0;
+        font-size: 13px;
+        font-weight: 800;
+        height: 28px;
+        justify-content: center;
+        width: 28px;
+      }
+
+      .flow-step strong {
+        display: block;
+        font-size: 16px;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        margin-bottom: 4px;
+      }
+
+      .flow-step span {
+        color: var(--text-sub);
+        font-size: 14px;
+        line-height: 1.55;
+      }
+
+      /* Feature bands */
+      .feature-band {
+        display: grid;
+        gap: 28px;
+        margin-top: 56px;
+      }
+
+      .feature-row {
+        align-items: center;
+        display: grid;
+        gap: 24px;
+      }
+
+      @media (min-width: 860px) {
+        .feature-row {
+          grid-template-columns: 1fr 1fr;
+          gap: 48px;
+        }
+
+        .feature-row.reverse .feature-text {
+          order: 2;
+        }
+      }
+
+      .feature-text h3 {
+        font-size: clamp(24px, 3.6vw, 34px);
+        font-weight: 800;
+        letter-spacing: -0.04em;
+        line-height: 1.3;
+        margin-bottom: 16px;
+      }
+
+      .feature-text p {
+        color: var(--text-sub);
+        font-size: 17px;
+        line-height: 1.75;
+      }
+
+      .feature-text p + p {
+        margin-top: 14px;
+      }
+
+      .feature-visual {
+        background: linear-gradient(160deg, #f2f8ff, #e8f2ff);
+        border: 1px solid rgba(49, 130, 246, 0.1);
+        border-radius: 28px;
+        min-height: 260px;
+        overflow: hidden;
+        padding: 28px;
+        position: relative;
+      }
+
+      .mock {
+        background: #fff;
+        border-radius: 20px;
+        box-shadow: 0 16px 40px rgba(25, 50, 100, 0.08);
+        padding: 20px;
+      }
+
+      .mock-top {
+        color: var(--text-muted);
+        font-size: 12px;
+        font-weight: 700;
+        margin-bottom: 14px;
+      }
+
+      .mock-title {
+        font-size: 22px;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+        line-height: 1.3;
+        margin-bottom: 18px;
+      }
+
+      .mock-line {
+        background: #f2f4f6;
+        border-radius: 10px;
+        height: 12px;
+        margin-bottom: 10px;
+      }
+
+      .mock-line.short {
+        width: 62%;
+      }
+
+      .mock-pill {
+        background: var(--blue-soft);
+        border-radius: 999px;
+        color: var(--blue);
+        display: inline-flex;
+        font-size: 13px;
+        font-weight: 800;
+        margin-top: 8px;
+        padding: 8px 12px;
+      }
+
+      /* Audience */
+      .audience-list {
+        display: grid;
+        gap: 16px;
+        margin-top: 44px;
+      }
+
+      @media (min-width: 860px) {
+        .audience-list {
+          grid-template-columns: repeat(3, 1fr);
+        }
+      }
+
+      .audience-item {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        padding: 28px 24px;
+      }
+
+      .audience-item .tag {
+        color: var(--blue);
+        font-size: 13px;
+        font-weight: 800;
+        margin-bottom: 12px;
+      }
+
+      .audience-item h3 {
+        font-size: 22px;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+        margin-bottom: 12px;
+      }
+
+      .audience-item p {
+        color: var(--text-sub);
+        font-size: 15px;
+        line-height: 1.7;
+      }
+
+      /* Closing CTA */
+      .closing {
+        padding-bottom: 110px;
+        text-align: center;
+      }
+
+      .closing .section-title {
+        margin-left: auto;
+        margin-right: auto;
+      }
+
+      .closing .section-desc {
+        margin: 0 auto 28px;
+      }
+
+      .closing .hero-actions {
+        justify-content: center;
+        margin-bottom: 0;
+      }
+
+      /* Footer */
+      .site-footer {
+        background: #191f28;
+        color: rgba(255, 255, 255, 0.88);
+        padding: 56px 0 40px;
+      }
+
+      .footer-top {
+        display: grid;
+        gap: 28px;
+        margin-bottom: 40px;
+      }
+
+      @media (min-width: 800px) {
+        .footer-top {
+          grid-template-columns: 1.2fr 2fr;
+          gap: 48px;
+        }
+      }
+
+      .footer-brand {
+        font-size: 22px;
+        font-weight: 800;
+        letter-spacing: -0.04em;
+      }
+
+      .footer-brand p {
+        color: rgba(255, 255, 255, 0.5);
+        font-size: 14px;
+        font-weight: 500;
+        line-height: 1.6;
+        margin-top: 12px;
+      }
+
+      .footer-links {
+        display: grid;
+        gap: 24px;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      }
+
+      .footer-col h4 {
+        color: rgba(255, 255, 255, 0.42);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        margin-bottom: 14px;
+        text-transform: uppercase;
+      }
+
+      .footer-col a,
+      .footer-col button {
+        background: none;
+        border: 0;
+        color: rgba(255, 255, 255, 0.9);
+        cursor: pointer;
+        display: block;
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 10px;
+        padding: 0;
+        text-align: left;
+      }
+
+      .footer-col a:hover,
+      .footer-col button:hover {
+        color: #90c2ff;
+      }
+
+      .footer-note {
+        color: rgba(255, 255, 255, 0.4);
+        font-size: 12px;
+        line-height: 1.5;
+        margin-top: 4px;
+      }
+
+      .footer-bottom {
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        color: rgba(255, 255, 255, 0.38);
+        font-size: 12px;
+        padding-top: 20px;
+      }
+
+      #message {
+        color: #90c2ff;
+        display: block;
+        font-size: 12px;
+        margin-top: 8px;
+        white-space: pre-wrap;
+      }
+
+      /* Reveal */
+      .reveal {
+        opacity: 0;
+        transform: translateY(18px);
+        transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+
+      .reveal.visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      @keyframes fadeUp {
+        from {
+          opacity: 0;
+          transform: translateY(18px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @keyframes floatGlow {
+        0%,
+        100% {
+          opacity: 0.55;
+          transform: translateY(0);
+        }
+        50% {
+          opacity: 0.95;
+          transform: translateY(10px);
+        }
+      }
+    </style>
   </head>
   <body>
-    <header>
-      <h1>Maydin 약국 전용 폐쇄몰 SaaS MVP</h1>
-      <p>Admin이 약국몰을 만들고, 약국 운영자가 상품/주문을 관리하며, 고객은 QR 링크로 가입해 주문합니다.</p>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="logo" href="/">Maydin</a>
+        <a class="top-cta" href="/join.html?pharmacyCode=A001">데모 시작하기</a>
+      </div>
     </header>
-    <main>
-      <section class="grid">
-        <article class="card">
-          <h2>플랫폼 Admin</h2>
-          <p class="muted">초기 계정: admin@maydin.kr / admin1234</p>
-          <a href="/admin.html">Admin 화면 열기</a>
-        </article>
-        <article class="card">
-          <h2>약국 운영자</h2>
-          <p class="muted">데모 계정: owner@apharmacy.kr / owner1234</p>
-          <a href="/owner.html">운영자 화면 열기</a>
-        </article>
-        <article class="card">
-          <h2>고객 쇼핑몰</h2>
-          <p class="muted">데모 약국 코드 A001</p>
-          <a href="/join.html?pharmacyCode=A001">QR 가입 화면</a><br />
-          <a href="/store.html?pharmacyCode=A001">쇼핑몰 화면</a>
-        </article>
-      </section>
-      <section class="card">
-        <h2>서버 확인</h2>
-        <button id="health">/api/health 확인</button>
-        <pre id="message" class="notice"></pre>
-      </section>
-    </main>
+
+    <section class="hero">
+      <div class="wrap">
+        <p class="hero-brand">Maydin</p>
+        <h1>
+          약국만의<br />
+          <em>안전한 폐쇄몰</em>을<br />
+          만드는 플랫폼
+        </h1>
+        <p class="hero-lead">
+          Maydin은 약국이 단골 고객만을 위한 전용 쇼핑몰을 직접 운영할 수 있게 돕는
+          약국 전용 폐쇄몰 SaaS입니다. 오픈마켓처럼 누구에게나 열려 있지 않고,
+          약국이 초대한 고객만 들어와 주문합니다.
+        </p>
+        <div class="hero-actions">
+          <a class="btn-primary" href="/join.html?pharmacyCode=A001">데모 쇼핑몰 보기</a>
+          <a class="btn-secondary" href="#problem">어떤 서비스인가요?</a>
+        </div>
+
+        <div class="hero-stage">
+          <div class="stage-grid">
+            <div class="stage-main">
+              <strong>Closed Mall for Pharmacies</strong>
+              <h2>QR로 초대하고,<br />약국이 직접 운영합니다</h2>
+              <p>
+                플랫폼이 약국몰을 만들고, 약국 운영자가 상품과 주문을 관리하며,
+                고객은 QR 링크로 간편하게 가입해 주문합니다.
+              </p>
+            </div>
+            <div class="stage-side">
+              <div class="stage-chip"><span>STEP 01</span>약국몰 개설</div>
+              <div class="stage-chip"><span>STEP 02</span>QR로 고객 초대</div>
+              <div class="stage-chip"><span>STEP 03</span>상품·주문 관리</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="bg-soft" id="problem">
+      <div class="wrap">
+        <p class="section-label reveal">Problem</p>
+        <h2 class="section-title reveal">
+          약국은 고객을 많이 만나지만,<br />
+          <em>그 관계를 온라인으로 이어가기 어렵습니다</em>
+        </h2>
+        <p class="section-desc reveal">
+          오프라인에서 쌓은 신뢰는 강하지만, 고객이 다시 찾아와 제품을 구매하도록
+          만드는 온라인 채널이 없습니다. 오픈마켓에 올리면 가격 경쟁에 휘말리고,
+          단골 고객과의 관계가 희석됩니다.
+        </p>
+        <p class="section-desc reveal">
+          그래서 많은 약국이 카톡, 문자, 전화로 주문을 받고 있습니다.
+          편해 보이지만 재고 확인, 배송 관리, 주문 기록이 흩어져
+          운영 부담은 점점 커집니다.
+        </p>
+
+        <div class="problem-list">
+          <article class="problem-item reveal">
+            <h3>단골이 열려 있는 시장으로 흩어집니다</h3>
+            <p>
+              오픈마켓에서는 가격과 검색에 따라 고객이 쉽게 이탈합니다.
+              약국이 쌓아온 신뢰와 상담 관계가 플랫폼 경쟁 속에 묻히기 쉽습니다.
+            </p>
+          </article>
+          <article class="problem-item reveal">
+            <h3>주문 채널이 정리되지 않습니다</h3>
+            <p>
+              전화, 문자, 메신저로 들어오는 주문은 기록하기 어렵고,
+              재고·배송·결제 상태를 한곳에서 보기 힘듭니다.
+            </p>
+          </article>
+          <article class="problem-item reveal">
+            <h3>자체몰을 직접 만들기는 너무 큽니다</h3>
+            <p>
+              쇼핑몰 구축, 회원 관리, 주문 시스템까지 직접 만들려면
+              시간과 비용이 많이 들고, 약국 업무에 집중하기 어렵습니다.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="bg-blue" id="solution">
+      <div class="wrap">
+        <p class="section-label reveal">Solution</p>
+        <h2 class="section-title reveal">
+          Maydin은<br />
+          <em>약국만의 전용 쇼핑몰</em>을<br />
+          바로 운영하게 합니다
+        </h2>
+        <p class="section-desc reveal">
+          Maydin은 불특정 다수가 들어오는 오픈몰이 아닙니다.
+          약국이 초대한 고객만 이용하는 폐쇄형 쇼핑몰을 제공합니다.
+          고객은 QR 코드로 들어와 가입하고, 약국은 익숙한 단골 관계를
+          온라인에서도 이어갈 수 있습니다.
+        </p>
+
+        <div class="solution-panel reveal">
+          <div class="solution-grid">
+            <div class="solution-copy">
+              <h3>초대된 고객만 들어오는<br />안전한 구조</h3>
+              <p>
+                약국마다 전용 몰과 QR 링크를 제공합니다.
+                고객은 그 링크를 통해서만 가입하고 주문할 수 있어,
+                단골 고객 중심의 판매 환경을 유지할 수 있습니다.
+              </p>
+              <p>
+                플랫폼 Admin이 약국몰을 개설하고,
+                약국 운영자가 상품·주문·배송을 관리하며,
+                고객은 모바일에서 바로 구매합니다.
+              </p>
+            </div>
+            <div class="flow">
+              <div class="flow-step">
+                <span class="flow-num">1</span>
+                <div>
+                  <strong>약국몰 개설</strong>
+                  <span>Admin이 약국 정보를 등록하고 전용 몰을 만듭니다.</span>
+                </div>
+              </div>
+              <div class="flow-step">
+                <span class="flow-num">2</span>
+                <div>
+                  <strong>QR로 고객 초대</strong>
+                  <span>약국은 QR을 통해 단골 고객만 몰에 초대합니다.</span>
+                </div>
+              </div>
+              <div class="flow-step">
+                <span class="flow-num">3</span>
+                <div>
+                  <strong>상품·주문 운영</strong>
+                  <span>운영자가 재고와 주문을 관리하고 고객은 간편하게 구매합니다.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features">
+      <div class="wrap">
+        <p class="section-label reveal">Why Maydin</p>
+        <h2 class="section-title reveal">
+          관계 · 운영 · 성장까지<br />
+          <em>한 흐름으로</em> 이어줍니다
+        </h2>
+        <p class="section-desc reveal">
+          Maydin은 단순 쇼핑몰 템플릿이 아닙니다.
+          약국이 이미 가진 신뢰 관계를 온라인 판매와 운영으로 자연스럽게 연결하는
+          폐쇄몰 운영 플랫폼입니다.
+        </p>
+
+        <div class="feature-band">
+          <div class="feature-row reveal">
+            <div class="feature-text">
+              <h3>단골 고객과의 관계를<br />온라인으로 이어갑니다</h3>
+              <p>
+                약국 방문 고객에게 QR을 안내하면, 그 고객은 해당 약국몰에만 가입합니다.
+                검색 경쟁에 노출되지 않고, 약국이 직접 관리하는 고객 채널을 만들 수 있습니다.
+              </p>
+              <p>
+                상담으로 쌓인 신뢰를 바탕으로
+                건강기능식품과 약국 추천 상품을 안정적으로 판매할 수 있습니다.
+              </p>
+            </div>
+            <div class="feature-visual">
+              <div class="mock">
+                <div class="mock-top">QR JOIN</div>
+                <div class="mock-title">우리 약국 고객만<br />입장할 수 있어요</div>
+                <div class="mock-line"></div>
+                <div class="mock-line short"></div>
+                <div class="mock-pill">초대 기반 가입</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="feature-row reverse reveal">
+            <div class="feature-text">
+              <h3>흩어진 주문을<br />한곳에서 관리합니다</h3>
+              <p>
+                전화와 메신저로 받던 주문을 몰 안으로 모읍니다.
+                상품, 재고, 주문 상태, 배송 정보를 운영자 화면에서 확인하고
+                처리할 수 있습니다.
+              </p>
+              <p>
+                고객도 모바일에서 바로 상품을 보고 주문할 수 있어,
+                약국과 고객 모두 더 빠르고 정확하게 연결됩니다.
+              </p>
+            </div>
+            <div class="feature-visual">
+              <div class="mock">
+                <div class="mock-top">OWNER DASHBOARD</div>
+                <div class="mock-title">오늘 들어온 주문<br />바로 확인</div>
+                <div class="mock-line"></div>
+                <div class="mock-line"></div>
+                <div class="mock-line short"></div>
+                <div class="mock-pill">주문 · 재고 · 배송</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="feature-row reveal">
+            <div class="feature-text">
+              <h3>처음부터 복잡한 구축 없이<br />바로 시작할 수 있습니다</h3>
+              <p>
+                자체몰을 처음부터 만들지 않아도 됩니다.
+                Maydin이 약국별 몰, 가입 흐름, 상품/주문 구조를 제공하기 때문에
+                운영에 필요한 기본기를 바로 갖출 수 있습니다.
+              </p>
+              <p>
+                플랫폼이 몰을 열어주고, 약국은 상품과 고객 응대에 집중하면 됩니다.
+              </p>
+            </div>
+            <div class="feature-visual">
+              <div class="mock">
+                <div class="mock-top">READY TO OPEN</div>
+                <div class="mock-title">약국몰 개설부터<br />운영까지</div>
+                <div class="mock-line"></div>
+                <div class="mock-line short"></div>
+                <div class="mock-pill">SaaS로 바로 시작</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="bg-soft" id="audience">
+      <div class="wrap">
+        <p class="section-label reveal">Who it's for</p>
+        <h2 class="section-title reveal">
+          플랫폼, 약국, 고객이<br />
+          <em>각자의 역할</em>로 연결됩니다
+        </h2>
+        <p class="section-desc reveal">
+          Maydin은 세 역할이 함께 움직이는 구조입니다.
+          플랫폼은 몰을 만들고, 약국은 운영하며, 고객은 편리하게 구매합니다.
+        </p>
+
+        <div class="audience-list">
+          <article class="audience-item reveal">
+            <p class="tag">Platform Admin</p>
+            <h3>플랫폼 관리자</h3>
+            <p>
+              약국을 등록하고 전용 몰을 개설합니다.
+              약국별 운영 기반을 만들어 전체 플랫폼이 안정적으로 확장되도록 돕습니다.
+            </p>
+          </article>
+          <article class="audience-item reveal">
+            <p class="tag">Pharmacy Owner</p>
+            <h3>약국 운영자</h3>
+            <p>
+              상품을 등록하고 재고와 주문을 관리합니다.
+              단골 고객에게 QR을 안내하며, 약국만의 온라인 판매 채널을 운영합니다.
+            </p>
+          </article>
+          <article class="audience-item reveal">
+            <p class="tag">Customer</p>
+            <h3>고객</h3>
+            <p>
+              약국 QR로 가입한 뒤 모바일에서 바로 상품을 보고 주문합니다.
+              익숙한 약국의 추천 상품을 더 편리하게 구매할 수 있습니다.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="closing">
+      <div class="wrap">
+        <p class="section-label reveal">Start</p>
+        <h2 class="section-title reveal">
+          지금 데모에서<br />
+          <em>Maydin의 흐름</em>을<br />
+          바로 경험보세요
+        </h2>
+        <p class="section-desc reveal">
+          고객 가입부터 쇼핑몰, 약국 운영 화면까지
+          실제 서비스 흐름을 데모로 확인할 수 있습니다.
+        </p>
+        <div class="hero-actions reveal">
+          <a class="btn-primary" href="/join.html?pharmacyCode=A001">고객 가입 데모</a>
+          <a class="btn-secondary" href="/store.html?pharmacyCode=A001">쇼핑몰 데모</a>
+        </div>
+      </div>
+    </section>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <div class="footer-top">
+          <div class="footer-brand">
+            Maydin
+            <p>
+              약국 전용 폐쇄몰 SaaS.<br />
+              단골 관계를 온라인 판매로 이어줍니다.
+            </p>
+          </div>
+
+          <div class="footer-links">
+            <div class="footer-col">
+              <h4>플랫폼 Admin</h4>
+              <a href="/admin.html">Admin 화면 열기</a>
+              <p class="footer-note">admin@maydin.kr / admin1234</p>
+            </div>
+            <div class="footer-col">
+              <h4>약국 운영자</h4>
+              <a href="/owner.html">운영자 화면 열기</a>
+              <p class="footer-note">owner@apharmacy.kr / owner1234</p>
+            </div>
+            <div class="footer-col">
+              <h4>고객 쇼핑몰</h4>
+              <a href="/join.html?pharmacyCode=A001">QR 가입 화면</a>
+              <a href="/store.html?pharmacyCode=A001">쇼핑몰 화면</a>
+            </div>
+            <div class="footer-col">
+              <h4>서버 확인</h4>
+              <button id="health" type="button">/api/health 확인</button>
+              <span id="message"></span>
+            </div>
+          </div>
+        </div>
+        <div class="footer-bottom">© Maydin. Pharmacy closed-mall platform.</div>
+      </div>
+    </footer>
+
     <script src="/app.js"></script>
     <script>
-      $('#health').addEventListener('click', async () => {
+      $("#health").addEventListener("click", async () => {
         try {
-          const data = await api.request('/health');
+          const data = await api.request("/health");
           message(JSON.stringify(data, null, 2));
         } catch (error) {
           message(error.message);
         }
       });
+
+      const observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (entry.isIntersecting) {
+              entry.target.classList.add("visible");
+              observer.unobserve(entry.target);
+            }
+          });
+        },
+        { threshold: 0.16 }
+      );
+
+      document.querySelectorAll(".reveal").forEach((el) => observer.observe(el));
     </script>
   </body>
 </html>
