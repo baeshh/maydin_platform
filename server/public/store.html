@@ -79,9 +79,11 @@
         align-items: center;
         background: none;
         border: none;
+        color: inherit;
         cursor: pointer;
         display: flex;
         position: relative;
+        text-decoration: none;
       }
 
       .icon-btn svg {
@@ -561,14 +563,14 @@
               <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
             </svg>
           </button>
-          <button class="icon-btn" type="button" onclick="scrollToCart()" aria-label="장바구니">
+          <a class="icon-btn" id="cartLink" href="/cart.html" aria-label="장바구니">
             <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="9" cy="21" r="1"></circle>
               <circle cx="20" cy="21" r="1"></circle>
               <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
             </svg>
             <span class="cart-badge" id="cartBadge">0</span>
-          </button>
+          </a>
         </div>
       </div>
     </header>
@@ -600,31 +602,6 @@
         </div>
         <div class="product-grid" id="productGrid"></div>
       </section>
-
-      <section class="customer-panel" id="cartSection">
-        <div class="section-header" style="padding: 0; margin-bottom: 14px;">
-          <h3>장바구니</h3>
-        </div>
-        <div class="panel-card" id="cart"></div>
-        <div class="panel-card">
-          <h3>배송지 입력</h3>
-          <form id="orderForm" class="order-form">
-            <input name="receiver_name" placeholder="수령인" required />
-            <input name="receiver_phone" placeholder="연락처" required />
-            <input name="zip_code" placeholder="우편번호" />
-            <input name="address" placeholder="주소" required />
-            <input name="address_detail" placeholder="상세주소" />
-            <button class="order-submit">모의 결제 및 주문하기</button>
-          </form>
-        </div>
-      </section>
-
-      <section class="customer-panel" id="ordersSection">
-        <div class="section-header" style="padding: 0; margin-bottom: 14px;">
-          <h3>주문 내역</h3>
-        </div>
-        <div class="panel-card" id="orders"></div>
-      </section>
     </main>
 
     <nav class="bottom-nav">
@@ -632,9 +609,13 @@
         <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
         <span>홈</span>
       </a>
-      <a href="#" class="nav-item" onclick="scrollToOrders(); return false;">
+      <a href="#" class="nav-item" id="orderNavLink">
         <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-        <span>주문내역</span>
+        <span>주문/예약</span>
+      </a>
+      <a href="#" class="nav-item" id="historyNavLink">
+        <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+        <span>내역</span>
       </a>
       <a href="#" class="nav-item" id="myLink">
         <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
@@ -655,6 +636,9 @@
       $('#joinLink').href = `/join.html?pharmacyCode=${encodeURIComponent(pharmacyCode)}`;
       $('#loginLink').href = `/login.html?pharmacyCode=${encodeURIComponent(pharmacyCode)}`;
       $('#myLink').href = `/login.html?pharmacyCode=${encodeURIComponent(pharmacyCode)}`;
+      $('#cartLink').href = withPharmacy('/cart.html', pharmacyCode);
+      $('#orderNavLink').href = withPharmacy('/order.html', pharmacyCode);
+      $('#historyNavLink').href = withPharmacy('/order-history.html', pharmacyCode);
 
       function toast(text) {
         const target = $('#message');
@@ -764,57 +748,18 @@
           renderProductGrid();
 
           if (isCustomerInThisStore()) {
-            await loadCart();
-            await loadOrders();
+            await refreshCartBadge();
           } else {
             $('#cartBadge').textContent = '0';
-            $('#cart').innerHTML = `<p class="muted">장바구니를 이용하려면 이 약국몰에 가입하거나 로그인해주세요.</p>`;
-            $('#orders').innerHTML = `<p class="muted">로그인 후 주문 내역을 확인할 수 있습니다.</p>`;
           }
         } catch (error) {
           toast(error.message);
         }
       }
 
-      async function loadCart() {
+      async function refreshCartBadge() {
         const data = await api.request('/cart');
-        const total = data.items.reduce((sum, item) => sum + item.sale_price * item.quantity, 0);
-        const deliveryFee = total >= 50000 || total === 0 ? 0 : 3000;
         $('#cartBadge').textContent = data.items.reduce((sum, item) => sum + Number(item.quantity), 0);
-        $('#cart').innerHTML = data.items.length
-          ? `
-            ${data.items.map((item) => `
-              <div class="cart-row">
-                <div>
-                  <strong>${item.product_name}</strong>
-                  <p class="muted">${item.quantity}개 · ${money(item.sale_price * item.quantity)}</p>
-                </div>
-                <button class="add-btn" style="margin: 0; padding: 8px 10px;" onclick="removeCart(${item.id})">삭제</button>
-              </div>
-            `).join('')}
-            <div class="cart-row">
-              <strong>결제 예정 금액</strong>
-              <strong>${money(total + deliveryFee)}</strong>
-            </div>
-            <p class="muted">상품금액 ${money(total)} · 배송비 ${money(deliveryFee)}</p>
-          `
-          : '<p class="muted">장바구니가 비어 있습니다.</p>';
-      }
-
-      async function loadOrders() {
-        const data = await api.request('/orders');
-        $('#orders').innerHTML = data.orders.length
-          ? data.orders.map((order) => `
-              <div class="order-row">
-                <div>
-                  <strong>${order.order_number}</strong>
-                  <p class="muted">${order.order_status} · ${order.delivery_status}</p>
-                  <p class="muted">${order.receiver_name || ''} ${order.address || ''}</p>
-                </div>
-                <strong>${money(order.final_amount)}</strong>
-              </div>
-            `).join('')
-          : '<p class="muted">아직 주문 내역이 없습니다.</p>';
       }
 
       async function addCart(productId) {
@@ -829,54 +774,15 @@
         try {
           await api.request('/cart', { method: 'POST', body: { product_id: productId, quantity: 1 } });
           toast('장바구니에 담았습니다.');
-          await loadCart();
+          await refreshCartBadge();
         } catch (error) {
           toast(error.message);
         }
-      }
-
-      async function removeCart(id) {
-        await api.request(`/cart/${id}`, { method: 'DELETE' });
-        await loadCart();
       }
 
       function scrollToProducts() {
         $('#productsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
-
-      function scrollToCart() {
-        $('#cartSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-
-      function scrollToOrders() {
-        $('#ordersSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-
-      $('#orderForm').addEventListener('submit', async (event) => {
-        event.preventDefault();
-        if (!isCustomerInThisStore()) {
-          toast('주문하려면 먼저 로그인해주세요.');
-          location.href = `/login.html?pharmacyCode=${encodeURIComponent(pharmacyCode)}`;
-          return;
-        }
-
-        try {
-          await api.request('/orders', {
-            method: 'POST',
-            body: {
-              payment_method: 'MOCK_CARD',
-              delivery: serializeForm(event.target)
-            }
-          });
-          toast('주문과 모의 결제가 완료되었습니다.');
-          event.target.reset();
-          await loadCart();
-          await loadOrders();
-          await loadStore();
-        } catch (error) {
-          toast(error.message);
-        }
-      });
 
       loadStore();
     </script>

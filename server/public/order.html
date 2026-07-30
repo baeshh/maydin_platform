@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>주문 · 예약</title>
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+    <style>
+      :root {
+        --blue: #3182f6;
+        --blue-soft: #e8f3ff;
+        --text: #191f28;
+        --sub: #4e5968;
+        --muted: #8b95a1;
+        --bg: #f2f4f6;
+        --line: #e5e8eb;
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; font-family: "Pretendard", system-ui, sans-serif; }
+      body { background: var(--bg); color: var(--text); min-height: 100vh; padding-bottom: 40px; word-break: keep-all; }
+      header {
+        backdrop-filter: blur(18px);
+        background: rgba(255,255,255,0.9);
+        border-bottom: 1px solid rgba(0,0,0,0.04);
+        position: sticky; top: 0; z-index: 20;
+      }
+      .header-inner {
+        align-items: center; display: flex; gap: 12px;
+        justify-content: space-between; margin: 0 auto; max-width: 720px; padding: 14px 20px;
+      }
+      .back { color: var(--sub); font-size: 14px; font-weight: 700; text-decoration: none; }
+      .title { font-size: 18px; font-weight: 800; letter-spacing: -0.03em; }
+      main { margin: 0 auto; max-width: 720px; padding: 20px; }
+      .lead { color: var(--sub); font-size: 15px; line-height: 1.6; margin-bottom: 18px; }
+      .menu { display: grid; gap: 12px; }
+      .card {
+        background: #fff; border: 1px solid var(--line); border-radius: 20px;
+        box-shadow: 0 8px 20px rgba(0,0,0,0.03); display: block; padding: 20px;
+        text-decoration: none; transition: transform .2s ease, box-shadow .2s ease;
+      }
+      .card:hover { box-shadow: 0 14px 28px rgba(25,50,100,0.08); transform: translateY(-2px); }
+      .card .tag { color: var(--blue); font-size: 12px; font-weight: 800; letter-spacing: 0.04em; margin-bottom: 8px; }
+      .card h2 { font-size: 18px; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 8px; }
+      .card p { color: var(--sub); font-size: 14px; line-height: 1.55; }
+      .toast {
+        background: rgba(25,31,40,0.92); border-radius: 12px; bottom: 24px; color: #fff;
+        font-size: 14px; font-weight: 700; left: 50%; opacity: 0; padding: 12px 16px;
+        pointer-events: none; position: fixed; transform: translateX(-50%) translateY(12px); transition: .2s ease; z-index: 50;
+      }
+      .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="header-inner">
+        <a class="back" id="storeLink" href="/store.html">← 쇼핑몰</a>
+        <div class="title">주문 · 예약</div>
+        <span style="width:64px"></span>
+      </div>
+    </header>
+    <main>
+      <p class="lead">배송 주문, 매장 픽업, 복약상담 예약을 선택해 주세요.</p>
+      <div class="menu">
+        <a class="card" id="cartLink" href="#">
+          <div class="tag">CART</div>
+          <h2>장바구니</h2>
+          <p>담아둔 상품을 확인하고 배송·픽업 주문을 진행하세요.</p>
+        </a>
+        <a class="card" id="deliveryLink" href="#">
+          <div class="tag">DELIVERY</div>
+          <h2>배송 주문</h2>
+          <p>장바구니 상품을 배송지로 받아보세요. 5만원 이상 무료배송입니다.</p>
+        </a>
+        <a class="card" id="pickupLink" href="#">
+          <div class="tag">PICKUP</div>
+          <h2>매장 픽업 예약</h2>
+          <p>장바구니 상품을 희망 시간에 맞춰 약국에서 직접 수령하세요.</p>
+        </a>
+        <a class="card" id="counselLink" href="#">
+          <div class="tag">COUNSEL</div>
+          <h2>복약상담 예약</h2>
+          <p>약사님과 복약·웰니스 상담을 희망 일시로 예약합니다.</p>
+        </a>
+        <a class="card" id="historyLink" href="#">
+          <div class="tag">HISTORY</div>
+          <h2>주문 · 예약 내역</h2>
+          <p>배송, 픽업, 상담 예약 상태를 한곳에서 확인합니다.</p>
+        </a>
+      </div>
+    </main>
+    <div id="message" class="toast"></div>
+    <script src="/app.js"></script>
+    <script>
+      const pharmacyCode = pharmacyCodeFromUrl();
+      $('#storeLink').href = withPharmacy('/store.html', pharmacyCode);
+      $('#cartLink').href = withPharmacy('/cart.html', pharmacyCode);
+      $('#deliveryLink').href = withPharmacy('/order-delivery.html', pharmacyCode);
+      $('#pickupLink').href = withPharmacy('/order-pickup.html', pharmacyCode);
+      $('#counselLink').href = withPharmacy('/order-counsel.html', pharmacyCode);
+      $('#historyLink').href = withPharmacy('/order-history.html', pharmacyCode);
+
+      if (!requireCustomerLogin(pharmacyCode)) {
+        message('로그인이 필요합니다.');
+      }
+    </script>
+  </body>
+</html>

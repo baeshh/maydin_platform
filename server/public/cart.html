@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>장바구니</title>
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+    <style>
+      :root { --blue:#3182f6; --text:#191f28; --sub:#4e5968; --muted:#8b95a1; --bg:#f2f4f6; --line:#e5e8eb; }
+      * { box-sizing:border-box; margin:0; padding:0; font-family:"Pretendard",system-ui,sans-serif; }
+      body { background:var(--bg); color:var(--text); min-height:100vh; padding-bottom:40px; word-break:keep-all; }
+      header { backdrop-filter:blur(18px); background:rgba(255,255,255,.9); border-bottom:1px solid rgba(0,0,0,.04); position:sticky; top:0; z-index:20; }
+      .header-inner { align-items:center; display:flex; justify-content:space-between; margin:0 auto; max-width:720px; padding:14px 20px; }
+      .back,.link { color:var(--sub); font-size:14px; font-weight:700; text-decoration:none; }
+      .title { font-size:18px; font-weight:800; }
+      main { margin:0 auto; max-width:720px; padding:20px; display:grid; gap:14px; }
+      .card { background:#fff; border:1px solid var(--line); border-radius:20px; padding:18px; }
+      .card h2 { font-size:16px; font-weight:800; margin-bottom:14px; }
+      .row { align-items:flex-start; border-bottom:1px solid #f2f4f6; display:flex; gap:12px; justify-content:space-between; padding:12px 0; }
+      .row:last-child { border-bottom:0; }
+      .muted { color:var(--muted); font-size:13px; line-height:1.5; }
+      .sum { align-items:center; display:flex; font-weight:800; justify-content:space-between; margin-top:8px; }
+      .actions { display:grid; gap:10px; }
+      .btn {
+        background:var(--blue); border:0; border-radius:14px; color:#fff; display:block;
+        font-size:15px; font-weight:800; padding:14px 16px; text-align:center; text-decoration:none;
+      }
+      .btn.secondary { background:#fff; border:1px solid var(--line); color:var(--text); }
+      .btn.ghost { background:#e8f3ff; color:var(--blue); }
+      button.del { background:#f2f4f6; border:0; border-radius:12px; color:var(--text); cursor:pointer; font-weight:700; padding:8px 10px; width:auto; }
+      .toast { background:rgba(25,31,40,.92); border-radius:12px; bottom:24px; color:#fff; font-size:14px; font-weight:700; left:50%; opacity:0; padding:12px 16px; pointer-events:none; position:fixed; transform:translateX(-50%) translateY(12px); transition:.2s ease; z-index:50; }
+      .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="header-inner">
+        <a class="back" id="storeLink" href="/store.html">← 쇼핑</a>
+        <div class="title">장바구니</div>
+        <a class="link" id="historyLink" href="/order-history.html">내역</a>
+      </div>
+    </header>
+    <main>
+      <section class="card">
+        <h2>담은 상품</h2>
+        <div id="cart"></div>
+      </section>
+      <section class="card">
+        <h2>주문 방식 선택</h2>
+        <p class="muted" style="margin-bottom:14px;">장바구니 상품으로 배송 주문 또는 매장 픽업 예약을 진행할 수 있습니다.</p>
+        <div class="actions">
+          <a class="btn" id="deliveryLink" href="/order-delivery.html">배송 주문하기</a>
+          <a class="btn ghost" id="pickupLink" href="/order-pickup.html">매장 픽업 예약</a>
+          <a class="btn secondary" id="orderHubLink" href="/order.html">주문 · 예약 메뉴</a>
+          <a class="btn secondary" id="counselLink" href="/order-counsel.html">복약상담 예약</a>
+        </div>
+      </section>
+    </main>
+    <div id="message" class="toast"></div>
+    <script src="/app.js"></script>
+    <script>
+      const pharmacyCode = pharmacyCodeFromUrl();
+      $('#storeLink').href = withPharmacy('/store.html', pharmacyCode);
+      $('#historyLink').href = withPharmacy('/order-history.html', pharmacyCode);
+      $('#deliveryLink').href = withPharmacy('/order-delivery.html', pharmacyCode);
+      $('#pickupLink').href = withPharmacy('/order-pickup.html', pharmacyCode);
+      $('#orderHubLink').href = withPharmacy('/order.html', pharmacyCode);
+      $('#counselLink').href = withPharmacy('/order-counsel.html', pharmacyCode);
+
+      function toast(text) {
+        const target = $('#message');
+        target.textContent = text;
+        target.classList.add('show');
+        clearTimeout(window.__toastTimer);
+        window.__toastTimer = setTimeout(() => target.classList.remove('show'), 2200);
+      }
+
+      async function loadCart() {
+        const data = await api.request('/cart');
+        const total = data.items.reduce((sum, item) => sum + item.sale_price * item.quantity, 0);
+        const deliveryFee = total >= 50000 || total === 0 ? 0 : 3000;
+        $('#cart').innerHTML = data.items.length
+          ? `
+            ${data.items.map((item) => `
+              <div class="row">
+                <div>
+                  <strong>${item.product_name}</strong>
+                  <p class="muted">${item.quantity}개 · ${money(item.sale_price * item.quantity)}</p>
+                </div>
+                <button class="del" type="button" onclick="removeCart(${item.id})">삭제</button>
+              </div>
+            `).join('')}
+            <div class="sum"><span>배송 주문 시</span><span>${money(total + deliveryFee)}</span></div>
+            <p class="muted">상품 ${money(total)} · 배송비 ${money(deliveryFee)} (픽업 시 배송비 0원)</p>
+          `
+          : '<p class="muted">장바구니가 비어 있습니다. 쇼핑몰에서 상품을 담아주세요.</p>';
+      }
+
+      async function removeCart(id) {
+        await api.request(`/cart/${id}`, { method: 'DELETE' });
+        await loadCart();
+      }
+
+      if (requireCustomerLogin(pharmacyCode)) {
+        loadCart().catch((error) => toast(error.message));
+      }
+    </script>
+  </body>
+</html>

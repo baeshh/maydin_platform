@@ -5,8 +5,83 @@ const { requirePharmacyScope } = require('../middleware/scope');
 
 const router = express.Router();
 
-function orderNumber() {
-  return `ORD-${Date.now()}-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
+const ORDER_TYPES = new Set(['DELIVERY', 'PICKUP', 'COUNSEL']);
+
+function orderNumber(prefix = 'ORD') {
+  return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
+}
+
+function getCartItems(userId, pharmacyId) {
+  return getAll(
+    `SELECT c.id AS cart_id, c.quantity, p.*
+     FROM carts c
+     JOIN products p ON p.id = c.product_id AND p.pharmacy_id = c.pharmacy_id
+     WHERE c.user_id = @user_id AND c.pharmacy_id = @pharmacy_id
+     ORDER BY c.id ASC`,
+    { user_id: userId, pharmacy_id: pharmacyId }
+  );
+}
+
+function assertCartReady(cartItems) {
+  if (cartItems.length === 0) throw new Error('장바구니가 비어 있습니다.');
+
+  let total = 0;
+  for (const item of cartItems) {
+    if (item.status !== 'ON_SALE') throw new Error(`${item.product_name} 상품은 판매중이 아닙니다.`);
+    if (item.stock_quantity < item.quantity) throw new Error(`${item.product_name} 재고가 부족합니다.`);
+    total += Number(item.discount_price || item.price) * item.quantity;
+  }
+  return total;
+}
+
+function insertOrderItems(orderId, cartItems, pharmacyId, userId) {
+  for (const item of cartItems) {
+    const price = Number(item.discount_price || item.price);
+    run(
+      `INSERT INTO order_items (order_id, product_id, product_name, quantity, price, total_price)
+       VALUES (@order_id, @product_id, @product_name, @quantity, @price, @total_price)`,
+      {
+        order_id: orderId,
+        product_id: item.id,
+        product_name: item.product_name,
+        quantity: item.quantity,
+        price,
+        total_price: price * item.quantity
+      }
+    );
+
+    run(
+      `UPDATE products
+       SET stock_quantity = stock_quantity - @quantity,
+           status = CASE WHEN stock_quantity - @quantity <= 0 THEN 'SOLD_OUT' ELSE status END,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = @product_id AND pharmacy_id = @pharmacy_id`,
+      { quantity: item.quantity, product_id: item.id, pharmacy_id: pharmacyId }
+    );
+
+    run(
+      `INSERT INTO inventory_logs (
+        pharmacy_id, product_id, change_type, quantity_before, quantity_after, reason, created_by
+      ) VALUES (
+        @pharmacy_id, @product_id, 'ORDER', @quantity_before, @quantity_after, @reason, @created_by
+      )`,
+      {
+        pharmacy_id: pharmacyId,
+        product_id: item.id,
+        quantity_before: item.stock_quantity,
+        quantity_after: item.stock_quantity - item.quantity,
+        reason: '주문 재고 차감',
+        created_by: userId
+      }
+    );
+  }
+}
+
+function clearCart(userId, pharmacyId) {
+  run('DELETE FROM carts WHERE user_id = @user_id AND pharmacy_id = @pharmacy_id', {
+    user_id: userId,
+    pharmacy_id: pharmacyId
+  });
 }
 
 router.use(authenticate);
@@ -61,84 +136,132 @@ router.post('/', requireRole('CUSTOMER'), requirePharmacyScope, (req, res) => {
   });
   if (!customer) return res.status(400).json({ message: '고객 정보를 찾을 수 없습니다.' });
 
-  const createOrder = transaction(() => {
-    const cartItems = getAll(
-      `SELECT c.id AS cart_id, c.quantity, p.*
-       FROM carts c
-       JOIN products p ON p.id = c.product_id AND p.pharmacy_id = c.pharmacy_id
-       WHERE c.user_id = @user_id AND c.pharmacy_id = @pharmacy_id
-       ORDER BY c.id ASC`,
-      { user_id: req.user.id, pharmacy_id: req.pharmacyId }
-    );
-    if (cartItems.length === 0) throw new Error('장바구니가 비어 있습니다.');
+  const orderType = String(req.body.order_type || 'DELIVERY').toUpperCase();
+  if (!ORDER_TYPES.has(orderType)) {
+    return res.status(400).json({ message: '지원하지 않는 주문 유형입니다.' });
+  }
 
-    let total = 0;
-    for (const item of cartItems) {
-      if (item.status !== 'ON_SALE') throw new Error(`${item.product_name} 상품은 판매중이 아닙니다.`);
-      if (item.stock_quantity < item.quantity) throw new Error(`${item.product_name} 재고가 부족합니다.`);
-      total += Number(item.discount_price || item.price) * item.quantity;
+  const createOrder = transaction(() => {
+    if (orderType === 'COUNSEL') {
+      const preferredAt = String(req.body.preferred_at || '').trim();
+      const memo = String(req.body.memo || '').trim();
+      if (!preferredAt) throw new Error('희망 상담 일시를 입력해 주세요.');
+      if (!memo) throw new Error('상담 문의 내용을 입력해 주세요.');
+
+      const contactName = String(req.body.contact_name || customer.name || '').trim();
+      const contactPhone = String(req.body.contact_phone || customer.phone || '').trim();
+
+      const orderResult = run(
+        `INSERT INTO orders (
+          order_number, pharmacy_id, customer_id, order_type, total_product_amount, delivery_fee,
+          discount_amount, final_amount, payment_status, order_status, delivery_status,
+          preferred_at, memo, contact_name, contact_phone
+        ) VALUES (
+          @order_number, @pharmacy_id, @customer_id, 'COUNSEL', 0, 0,
+          0, 0, 'PAID', 'RESERVED', 'NOT_SHIPPED',
+          @preferred_at, @memo, @contact_name, @contact_phone
+        )`,
+        {
+          order_number: orderNumber('CNS'),
+          pharmacy_id: req.pharmacyId,
+          customer_id: customer.id,
+          preferred_at: preferredAt,
+          memo,
+          contact_name: contactName,
+          contact_phone: contactPhone
+        }
+      );
+
+      run(
+        `INSERT INTO payments (order_id, payment_method, payment_provider, payment_status, paid_amount, paid_at)
+         VALUES (@order_id, 'NONE', 'MOCK', 'PAID', 0, CURRENT_TIMESTAMP)`,
+        { order_id: orderResult.lastInsertRowid }
+      );
+
+      return getOne('SELECT * FROM orders WHERE id = @id', { id: orderResult.lastInsertRowid });
+    }
+
+    const cartItems = getCartItems(req.user.id, req.pharmacyId);
+    const total = assertCartReady(cartItems);
+    const preferredAt = String(req.body.preferred_at || '').trim();
+    const memo = String(req.body.memo || '').trim();
+    const contactName = String(req.body.contact_name || customer.name || '').trim();
+    const contactPhone = String(req.body.contact_phone || customer.phone || '').trim();
+
+    if (orderType === 'PICKUP') {
+      if (!preferredAt) throw new Error('희망 픽업 일시를 입력해 주세요.');
+      if (!contactName || !contactPhone) throw new Error('수령인 정보를 입력해 주세요.');
+
+      const orderResult = run(
+        `INSERT INTO orders (
+          order_number, pharmacy_id, customer_id, order_type, total_product_amount, delivery_fee,
+          discount_amount, final_amount, payment_status, order_status, delivery_status,
+          preferred_at, memo, contact_name, contact_phone
+        ) VALUES (
+          @order_number, @pharmacy_id, @customer_id, 'PICKUP', @total_product_amount, 0,
+          0, @final_amount, 'PAID', 'RESERVED', 'READY_FOR_PICKUP',
+          @preferred_at, @memo, @contact_name, @contact_phone
+        )`,
+        {
+          order_number: orderNumber('PCK'),
+          pharmacy_id: req.pharmacyId,
+          customer_id: customer.id,
+          total_product_amount: total,
+          final_amount: total,
+          preferred_at: preferredAt,
+          memo,
+          contact_name: contactName,
+          contact_phone: contactPhone
+        }
+      );
+
+      insertOrderItems(orderResult.lastInsertRowid, cartItems, req.pharmacyId, req.user.id);
+
+      run(
+        `INSERT INTO payments (order_id, payment_method, payment_provider, payment_status, paid_amount, paid_at)
+         VALUES (@order_id, @payment_method, 'MOCK', 'PAID', @paid_amount, CURRENT_TIMESTAMP)`,
+        {
+          order_id: orderResult.lastInsertRowid,
+          payment_method: req.body.payment_method || 'MOCK_CARD',
+          paid_amount: total
+        }
+      );
+
+      clearCart(req.user.id, req.pharmacyId);
+      return getOne('SELECT * FROM orders WHERE id = @id', { id: orderResult.lastInsertRowid });
+    }
+
+    const delivery = req.body.delivery || {};
+    if (!String(delivery.address || '').trim()) {
+      throw new Error('배송지 주소를 입력해 주세요.');
     }
 
     const deliveryFee = total >= 50000 ? 0 : 3000;
     const finalAmount = total + deliveryFee;
     const orderResult = run(
       `INSERT INTO orders (
-        order_number, pharmacy_id, customer_id, total_product_amount, delivery_fee,
-        discount_amount, final_amount, payment_status, order_status, delivery_status
+        order_number, pharmacy_id, customer_id, order_type, total_product_amount, delivery_fee,
+        discount_amount, final_amount, payment_status, order_status, delivery_status,
+        preferred_at, memo, contact_name, contact_phone
       ) VALUES (
-        @order_number, @pharmacy_id, @customer_id, @total_product_amount, @delivery_fee,
-        0, @final_amount, 'PAID', 'PAYMENT_COMPLETED', 'NOT_SHIPPED'
+        @order_number, @pharmacy_id, @customer_id, 'DELIVERY', @total_product_amount, @delivery_fee,
+        0, @final_amount, 'PAID', 'PAYMENT_COMPLETED', 'NOT_SHIPPED',
+        NULL, @memo, @contact_name, @contact_phone
       )`,
       {
-        order_number: orderNumber(),
+        order_number: orderNumber('ORD'),
         pharmacy_id: req.pharmacyId,
         customer_id: customer.id,
         total_product_amount: total,
         delivery_fee: deliveryFee,
-        final_amount: finalAmount
+        final_amount: finalAmount,
+        memo,
+        contact_name: delivery.receiver_name || contactName,
+        contact_phone: delivery.receiver_phone || contactPhone
       }
     );
 
-    for (const item of cartItems) {
-      const price = Number(item.discount_price || item.price);
-      run(
-        `INSERT INTO order_items (order_id, product_id, product_name, quantity, price, total_price)
-         VALUES (@order_id, @product_id, @product_name, @quantity, @price, @total_price)`,
-        {
-          order_id: orderResult.lastInsertRowid,
-          product_id: item.id,
-          product_name: item.product_name,
-          quantity: item.quantity,
-          price,
-          total_price: price * item.quantity
-        }
-      );
-
-      run(
-        `UPDATE products
-         SET stock_quantity = stock_quantity - @quantity,
-             status = CASE WHEN stock_quantity - @quantity <= 0 THEN 'SOLD_OUT' ELSE status END,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = @product_id AND pharmacy_id = @pharmacy_id`,
-        { quantity: item.quantity, product_id: item.id, pharmacy_id: req.pharmacyId }
-      );
-
-      run(
-        `INSERT INTO inventory_logs (
-          pharmacy_id, product_id, change_type, quantity_before, quantity_after, reason, created_by
-        ) VALUES (
-          @pharmacy_id, @product_id, 'ORDER', @quantity_before, @quantity_after, @reason, @created_by
-        )`,
-        {
-          pharmacy_id: req.pharmacyId,
-          product_id: item.id,
-          quantity_before: item.stock_quantity,
-          quantity_after: item.stock_quantity - item.quantity,
-          reason: '주문 재고 차감',
-          created_by: req.user.id
-        }
-      );
-    }
+    insertOrderItems(orderResult.lastInsertRowid, cartItems, req.pharmacyId, req.user.id);
 
     run(
       `INSERT INTO payments (order_id, payment_method, payment_provider, payment_status, paid_amount, paid_at)
@@ -150,7 +273,6 @@ router.post('/', requireRole('CUSTOMER'), requirePharmacyScope, (req, res) => {
       }
     );
 
-    const delivery = req.body.delivery || {};
     run(
       `INSERT INTO deliveries (
         order_id, receiver_name, receiver_phone, zip_code, address, address_detail, delivery_status
@@ -167,11 +289,7 @@ router.post('/', requireRole('CUSTOMER'), requirePharmacyScope, (req, res) => {
       }
     );
 
-    run('DELETE FROM carts WHERE user_id = @user_id AND pharmacy_id = @pharmacy_id', {
-      user_id: req.user.id,
-      pharmacy_id: req.pharmacyId
-    });
-
+    clearCart(req.user.id, req.pharmacyId);
     return getOne('SELECT * FROM orders WHERE id = @id', { id: orderResult.lastInsertRowid });
   });
 
@@ -204,21 +322,23 @@ router.patch('/:id/status', requireRole('PHARMACY_OWNER', 'ADMIN'), requirePharm
     }
   );
 
-  run(
-    `UPDATE deliveries
-     SET courier = COALESCE(@courier, courier),
-         tracking_number = COALESCE(@tracking_number, tracking_number),
-         delivery_status = COALESCE(@delivery_status, delivery_status),
-         shipped_at = CASE WHEN @delivery_status = 'SHIPPING' THEN CURRENT_TIMESTAMP ELSE shipped_at END,
-         delivered_at = CASE WHEN @delivery_status = 'DELIVERED' THEN CURRENT_TIMESTAMP ELSE delivered_at END
-     WHERE order_id = @order_id`,
-    {
-      order_id: order.id,
-      courier: courier || null,
-      tracking_number: tracking_number || null,
-      delivery_status: delivery_status || null
-    }
-  );
+  if (order.order_type === 'DELIVERY' || !order.order_type) {
+    run(
+      `UPDATE deliveries
+       SET courier = COALESCE(@courier, courier),
+           tracking_number = COALESCE(@tracking_number, tracking_number),
+           delivery_status = COALESCE(@delivery_status, delivery_status),
+           shipped_at = CASE WHEN @delivery_status = 'SHIPPING' THEN CURRENT_TIMESTAMP ELSE shipped_at END,
+           delivered_at = CASE WHEN @delivery_status = 'DELIVERED' THEN CURRENT_TIMESTAMP ELSE delivered_at END
+       WHERE order_id = @order_id`,
+      {
+        order_id: order.id,
+        courier: courier || null,
+        tracking_number: tracking_number || null,
+        delivery_status: delivery_status || null
+      }
+    );
+  }
 
   res.json({ order: getOne('SELECT * FROM orders WHERE id = @id', { id: order.id }) });
 });

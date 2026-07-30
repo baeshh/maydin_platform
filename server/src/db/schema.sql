@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS orders (
   order_number TEXT NOT NULL UNIQUE,
   pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
   customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
+  order_type TEXT NOT NULL DEFAULT 'DELIVERY',
   total_product_amount INTEGER NOT NULL,
   delivery_fee INTEGER NOT NULL DEFAULT 0,
   discount_amount INTEGER NOT NULL DEFAULT 0,
@@ -112,6 +113,10 @@ CREATE TABLE IF NOT EXISTS orders (
   payment_status TEXT NOT NULL DEFAULT 'PAID',
   order_status TEXT NOT NULL DEFAULT 'PAYMENT_COMPLETED',
   delivery_status TEXT NOT NULL DEFAULT 'NOT_SHIPPED',
+  preferred_at TEXT,
+  memo TEXT,
+  contact_name TEXT,
+  contact_phone TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

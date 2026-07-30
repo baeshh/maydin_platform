@@ -57,3 +57,59 @@ function currentUser() {
 function serializeForm(form) {
   return Object.fromEntries(new FormData(form).entries());
 }
+
+function pharmacyCodeFromUrl(fallback = 'A001') {
+  return new URLSearchParams(location.search).get('pharmacyCode') || fallback;
+}
+
+function withPharmacy(path, pharmacyCode = pharmacyCodeFromUrl()) {
+  const joiner = path.includes('?') ? '&' : '?';
+  return `${path}${joiner}pharmacyCode=${encodeURIComponent(pharmacyCode)}`;
+}
+
+function requireCustomerLogin(pharmacyCode = pharmacyCodeFromUrl()) {
+  const user = currentUser();
+  if (!user || user.role !== 'CUSTOMER') {
+    location.href = withPharmacy('/login.html', pharmacyCode);
+    return false;
+  }
+  return true;
+}
+
+function orderTypeLabel(type) {
+  return (
+    {
+      DELIVERY: '배송 주문',
+      PICKUP: '매장 픽업',
+      COUNSEL: '복약상담'
+    }[type] || type || '배송 주문'
+  );
+}
+
+function orderStatusLabel(status) {
+  return (
+    {
+      PAYMENT_COMPLETED: '결제완료',
+      SHIPPING: '배송중',
+      DELIVERED: '배송완료',
+      RESERVED: '예약접수',
+      CONFIRMED: '상담확정',
+      READY_FOR_PICKUP: '픽업준비',
+      PICKED_UP: '픽업완료',
+      COMPLETED: '완료',
+      CANCELED: '취소'
+    }[status] || status || '-'
+  );
+}
+
+function deliveryStatusLabel(status) {
+  return (
+    {
+      NOT_SHIPPED: '출고대기',
+      SHIPPING: '배송중',
+      DELIVERED: '배송완료',
+      READY_FOR_PICKUP: '픽업대기',
+      PICKED_UP: '픽업완료'
+    }[status] || status || '-'
+  );
+}

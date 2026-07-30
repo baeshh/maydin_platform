@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>매장 픽업 예약</title>
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+    <style>
+      :root { --blue:#3182f6; --text:#191f28; --sub:#4e5968; --muted:#8b95a1; --bg:#f2f4f6; --line:#e5e8eb; }
+      * { box-sizing:border-box; margin:0; padding:0; font-family:"Pretendard",system-ui,sans-serif; }
+      body { background:var(--bg); color:var(--text); min-height:100vh; padding-bottom:40px; word-break:keep-all; }
+      header { backdrop-filter:blur(18px); background:rgba(255,255,255,.9); border-bottom:1px solid rgba(0,0,0,.04); position:sticky; top:0; z-index:20; }
+      .header-inner { align-items:center; display:flex; justify-content:space-between; margin:0 auto; max-width:720px; padding:14px 20px; }
+      .back,.link { color:var(--sub); font-size:14px; font-weight:700; text-decoration:none; }
+      .title { font-size:18px; font-weight:800; }
+      main { margin:0 auto; max-width:720px; padding:20px; display:grid; gap:14px; }
+      .card { background:#fff; border:1px solid var(--line); border-radius:20px; padding:18px; }
+      .card h2 { font-size:16px; font-weight:800; margin-bottom:14px; }
+      .row { align-items:flex-start; border-bottom:1px solid #f2f4f6; display:flex; gap:12px; justify-content:space-between; padding:12px 0; }
+      .row:last-child { border-bottom:0; }
+      .muted { color:var(--muted); font-size:13px; line-height:1.5; }
+      .sum { align-items:center; display:flex; font-weight:800; justify-content:space-between; margin-top:8px; }
+      label { display:grid; gap:6px; font-size:13px; font-weight:700; margin-bottom:12px; }
+      input, textarea, button { border:1px solid var(--line); border-radius:14px; font:inherit; padding:12px 14px; width:100%; }
+      button { background:var(--blue); border:0; color:#fff; cursor:pointer; font-weight:800; margin-top:8px; }
+      .notice { background:#e8f3ff; border-radius:14px; color:var(--sub); font-size:13px; line-height:1.55; padding:12px 14px; }
+      .toast { background:rgba(25,31,40,.92); border-radius:12px; bottom:24px; color:#fff; font-size:14px; font-weight:700; left:50%; opacity:0; padding:12px 16px; pointer-events:none; position:fixed; transform:translateX(-50%) translateY(12px); transition:.2s ease; z-index:50; }
+      .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="header-inner">
+        <a class="back" id="backLink" href="/order.html">← 주문</a>
+        <div class="title">매장 픽업</div>
+        <a class="link" id="storeLink" href="/store.html">쇼핑</a>
+      </div>
+    </header>
+    <main>
+      <div class="notice">장바구니 상품을 약국에서 직접 수령합니다. 배송비는 없습니다.</div>
+      <section class="card">
+        <h2>장바구니</h2>
+        <div id="cart"></div>
+      </section>
+      <section class="card">
+        <h2>픽업 예약 정보</h2>
+        <form id="pickupForm">
+          <label>수령인 <input name="contact_name" required /></label>
+          <label>연락처 <input name="contact_phone" required /></label>
+          <label>희망 픽업 일시 <input name="preferred_at" type="datetime-local" required /></label>
+          <label>요청사항 <textarea name="memo" rows="3" placeholder="예: 오후 방문 예정입니다"></textarea></label>
+          <button type="submit">픽업 예약 및 결제</button>
+        </form>
+      </section>
+    </main>
+    <div id="message" class="toast"></div>
+    <script src="/app.js"></script>
+    <script>
+      const pharmacyCode = pharmacyCodeFromUrl();
+      $('#backLink').href = withPharmacy('/order.html', pharmacyCode);
+      $('#storeLink').href = withPharmacy('/store.html', pharmacyCode);
+
+      function toast(text) {
+        const target = $('#message');
+        target.textContent = text;
+        target.classList.add('show');
+        clearTimeout(window.__toastTimer);
+        window.__toastTimer = setTimeout(() => target.classList.remove('show'), 2200);
+      }
+
+      async function loadCart() {
+        const data = await api.request('/cart');
+        const total = data.items.reduce((sum, item) => sum + item.sale_price * item.quantity, 0);
+        $('#cart').innerHTML = data.items.length
+          ? `
+            ${data.items.map((item) => `
+              <div class="row">
+                <div>
+                  <strong>${item.product_name}</strong>
+                  <p class="muted">${item.quantity}개 · ${money(item.sale_price * item.quantity)}</p>
+                </div>
+                <button type="button" style="width:auto;margin:0;padding:8px 10px;background:#f2f4f6;color:var(--text);" onclick="removeCart(${item.id})">삭제</button>
+              </div>
+            `).join('')}
+            <div class="sum"><span>결제 예정</span><span>${money(total)}</span></div>
+            <p class="muted">매장 픽업 · 배송비 0원</p>
+          `
+          : '<p class="muted">장바구니가 비어 있습니다. 쇼핑몰에서 상품을 담아주세요.</p>';
+      }
+
+      async function removeCart(id) {
+        await api.request(`/cart/${id}`, { method: 'DELETE' });
+        await loadCart();
+      }
+
+      $('#pickupForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const form = serializeForm(event.target);
+        try {
+          await api.request('/orders', {
+            method: 'POST',
+            body: {
+              order_type: 'PICKUP',
+              payment_method: 'MOCK_CARD',
+              contact_name: form.contact_name,
+              contact_phone: form.contact_phone,
+              preferred_at: form.preferred_at,
+              memo: form.memo || ''
+            }
+          });
+          toast('매장 픽업 예약이 완료되었습니다.');
+          setTimeout(() => { location.href = withPharmacy('/order-history.html', pharmacyCode); }, 700);
+        } catch (error) {
+          toast(error.message);
+        }
+      });
+
+      if (requireCustomerLogin(pharmacyCode)) {
+        const user = currentUser();
+        $('[name=contact_name]').value = user.name || '';
+        $('[name=contact_phone]').value = user.phone || '';
+        loadCart().catch((error) => toast(error.message));
+      }
+    </script>
+  </body>
+</html>

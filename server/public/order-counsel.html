@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>복약상담 예약</title>
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+    <style>
+      :root { --blue:#3182f6; --text:#191f28; --sub:#4e5968; --muted:#8b95a1; --bg:#f2f4f6; --line:#e5e8eb; }
+      * { box-sizing:border-box; margin:0; padding:0; font-family:"Pretendard",system-ui,sans-serif; }
+      body { background:var(--bg); color:var(--text); min-height:100vh; padding-bottom:40px; word-break:keep-all; }
+      header { backdrop-filter:blur(18px); background:rgba(255,255,255,.9); border-bottom:1px solid rgba(0,0,0,.04); position:sticky; top:0; z-index:20; }
+      .header-inner { align-items:center; display:flex; justify-content:space-between; margin:0 auto; max-width:720px; padding:14px 20px; }
+      .back,.link { color:var(--sub); font-size:14px; font-weight:700; text-decoration:none; }
+      .title { font-size:18px; font-weight:800; }
+      main { margin:0 auto; max-width:720px; padding:20px; display:grid; gap:14px; }
+      .card { background:#fff; border:1px solid var(--line); border-radius:20px; padding:18px; }
+      .card h2 { font-size:16px; font-weight:800; margin-bottom:14px; }
+      .muted { color:var(--muted); font-size:13px; line-height:1.5; margin-bottom:14px; }
+      label { display:grid; gap:6px; font-size:13px; font-weight:700; margin-bottom:12px; }
+      input, textarea, button { border:1px solid var(--line); border-radius:14px; font:inherit; padding:12px 14px; width:100%; }
+      button { background:var(--blue); border:0; color:#fff; cursor:pointer; font-weight:800; margin-top:8px; }
+      .notice { background:#e8f3ff; border-radius:14px; color:var(--sub); font-size:13px; line-height:1.55; padding:12px 14px; }
+      .toast { background:rgba(25,31,40,.92); border-radius:12px; bottom:24px; color:#fff; font-size:14px; font-weight:700; left:50%; opacity:0; padding:12px 16px; pointer-events:none; position:fixed; transform:translateX(-50%) translateY(12px); transition:.2s ease; z-index:50; }
+      .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="header-inner">
+        <a class="back" id="backLink" href="/order.html">← 주문</a>
+        <div class="title">복약상담</div>
+        <a class="link" id="storeLink" href="/store.html">쇼핑</a>
+      </div>
+    </header>
+    <main>
+      <div class="notice">상품 구매 없이 약사님과 복약·웰니스 상담만 예약할 수 있습니다.</div>
+      <section class="card">
+        <h2>상담 예약</h2>
+        <p class="muted">희망 일시와 문의 내용을 남겨주시면 약국에서 확인 후 안내드립니다.</p>
+        <form id="counselForm">
+          <label>이름 <input name="contact_name" required /></label>
+          <label>연락처 <input name="contact_phone" required /></label>
+          <label>희망 상담 일시 <input name="preferred_at" type="datetime-local" required /></label>
+          <label>상담 문의 내용 <textarea name="memo" rows="5" placeholder="복용 중인 약, 증상, 궁금한 점을 적어주세요." required></textarea></label>
+          <button type="submit">복약상담 예약하기</button>
+        </form>
+      </section>
+    </main>
+    <div id="message" class="toast"></div>
+    <script src="/app.js"></script>
+    <script>
+      const pharmacyCode = pharmacyCodeFromUrl();
+      $('#backLink').href = withPharmacy('/order.html', pharmacyCode);
+      $('#storeLink').href = withPharmacy('/store.html', pharmacyCode);
+
+      function toast(text) {
+        const target = $('#message');
+        target.textContent = text;
+        target.classList.add('show');
+        clearTimeout(window.__toastTimer);
+        window.__toastTimer = setTimeout(() => target.classList.remove('show'), 2200);
+      }
+
+      $('#counselForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const form = serializeForm(event.target);
+        try {
+          await api.request('/orders', {
+            method: 'POST',
+            body: {
+              order_type: 'COUNSEL',
+              contact_name: form.contact_name,
+              contact_phone: form.contact_phone,
+              preferred_at: form.preferred_at,
+              memo: form.memo
+            }
+          });
+          toast('복약상담 예약이 접수되었습니다.');
+          setTimeout(() => { location.href = withPharmacy('/order-history.html', pharmacyCode); }, 700);
+        } catch (error) {
+          toast(error.message);
+        }
+      });
+
+      if (requireCustomerLogin(pharmacyCode)) {
+        const user = currentUser();
+        $('[name=contact_name]').value = user.name || '';
+        $('[name=contact_phone]').value = user.phone || '';
+      }
+    </script>
+  </body>
+</html>

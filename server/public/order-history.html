@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>주문 · 예약 내역</title>
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+    <style>
+      :root { --blue:#3182f6; --text:#191f28; --sub:#4e5968; --muted:#8b95a1; --bg:#f2f4f6; --line:#e5e8eb; }
+      * { box-sizing:border-box; margin:0; padding:0; font-family:"Pretendard",system-ui,sans-serif; }
+      body { background:var(--bg); color:var(--text); min-height:100vh; padding-bottom:40px; word-break:keep-all; }
+      header { backdrop-filter:blur(18px); background:rgba(255,255,255,.9); border-bottom:1px solid rgba(0,0,0,.04); position:sticky; top:0; z-index:20; }
+      .header-inner { align-items:center; display:flex; justify-content:space-between; margin:0 auto; max-width:720px; padding:14px 20px; }
+      .back,.link { color:var(--sub); font-size:14px; font-weight:700; text-decoration:none; }
+      .title { font-size:18px; font-weight:800; }
+      main { margin:0 auto; max-width:720px; padding:20px; display:grid; gap:12px; }
+      .card { background:#fff; border:1px solid var(--line); border-radius:20px; padding:18px; }
+      .top { align-items:center; display:flex; gap:8px; justify-content:space-between; margin-bottom:10px; }
+      .badge { background:#e8f3ff; border-radius:999px; color:var(--blue); font-size:12px; font-weight:800; padding:6px 10px; }
+      .badge.pickup { background:#ecfdf5; color:#059669; }
+      .badge.counsel { background:#fff7ed; color:#c2410c; }
+      .muted { color:var(--muted); font-size:13px; line-height:1.55; }
+      .amount { font-size:16px; font-weight:800; margin-top:10px; }
+      .toast { background:rgba(25,31,40,.92); border-radius:12px; bottom:24px; color:#fff; font-size:14px; font-weight:700; left:50%; opacity:0; padding:12px 16px; pointer-events:none; position:fixed; transform:translateX(-50%) translateY(12px); transition:.2s ease; z-index:50; }
+      .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="header-inner">
+        <a class="back" id="backLink" href="/order.html">← 주문</a>
+        <div class="title">내역</div>
+        <a class="link" id="storeLink" href="/store.html">쇼핑</a>
+      </div>
+    </header>
+    <main id="list"></main>
+    <div id="message" class="toast"></div>
+    <script src="/app.js"></script>
+    <script>
+      const pharmacyCode = pharmacyCodeFromUrl();
+      $('#backLink').href = withPharmacy('/order.html', pharmacyCode);
+      $('#storeLink').href = withPharmacy('/store.html', pharmacyCode);
+
+      function toast(text) {
+        const target = $('#message');
+        target.textContent = text;
+        target.classList.add('show');
+        clearTimeout(window.__toastTimer);
+        window.__toastTimer = setTimeout(() => target.classList.remove('show'), 2200);
+      }
+
+      function badgeClass(type) {
+        if (type === 'PICKUP') return 'pickup';
+        if (type === 'COUNSEL') return 'counsel';
+        return '';
+      }
+
+      function detailLine(order) {
+        if (order.order_type === 'COUNSEL') {
+          return `${order.preferred_at || '-'} · ${order.memo || ''}`;
+        }
+        if (order.order_type === 'PICKUP') {
+          return `픽업 ${order.preferred_at || '-'} · ${order.contact_name || ''} ${order.contact_phone || ''}`;
+        }
+        return `${order.receiver_name || order.contact_name || ''} ${order.address || ''}`.trim() || '배송 주문';
+      }
+
+      async function loadOrders() {
+        const data = await api.request('/orders');
+        $('#list').innerHTML = data.orders.length
+          ? data.orders.map((order) => `
+              <article class="card">
+                <div class="top">
+                  <strong>${order.order_number}</strong>
+                  <span class="badge ${badgeClass(order.order_type)}">${orderTypeLabel(order.order_type)}</span>
+                </div>
+                <p class="muted">${orderStatusLabel(order.order_status)} · ${deliveryStatusLabel(order.delivery_status)}</p>
+                <p class="muted">${detailLine(order)}</p>
+                <div class="amount">${order.order_type === 'COUNSEL' ? '상담 예약' : money(order.final_amount)}</div>
+              </article>
+            `).join('')
+          : '<div class="card"><p class="muted">아직 주문·예약 내역이 없습니다.</p></div>';
+      }
+
+      if (requireCustomerLogin(pharmacyCode)) {
+        loadOrders().catch((error) => toast(error.message));
+      }
+    </script>
+  </body>
+</html>

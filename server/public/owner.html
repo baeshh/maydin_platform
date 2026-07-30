@@ -839,12 +839,24 @@
           PAYMENT_COMPLETED: { text: '결제완료', color: 'blue' },
           SHIPPING: { text: '배송중', color: 'orange' },
           DELIVERED: { text: '배송완료', color: 'green' },
+          RESERVED: { text: '예약접수', color: 'blue' },
+          CONFIRMED: { text: '상담확정', color: 'orange' },
+          READY_FOR_PICKUP: { text: '픽업준비', color: 'orange' },
+          PICKED_UP: { text: '픽업완료', color: 'green' },
+          COMPLETED: { text: '완료', color: 'green' },
           CANCELED: { text: '취소', color: 'gray' }
         },
         deliveryStatus: {
           NOT_SHIPPED: { text: '미배송', color: 'red' },
           SHIPPING: { text: '배송중', color: 'blue' },
-          DELIVERED: { text: '배송완료', color: 'green' }
+          DELIVERED: { text: '배송완료', color: 'green' },
+          READY_FOR_PICKUP: { text: '픽업대기', color: 'orange' },
+          PICKED_UP: { text: '픽업완료', color: 'green' }
+        },
+        orderType: {
+          DELIVERY: { text: '배송', color: 'blue' },
+          PICKUP: { text: '픽업', color: 'green' },
+          COUNSEL: { text: '상담', color: 'orange' }
         },
         paymentStatus: {
           PAID: { text: '결제완료', color: 'blue' },
@@ -1000,11 +1012,11 @@
               <thead>
                 <tr>
                   <th>주문번호/일시</th>
+                  <th>유형</th>
                   <th>주문자 정보</th>
                   <th>결제금액</th>
-                  <th>결제상태</th>
-                  <th>배송상태</th>
-                  <th>배송처리</th>
+                  <th>상태</th>
+                  <th>처리</th>
                 </tr>
               </thead>
               <tbody>
@@ -1014,25 +1026,59 @@
                       <div class="list-title">${h(order.order_number)}</div>
                       <div class="list-meta">${h(formatDate(order.created_at))}</div>
                     </td>
+                    <td>${badge('orderType', order.order_type || 'DELIVERY')}</td>
                     <td>
-                      <div class="list-title">${h(order.customer_name || order.receiver_name || '-')}</div>
-                      <div class="list-meta">${h(order.customer_phone || '')}</div>
+                      <div class="list-title">${h(order.customer_name || order.contact_name || order.receiver_name || '-')}</div>
+                      <div class="list-meta">${h(orderDetailMeta(order))}</div>
                     </td>
-                    <td class="list-value" style="text-align:left;">${money(order.final_amount)}</td>
-                    <td>${badge('paymentStatus', order.payment_status)}</td>
-                    <td>${badge('deliveryStatus', order.delivery_status)}</td>
+                    <td class="list-value" style="text-align:left;">${order.order_type === 'COUNSEL' ? '상담예약' : money(order.final_amount)}</td>
                     <td>
-                      <div class="ship-grid">
-                        <input id="courier-${order.id}" class="form-control" placeholder="택배사" value="${h(order.courier || 'CJ대한통운')}" />
-                        <input id="tracking-${order.id}" class="form-control" placeholder="송장번호" value="${h(order.tracking_number || '')}" />
-                        <button class="btn btn-outline btn-sm" type="button" onclick="ship(${Number(order.id)})">배송중</button>
-                        <button class="btn btn-primary btn-sm" type="button" onclick="deliver(${Number(order.id)})">배송완료</button>
-                      </div>
+                      ${badge('orderStatus', order.order_status)}
+                      ${order.order_type === 'DELIVERY' || !order.order_type ? `<div style="margin-top:6px;">${badge('deliveryStatus', order.delivery_status)}</div>` : ''}
                     </td>
+                    <td>${renderOrderActions(order)}</td>
                   </tr>
                 `).join('')}
               </tbody>
             </table>
+          </div>
+        `;
+      }
+
+      function orderDetailMeta(order) {
+        if (order.order_type === 'COUNSEL') {
+          return `${order.contact_phone || order.customer_phone || ''} · 희망 ${order.preferred_at || '-'}${order.memo ? ` · ${order.memo}` : ''}`;
+        }
+        if (order.order_type === 'PICKUP') {
+          return `${order.contact_phone || order.customer_phone || ''} · 픽업 ${order.preferred_at || '-'}`;
+        }
+        return `${order.customer_phone || ''} · ${order.address || ''}`.trim();
+      }
+
+      function renderOrderActions(order) {
+        const type = order.order_type || 'DELIVERY';
+        if (type === 'PICKUP') {
+          return `
+            <div class="inline-actions">
+              <button class="btn btn-outline btn-sm" type="button" onclick="updateOrderStatus(${Number(order.id)}, 'READY_FOR_PICKUP', 'READY_FOR_PICKUP')">픽업준비</button>
+              <button class="btn btn-primary btn-sm" type="button" onclick="updateOrderStatus(${Number(order.id)}, 'PICKED_UP', 'PICKED_UP')">수령완료</button>
+            </div>
+          `;
+        }
+        if (type === 'COUNSEL') {
+          return `
+            <div class="inline-actions">
+              <button class="btn btn-outline btn-sm" type="button" onclick="updateOrderStatus(${Number(order.id)}, 'CONFIRMED')">상담확정</button>
+              <button class="btn btn-primary btn-sm" type="button" onclick="updateOrderStatus(${Number(order.id)}, 'COMPLETED')">상담완료</button>
+            </div>
+          `;
+        }
+        return `
+          <div class="ship-grid">
+            <input id="courier-${order.id}" class="form-control" placeholder="택배사" value="${h(order.courier || 'CJ대한통운')}" />
+            <input id="tracking-${order.id}" class="form-control" placeholder="송장번호" value="${h(order.tracking_number || '')}" />
+            <button class="btn btn-outline btn-sm" type="button" onclick="ship(${Number(order.id)})">배송중</button>
+            <button class="btn btn-primary btn-sm" type="button" onclick="deliver(${Number(order.id)})">배송완료</button>
           </div>
         `;
       }
@@ -1133,6 +1179,22 @@
         try {
           await api.request(`/products/${id}`, { method: 'DELETE' });
           showToast('상품이 숨김 처리되었습니다.');
+          loadOwner();
+        } catch (error) {
+          showToast(error.message);
+        }
+      }
+
+      async function updateOrderStatus(id, orderStatus, deliveryStatus) {
+        try {
+          await api.request(`/orders/${id}/status`, {
+            method: 'PATCH',
+            body: {
+              order_status: orderStatus,
+              delivery_status: deliveryStatus || undefined
+            }
+          });
+          showToast('상태가 변경되었습니다.');
           loadOwner();
         } catch (error) {
           showToast(error.message);

@@ -13,9 +13,21 @@ if (!fs.existsSync(dataDir)) {
 const db = new Database(dbPath);
 db.pragma('foreign_keys = ON');
 
+function addColumnIfMissing(table, column, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (columns.some((col) => col.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
 function migrate() {
   const schema = fs.readFileSync(schemaPath, 'utf8');
   db.exec(schema);
+
+  addColumnIfMissing('orders', 'order_type', "TEXT NOT NULL DEFAULT 'DELIVERY'");
+  addColumnIfMissing('orders', 'preferred_at', 'TEXT');
+  addColumnIfMissing('orders', 'memo', 'TEXT');
+  addColumnIfMissing('orders', 'contact_name', 'TEXT');
+  addColumnIfMissing('orders', 'contact_phone', 'TEXT');
 }
 
 function getOne(sql, params = {}) {
