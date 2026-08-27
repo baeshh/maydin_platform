@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>MAYDIN — 약국 전용 프라이빗 웰니스 몰</title>
+    <title>메이딘 스토어 — 약국 전용 프라이빗 웰니스 몰</title>
     <link
       rel="stylesheet"
       as="style"
@@ -90,9 +90,9 @@
       }
 
       .logo {
-        font-size: 21px;
+        font-size: 18px;
         font-weight: 800;
-        letter-spacing: 0.08em;
+        letter-spacing: -0.03em;
       }
 
       .top-cta {
@@ -865,30 +865,61 @@
       }
 
       .footer-inner {
-        align-items: center;
+        display: grid;
+        gap: 12px;
+      }
+
+      .footer-main {
+        align-items: flex-start;
         display: flex;
         flex-wrap: wrap;
-        gap: 12px 24px;
+        gap: 14px 28px;
         justify-content: space-between;
       }
 
       .footer-brand {
-        font-size: 13px;
+        color: #fff;
+        font-size: 14px;
         font-weight: 800;
-        letter-spacing: 0.08em;
+        letter-spacing: -0.02em;
+        margin-bottom: 8px;
+      }
+
+      .footer-info {
+        color: rgba(255, 255, 255, 0.55);
+        display: flex;
+        flex-wrap: wrap;
+        font-size: 12px;
+        gap: 4px 0;
+        line-height: 1.55;
+      }
+
+      .footer-info span + span::before {
+        color: rgba(255, 255, 255, 0.22);
+        content: "·";
+        margin: 0 8px;
+      }
+
+      .footer-info a {
+        color: rgba(255, 255, 255, 0.72);
+      }
+
+      .footer-info a:hover {
+        color: #93c5fd;
       }
 
       .footer-links {
+        align-items: center;
         display: flex;
         flex-wrap: wrap;
-        gap: 8px 16px;
+        gap: 8px 14px;
       }
 
       .footer-links a,
       .footer-links button {
         background: none;
         border: 0;
-        color: rgba(255, 255, 255, 0.62);
+        color: rgba(255, 255, 255, 0.6);
         cursor: pointer;
         font-size: 12px;
         font-weight: 600;
@@ -900,9 +931,16 @@
         color: #93c5fd;
       }
 
+      .footer-mall {
+        color: #93c5fd !important;
+        font-weight: 800 !important;
+      }
+
       .footer-copy {
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
         color: rgba(255, 255, 255, 0.35);
         font-size: 11px;
+        padding-top: 12px;
       }
 
       #message {
@@ -1009,7 +1047,7 @@
   <body>
     <header class="topbar" id="topbar">
       <div class="topbar-inner">
-        <a class="logo" href="/">MAYDIN</a>
+        <a class="logo" href="/">메이딘 스토어</a>
         <a class="top-cta" href="/join.html?pharmacyCode=A001">데모 시작하기</a>
       </div>
     </header>
@@ -1297,16 +1335,26 @@
     <footer class="site-footer">
       <div class="wrap">
         <div class="footer-inner">
-          <div class="footer-brand">MAYDIN</div>
-          <div class="footer-links">
-            <a href="/admin.html">Admin</a>
-            <a href="/owner.html">운영자</a>
-            <a href="/join.html?pharmacyCode=A001">QR 가입</a>
-            <a href="/store.html?pharmacyCode=A001">쇼핑몰</a>
-            <button id="health" type="button">Health</button>
-            <span id="message"></span>
+          <div class="footer-main">
+            <div>
+              <div class="footer-brand">메이딘 스토어</div>
+              <div class="footer-info">
+                <span>대표 배승환·신형상</span>
+                <span><a href="tel:01022906778">010-2290-6778</a></span>
+                <span><a href="mailto:baesh6778@gmail.com">baesh6778@gmail.com</a></span>
+              </div>
+            </div>
+            <div class="footer-links">
+              <a class="footer-mall" href="https://maydin.co.kr/" target="_blank" rel="noopener noreferrer">메이딘 자사몰</a>
+              <a href="/admin.html">Admin</a>
+              <a href="/owner.html">운영자</a>
+              <a href="/join.html?pharmacyCode=A001">QR 가입</a>
+              <a href="/store.html?pharmacyCode=A001">쇼핑몰</a>
+              <button id="health" type="button">Health</button>
+              <span id="message"></span>
+            </div>
           </div>
-          <div class="footer-copy">© MAYDIN</div>
+          <div class="footer-copy">© 메이딘 스토어</div>
         </div>
       </div>
     </footer>
