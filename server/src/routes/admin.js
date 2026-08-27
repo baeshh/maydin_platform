@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const { getAll, getOne, run, transaction } = require('../db');
@@ -136,6 +138,86 @@ router.patch('/pharmacies/:id/status', (req, res) => {
     status
   });
   res.json({ pharmacy: getOne('SELECT * FROM pharmacies WHERE id = @id', { id: Number(req.params.id) }) });
+});
+
+router.get('/inquiries', (req, res) => {
+  const inquiries = getAll(
+    `SELECT *
+     FROM partnership_inquiries
+     ORDER BY
+       CASE status WHEN 'NEW' THEN 0 WHEN 'IN_PROGRESS' THEN 1 ELSE 2 END,
+       id DESC`
+  );
+  const counts = getOne(
+    `SELECT
+      COUNT(*) AS total_count,
+      SUM(CASE WHEN status = 'NEW' THEN 1 ELSE 0 END) AS new_count,
+      SUM(CASE WHEN status = 'IN_PROGRESS' THEN 1 ELSE 0 END) AS in_progress_count,
+      SUM(CASE WHEN status = 'DONE' THEN 1 ELSE 0 END) AS done_count
+     FROM partnership_inquiries`
+  );
+  res.json({ inquiries, counts });
+});
+
+router.patch('/inquiries/:id', (req, res) => {
+  const id = Number(req.params.id);
+  const inquiry = getOne('SELECT * FROM partnership_inquiries WHERE id = @id', { id });
+  if (!inquiry) return res.status(404).json({ message: '문의를 찾을 수 없습니다.' });
+
+  const status = req.body.status ? String(req.body.status) : inquiry.status;
+  const allowed = new Set(['NEW', 'IN_PROGRESS', 'DONE']);
+  if (!allowed.has(status)) {
+    return res.status(400).json({ message: '지원하지 않는 상태입니다.' });
+  }
+
+  const adminNote =
+    req.body.admin_note !== undefined ? String(req.body.admin_note || '').trim() : inquiry.admin_note;
+
+  run(
+    `UPDATE partnership_inquiries
+     SET status = @status,
+         admin_note = @admin_note,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE id = @id`,
+    { id, status, admin_note: adminNote }
+  );
+
+  res.json({ inquiry: getOne('SELECT * FROM partnership_inquiries WHERE id = @id', { id }) });
+});
+
+router.get('/inquiries/:id/license', (req, res) => {
+  const id = Number(req.params.id);
+  const inquiry = getOne('SELECT * FROM partnership_inquiries WHERE id = @id', { id });
+  if (!inquiry || !inquiry.license_file_path) {
+    return res.status(404).json({ message: '등록증 파일을 찾을 수 없습니다.' });
+  }
+
+  const absolutePath = path.join(__dirname, '../..', inquiry.license_file_path);
+  if (!fs.existsSync(absolutePath)) {
+    return res.status(404).json({ message: '등록증 파일이 존재하지 않습니다.' });
+  }
+
+  res.download(absolutePath, inquiry.license_file_name || path.basename(absolutePath));
+});
+
+router.delete('/inquiries/:id', (req, res) => {
+  const id = Number(req.params.id);
+  const inquiry = getOne('SELECT * FROM partnership_inquiries WHERE id = @id', { id });
+  if (!inquiry) return res.status(404).json({ message: '문의를 찾을 수 없습니다.' });
+
+  if (inquiry.license_file_path) {
+    const absolutePath = path.join(__dirname, '../..', inquiry.license_file_path);
+    if (fs.existsSync(absolutePath)) {
+      try {
+        fs.unlinkSync(absolutePath);
+      } catch (error) {
+        console.error('Failed to delete license file:', error);
+      }
+    }
+  }
+
+  run('DELETE FROM partnership_inquiries WHERE id = @id', { id });
+  res.json({ ok: true, id });
 });
 
 module.exports = router;

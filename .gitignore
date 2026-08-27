@@ -5,6 +5,7 @@ node_modules/
 
 # Runtime data
 server/data/
+server/uploads/
 *.db
 *.sqlite
 *.sqlite3

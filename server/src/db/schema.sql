@@ -216,7 +216,24 @@ CREATE TABLE IF NOT EXISTS admin_logs (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS partnership_inquiries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_name TEXT NOT NULL,
+  contact_name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  email TEXT NOT NULL,
+  license_number TEXT NOT NULL DEFAULT '',
+  license_file_name TEXT,
+  license_file_path TEXT,
+  message TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'NEW',
+  admin_note TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_users_role_pharmacy ON users(role, pharmacy_id);
 CREATE INDEX IF NOT EXISTS idx_products_pharmacy ON products(pharmacy_id);
 CREATE INDEX IF NOT EXISTS idx_orders_pharmacy ON orders(pharmacy_id);
 CREATE INDEX IF NOT EXISTS idx_carts_user ON carts(user_id, pharmacy_id);
+CREATE INDEX IF NOT EXISTS idx_partnership_inquiries_status ON partnership_inquiries(status, id DESC);

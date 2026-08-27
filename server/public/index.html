@@ -95,6 +95,23 @@
         letter-spacing: -0.03em;
       }
 
+      .topbar-actions {
+        align-items: center;
+        display: flex;
+        gap: 10px;
+      }
+
+      .top-link {
+        color: var(--text);
+        font-size: 14px;
+        font-weight: 700;
+        padding: 10px 12px;
+      }
+
+      .top-link:hover {
+        color: var(--blue);
+      }
+
       .top-cta {
         background: linear-gradient(135deg, #3b7bff, #1d4ed8);
         border-radius: 999px;
@@ -110,6 +127,153 @@
       .top-cta:hover {
         box-shadow: 0 14px 28px rgba(47, 107, 255, 0.35);
         transform: translateY(-1px);
+      }
+
+      .inquiry-shell {
+        display: grid;
+        gap: 24px;
+        margin-top: 40px;
+      }
+
+      @media (min-width: 900px) {
+        .inquiry-shell {
+          align-items: start;
+          grid-template-columns: 0.9fr 1.1fr;
+          gap: 32px;
+        }
+      }
+
+      .inquiry-contact {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 28px;
+        color: var(--text);
+        padding: 28px 24px;
+      }
+
+      .inquiry-contact h3 {
+        font-size: 22px;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+        margin-bottom: 12px;
+      }
+
+      .inquiry-contact p {
+        color: var(--sub);
+        font-size: 15px;
+        line-height: 1.7;
+        margin-bottom: 22px;
+      }
+
+      .contact-actions {
+        display: grid;
+        gap: 10px;
+      }
+
+      .contact-actions a {
+        align-items: center;
+        background: var(--blue-soft);
+        border-radius: 16px;
+        color: var(--blue);
+        display: flex;
+        font-size: 15px;
+        font-weight: 800;
+        justify-content: space-between;
+        padding: 16px 18px;
+        transition: transform 0.2s ease, background 0.2s ease;
+      }
+
+      .contact-actions a:hover {
+        background: #dbeafe;
+        transform: translateY(-1px);
+      }
+
+      .inquiry-form {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 28px;
+        box-shadow: 0 18px 40px rgba(12, 27, 58, 0.05);
+        color: var(--text);
+        padding: 28px 24px;
+      }
+
+      .inquiry-form h3 {
+        font-size: 20px;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+        margin-bottom: 18px;
+      }
+
+      .inquiry-form label {
+        display: grid;
+        gap: 6px;
+        font-size: 13px;
+        font-weight: 700;
+        margin-bottom: 12px;
+      }
+
+      .inquiry-form input,
+      .inquiry-form textarea {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        font: inherit;
+        padding: 12px 14px;
+        width: 100%;
+      }
+
+      .inquiry-form textarea {
+        min-height: 120px;
+        resize: vertical;
+      }
+
+      .inquiry-form button {
+        background: linear-gradient(135deg, #3b7bff, #1d4ed8);
+        border: 0;
+        border-radius: 14px;
+        box-shadow: 0 12px 28px rgba(29, 78, 216, 0.22);
+        color: #fff;
+        cursor: pointer;
+        font-size: 15px;
+        font-weight: 800;
+        margin-top: 6px;
+        padding: 14px 18px;
+        width: 100%;
+      }
+
+      .inquiry-form .form-msg {
+        color: var(--sub);
+        font-size: 13px;
+        margin-top: 12px;
+        min-height: 1.2em;
+      }
+
+      .inquiry-form .form-msg.ok {
+        color: #059669;
+      }
+
+      .inquiry-form .form-msg.err {
+        color: #dc2626;
+      }
+
+      #inquiry {
+        display: none;
+      }
+
+      #inquiry.is-open {
+        display: block;
+        animation: fadeUp 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+
+      .inquiry-close {
+        background: rgba(255, 255, 255, 0.12);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 999px;
+        color: #fff;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 700;
+        margin-top: 18px;
+        padding: 10px 16px;
       }
 
       /* Hero */
@@ -1048,7 +1212,9 @@
     <header class="topbar" id="topbar">
       <div class="topbar-inner">
         <a class="logo" href="/">메이딘 스토어</a>
-        <a class="top-cta" href="/join.html?pharmacyCode=A001">데모 시작하기</a>
+        <div class="topbar-actions">
+          <a class="top-cta js-open-inquiry" href="#inquiry">입점 상담 신청</a>
+        </div>
       </div>
     </header>
 
@@ -1069,8 +1235,8 @@
               QR 코드 하나로 우리 약국만의 전용 온라인 케어 공간을 시작하세요.
             </p>
             <div class="hero-actions reveal reveal-delay-3">
-              <a class="btn-primary" href="/join.html?pharmacyCode=A001">고객 경험 데모 보기</a>
-              <a class="btn-secondary" href="/owner.html">약국 관리자 데모 보기</a>
+              <a class="btn-primary js-open-inquiry" href="#inquiry">입점 문의하기</a>
+              <a class="btn-secondary" href="/join.html?pharmacyCode=A001">고객 경험 데모 보기</a>
             </div>
             <div class="trust-row reveal reveal-delay-3">
               <span>초대형 Closed Mall</span>
@@ -1314,6 +1480,50 @@
       </div>
     </section>
 
+    <section class="block bg-blue" id="inquiry" hidden>
+      <div class="wrap">
+        <p class="section-label">Partnership</p>
+        <h2 class="section-title">
+          약국 입점 문의,<br />
+          <em>지금 바로</em> 남겨주세요
+        </h2>
+
+        <div class="inquiry-shell">
+          <div class="inquiry-contact">
+            <h3>바로 연락하기</h3>
+            <p>
+              입점 상담은 평일 기준 빠르게 확인합니다.
+              전화 연결 또는 메일 작성으로 바로 문의하실 수 있습니다.
+            </p>
+            <div class="contact-actions">
+              <a href="tel:01022906778"><span>전화 문의</span><strong>010-2290-6778</strong></a>
+              <a href="mailto:baesh6778@gmail.com?subject=%5B%EC%9E%85%EC%A0%90%20%EB%AC%B8%EC%9D%98%5D%20%EB%A9%94%EC%9D%B4%EB%94%98%20%EC%8A%A4%ED%86%A0%EC%96%B4&body=%EC%95%BD%EA%B5%AD%EB%AA%85%3A%0A%EB%8B%B4%EB%8B%B9%EC%9E%90%3A%0A%EC%97%B0%EB%9D%BD%EC%B2%98%3A%0A%EB%AC%B8%EC%9D%98%20%EB%82%B4%EC%9A%A9%3A%0A"><span>이메일 문의</span><strong>baesh6778@gmail.com</strong></a>
+            </div>
+          </div>
+
+          <div class="inquiry-form">
+            <h3>입점 문의 남기기</h3>
+            <form id="inquiryForm">
+              <label>약국명 <input name="pharmacy_name" required placeholder="예: OO약국" /></label>
+              <label>담당자명 <input name="contact_name" required placeholder="예: 홍길동" /></label>
+              <label>연락처 <input name="phone" required placeholder="010-0000-0000" /></label>
+              <label>이메일 <input name="email" type="email" required placeholder="owner@pharmacy.kr" /></label>
+              <label>약사 면허번호 <input name="license_number" required placeholder="예: 12345" /></label>
+              <label>
+                약사 등록증 업로드
+                <input id="licenseFile" name="license_file" type="file" accept=".jpg,.jpeg,.png,.webp,.pdf,image/*,application/pdf" required />
+              </label>
+              <p class="form-msg" style="margin-top:-4px; margin-bottom:12px;">JPG, PNG, WEBP, PDF / 최대 5MB</p>
+              <label>문의 내용 <textarea name="message" required placeholder="입점 희망 지역, 관심 제품, 희망 일정 등을 적어주세요."></textarea></label>
+              <button type="submit">입점 문의 보내기</button>
+              <p class="form-msg" id="inquiryMsg"></p>
+            </form>
+          </div>
+        </div>
+        <button class="inquiry-close" id="closeInquiry" type="button">닫기</button>
+      </div>
+    </section>
+
     <section class="closing bg-white">
       <div class="wrap">
         <p class="section-label reveal">Start</p>
@@ -1326,8 +1536,8 @@
           메이딘의 핵심 흐름을 데모로 미리 확인하실 수 있습니다.
         </p>
         <div class="hero-actions reveal">
-          <a class="btn-primary" href="/join.html?pharmacyCode=A001">고객 경험 데모 보기</a>
-          <a class="btn-secondary" href="/owner.html">약국 관리자 데모 보기</a>
+          <a class="btn-primary js-open-inquiry" href="#inquiry">입점 문의하기</a>
+          <a class="btn-secondary" href="/join.html?pharmacyCode=A001">고객 경험 데모 보기</a>
         </div>
       </div>
     </section>
@@ -1346,12 +1556,9 @@
             </div>
             <div class="footer-links">
               <a class="footer-mall" href="https://maydin.co.kr/" target="_blank" rel="noopener noreferrer">메이딘 자사몰</a>
-              <a href="/admin.html">Admin</a>
               <a href="/owner.html">운영자</a>
               <a href="/join.html?pharmacyCode=A001">QR 가입</a>
               <a href="/store.html?pharmacyCode=A001">쇼핑몰</a>
-              <button id="health" type="button">Health</button>
-              <span id="message"></span>
             </div>
           </div>
           <div class="footer-copy">© 메이딘 스토어</div>
@@ -1361,12 +1568,69 @@
 
     <script src="/app.js"></script>
     <script>
-      $("#health").addEventListener("click", async () => {
+      const inquirySection = $("#inquiry");
+
+      function openInquiry(event) {
+        if (event) event.preventDefault();
+        inquirySection.hidden = false;
+        inquirySection.classList.add("is-open");
+        inquirySection.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+
+      function closeInquiry() {
+        inquirySection.classList.remove("is-open");
+        inquirySection.hidden = true;
+        if (location.hash === "#inquiry") {
+          history.replaceState(null, "", location.pathname + location.search);
+        }
+      }
+
+      document.querySelectorAll(".js-open-inquiry").forEach((el) => {
+        el.addEventListener("click", openInquiry);
+      });
+      $("#closeInquiry").addEventListener("click", closeInquiry);
+
+      if (location.hash === "#inquiry") {
+        openInquiry();
+      }
+
+      $("#inquiryForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const msg = $("#inquiryMsg");
+        msg.className = "form-msg";
+        msg.textContent = "전송 중...";
         try {
-          const data = await api.request("/health");
-          message(JSON.stringify(data, null, 2));
+          const form = serializeForm(event.target);
+          const fileInput = $("#licenseFile");
+          const file = fileInput?.files?.[0];
+          if (!file) throw new Error("약사 등록증 파일을 선택해 주세요.");
+
+          const licenseFile = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              resolve({
+                name: file.name,
+                mime: file.type || "application/octet-stream",
+                data: String(reader.result || "")
+              });
+            };
+            reader.onerror = () => reject(new Error("파일 읽기에 실패했습니다."));
+            reader.readAsDataURL(file);
+          });
+
+          await api.request("/inquiries", {
+            method: "POST",
+            body: {
+              ...form,
+              license_file: licenseFile
+            }
+          });
+          msg.className = "form-msg ok";
+          msg.textContent = "입점 문의가 접수되었습니다. 확인 후 연락드리겠습니다.";
+          event.target.reset();
         } catch (error) {
-          message(error.message);
+          msg.className = "form-msg err";
+          msg.textContent = error.message;
         }
       });
 

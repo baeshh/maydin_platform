@@ -3,89 +3,758 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Maydin Admin</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <title>메이딘 스토어 Admin</title>
+    <link
+      rel="stylesheet"
+      as="style"
+      crossorigin
+      href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css"
+    />
+    <style>
+      :root {
+        --blue: #3182f6;
+        --blue-deep: #1b64da;
+        --blue-soft: #e8f3ff;
+        --bg: #f2f4f6;
+        --surface: #fff;
+        --text: #191f28;
+        --sub: #4e5968;
+        --muted: #8b95a1;
+        --line: #e5e8eb;
+        --green: #00a645;
+        --orange: #f59f00;
+        --red: #f04452;
+        --sidebar: 240px;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+        font-family: "Pretendard", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+        word-break: keep-all;
+      }
+
+      a {
+        color: var(--blue);
+        text-decoration: none;
+      }
+
+      button,
+      input,
+      select,
+      textarea {
+        font: inherit;
+      }
+
+      body.locked .app-shell,
+      body:not(.authed) .app-shell {
+        display: none !important;
+      }
+
+      body.authed .login-screen,
+      body:not(.locked) .login-screen {
+        display: none !important;
+      }
+
+      body.locked .login-screen,
+      body:not(.authed) .login-screen {
+        display: flex !important;
+      }
+
+      .login-screen {
+        align-items: center;
+        background:
+          radial-gradient(circle at 20% 20%, rgba(49, 130, 246, 0.16), transparent 34%),
+          linear-gradient(160deg, #f7f9fc, #eef3fb);
+        display: flex;
+        justify-content: center;
+        min-height: 100vh;
+        padding: 24px;
+      }
+
+      .login-card {
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.8);
+        border-radius: 28px;
+        box-shadow: 0 24px 60px rgba(12, 27, 58, 0.08);
+        max-width: 420px;
+        padding: 36px 28px;
+        width: 100%;
+      }
+
+      .login-card .eyebrow {
+        color: var(--blue);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        margin-bottom: 10px;
+      }
+
+      .login-card h1 {
+        font-size: 28px;
+        font-weight: 800;
+        letter-spacing: -0.04em;
+        margin-bottom: 8px;
+      }
+
+      .login-card .desc {
+        color: var(--sub);
+        font-size: 14px;
+        line-height: 1.6;
+        margin-bottom: 24px;
+      }
+
+      .app-shell {
+        display: grid;
+        grid-template-columns: var(--sidebar) 1fr;
+        min-height: 100vh;
+      }
+
+      .sidebar {
+        background: var(--surface);
+        border-right: 1px solid var(--line);
+        display: flex;
+        flex-direction: column;
+        position: sticky;
+        top: 0;
+        height: 100vh;
+      }
+
+      .sidebar-brand {
+        border-bottom: 1px solid var(--line);
+        padding: 22px 20px;
+      }
+
+      .sidebar-brand strong {
+        display: block;
+        font-size: 18px;
+        font-weight: 800;
+        letter-spacing: -0.03em;
+      }
+
+      .sidebar-brand span {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .nav {
+        display: grid;
+        gap: 6px;
+        padding: 16px 12px;
+      }
+
+      .nav a {
+        border-radius: 12px;
+        color: var(--sub);
+        font-size: 14px;
+        font-weight: 700;
+        padding: 12px 14px;
+      }
+
+      .nav a:hover,
+      .nav a.active {
+        background: var(--blue-soft);
+        color: var(--blue);
+      }
+
+      .sidebar-foot {
+        border-top: 1px solid var(--line);
+        margin-top: auto;
+        padding: 16px;
+      }
+
+      .content {
+        padding: 28px;
+      }
+
+      .page-header {
+        align-items: end;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        justify-content: space-between;
+        margin-bottom: 24px;
+      }
+
+      .page-header h1 {
+        font-size: 28px;
+        font-weight: 800;
+        letter-spacing: -0.04em;
+      }
+
+      .page-header p {
+        color: var(--sub);
+        font-size: 14px;
+        margin-top: 6px;
+      }
+
+      .header-actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .btn {
+        background: var(--blue);
+        border: 0;
+        border-radius: 12px;
+        color: #fff;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 800;
+        padding: 10px 14px;
+      }
+
+      .btn:hover {
+        background: var(--blue-deep);
+      }
+
+      .btn.secondary {
+        background: #fff;
+        border: 1px solid var(--line);
+        color: var(--text);
+      }
+
+      .btn.ghost {
+        background: var(--blue-soft);
+        color: var(--blue);
+      }
+
+      .btn.sm {
+        font-size: 12px;
+        padding: 8px 10px;
+      }
+
+      .stats {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        margin-bottom: 20px;
+      }
+
+      .stat-card {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        box-shadow: 0 10px 24px rgba(12, 27, 58, 0.03);
+        padding: 18px 16px;
+      }
+
+      .stat-card .label {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+        margin-bottom: 10px;
+      }
+
+      .stat-card .value {
+        font-size: 24px;
+        font-weight: 800;
+        letter-spacing: -0.04em;
+      }
+
+      .stat-card .hint {
+        color: var(--sub);
+        font-size: 12px;
+        margin-top: 8px;
+      }
+
+      .panel-grid {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: 1.1fr 0.9fr;
+        margin-bottom: 16px;
+      }
+
+      .panel {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        box-shadow: 0 12px 28px rgba(12, 27, 58, 0.03);
+        overflow: hidden;
+      }
+
+      .panel-head {
+        align-items: center;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        gap: 12px;
+        justify-content: space-between;
+        padding: 18px 20px;
+      }
+
+      .panel-head h2 {
+        font-size: 16px;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+      }
+
+      .panel-body {
+        padding: 18px 20px;
+      }
+
+      .badge {
+        border-radius: 999px;
+        display: inline-flex;
+        font-size: 11px;
+        font-weight: 800;
+        padding: 5px 10px;
+      }
+
+      .badge.blue {
+        background: var(--blue-soft);
+        color: var(--blue);
+      }
+
+      .badge.green {
+        background: #e8f8ef;
+        color: var(--green);
+      }
+
+      .badge.orange {
+        background: #fff4d6;
+        color: var(--orange);
+      }
+
+      .badge.gray {
+        background: #f2f4f6;
+        color: var(--muted);
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        font-size: 12px;
+        font-weight: 700;
+        margin-bottom: 12px;
+      }
+
+      input,
+      textarea {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 11px 12px;
+        width: 100%;
+      }
+
+      .form-grid {
+        display: grid;
+        gap: 0 12px;
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .form-grid label.full {
+        grid-column: 1 / -1;
+      }
+
+      .table-wrap {
+        overflow-x: auto;
+      }
+
+      table {
+        border-collapse: collapse;
+        width: 100%;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid #f2f4f6;
+        font-size: 13px;
+        padding: 12px 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+        white-space: nowrap;
+      }
+
+      .muted {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .empty {
+        color: var(--muted);
+        font-size: 14px;
+        padding: 28px 8px;
+        text-align: center;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .toast {
+        background: rgba(25, 31, 40, 0.94);
+        border-radius: 14px;
+        bottom: 24px;
+        color: #fff;
+        font-size: 13px;
+        font-weight: 700;
+        left: 50%;
+        max-width: 90vw;
+        opacity: 0;
+        padding: 12px 16px;
+        pointer-events: none;
+        position: fixed;
+        transform: translateX(-50%) translateY(10px);
+        transition: 0.2s ease;
+        z-index: 50;
+      }
+
+      .toast.show {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+
+      @media (max-width: 1100px) {
+        .stats {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .panel-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 860px) {
+        .app-shell {
+          grid-template-columns: 1fr;
+        }
+
+        .sidebar {
+          height: auto;
+          position: relative;
+        }
+
+        .content {
+          padding: 18px;
+        }
+
+        .form-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
   </head>
-  <body>
-    <header>
-      <div class="row">
+  <body class="locked">
+    <div class="login-screen" id="loginScreen">
+      <div class="login-card">
+        <p class="eyebrow">MAYDIN STORE</p>
         <h1>플랫폼 Admin</h1>
-        <button class="secondary" onclick="logout()">로그아웃</button>
-        <a href="/">홈</a>
-      </div>
-    </header>
-    <main>
-      <section class="card" id="loginCard">
-        <h2>Admin 로그인</h2>
+        <p class="desc">약국 입점, 운영 현황, 문의 관리를 한곳에서 확인합니다.</p>
         <form id="loginForm">
           <label>이메일 <input name="email" value="admin@maydin.kr" /></label>
           <label>비밀번호 <input name="password" type="password" value="admin1234" /></label>
-          <button>로그인</button>
+          <button class="btn" style="width: 100%; margin-top: 6px;">로그인</button>
         </form>
-      </section>
+      </div>
+    </div>
 
-      <section class="grid">
-        <article class="card">
-          <h2>전체 현황</h2>
-          <div id="summary"></div>
-        </article>
-        <article class="card">
-          <h2>약국 생성</h2>
-          <form id="pharmacyForm">
-            <label>약국 코드 <input name="pharmacy_code" value="B001" required /></label>
-            <label>약국명 <input name="pharmacy_name" value="B약국" required /></label>
-            <label>대표자명 <input name="owner_name" value="김대표" required /></label>
-            <label>사업자등록번호 <input name="business_number" value="222-22-22222" /></label>
-            <label>약국 전화번호 <input name="phone" value="02-2222-2222" /></label>
-            <label>주소 <input name="address" value="서울시 테스트구 2" /></label>
-            <label>쇼핑몰 주소 Slug <input name="store_slug" value="b-pharmacy" required /></label>
-            <label>운영자 이메일 <input name="owner_email" value="owner@bpharmacy.kr" required /></label>
-            <label>운영자 휴대폰 <input name="owner_phone" value="010-2222-3333" /></label>
-            <label>임시 비밀번호 <input name="owner_password" value="owner1234" /></label>
-            <label>수수료율 <input name="commission_rate" type="number" value="5" /></label>
-            <button>약국 생성</button>
-          </form>
-        </article>
-      </section>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <strong>메이딘 스토어</strong>
+          <span>Platform Admin</span>
+        </div>
+        <nav class="nav">
+          <a href="#overview" class="active">대시보드</a>
+          <a href="#inquiries">입점 문의</a>
+          <a href="#create">약국 생성</a>
+          <a href="#pharmacies">약국 목록</a>
+          <a href="/">랜딩 홈</a>
+        </nav>
+        <div class="sidebar-foot">
+          <button class="btn secondary" style="width: 100%;" onclick="adminLogout()">로그아웃</button>
+        </div>
+      </aside>
 
-      <section class="card">
-        <h2>약국 목록</h2>
-        <div id="pharmacies"></div>
-      </section>
-      <pre id="message" class="notice"></pre>
-    </main>
+      <main class="content">
+        <div class="page-header" id="overview">
+          <div>
+            <h1>운영 대시보드</h1>
+            <p>입점 문의와 약국 운영 지표를 한눈에 확인하세요.</p>
+          </div>
+          <div class="header-actions">
+            <a class="btn ghost" href="/#inquiry">입점 문의 페이지</a>
+            <a class="btn secondary" href="/store.html?pharmacyCode=A001">데모 스토어</a>
+          </div>
+        </div>
+
+        <section class="stats" id="summary"></section>
+
+        <section class="panel-grid">
+          <article class="panel" id="inquiries">
+            <div class="panel-head">
+              <h2>입점 문의</h2>
+              <span class="badge blue" id="inquiryCounts">신규 0건</span>
+            </div>
+            <div class="panel-body" id="inquiriesBody"></div>
+          </article>
+
+          <article class="panel" id="create">
+            <div class="panel-head">
+              <h2>약국 생성</h2>
+            </div>
+            <div class="panel-body">
+              <form id="pharmacyForm" class="form-grid">
+                <label>약국 코드 <input name="pharmacy_code" value="B001" required /></label>
+                <label>약국명 <input name="pharmacy_name" value="B약국" required /></label>
+                <label>대표자명 <input name="owner_name" value="김대표" required /></label>
+                <label>사업자등록번호 <input name="business_number" value="222-22-22222" /></label>
+                <label>약국 전화번호 <input name="phone" value="02-2222-2222" /></label>
+                <label>주소 <input name="address" value="서울시 테스트구 2" /></label>
+                <label>쇼핑몰 Slug <input name="store_slug" value="b-pharmacy" required /></label>
+                <label>수수료율 <input name="commission_rate" type="number" value="5" /></label>
+                <label>운영자 이메일 <input name="owner_email" value="owner@bpharmacy.kr" required /></label>
+                <label>운영자 휴대폰 <input name="owner_phone" value="010-2222-3333" /></label>
+                <label class="full">임시 비밀번호 <input name="owner_password" value="owner1234" /></label>
+                <label class="full"><button class="btn" type="submit" style="width: 100%;">약국 생성하기</button></label>
+              </form>
+            </div>
+          </article>
+        </section>
+
+        <section class="panel" id="pharmacies">
+          <div class="panel-head">
+            <h2>약국 목록</h2>
+          </div>
+          <div class="panel-body" id="pharmaciesBody"></div>
+        </section>
+      </main>
+    </div>
+
+    <div id="message" class="toast"></div>
+
     <script src="/app.js"></script>
     <script>
+      const inquiryStatusLabel = {
+        NEW: { text: '신규', color: 'blue' },
+        IN_PROGRESS: { text: '진행중', color: 'orange' },
+        DONE: { text: '완료', color: 'green' }
+      };
+
+      function toast(text) {
+        const target = $('#message');
+        target.textContent = text;
+        target.classList.add('show');
+        clearTimeout(window.__toastTimer);
+        window.__toastTimer = setTimeout(() => target.classList.remove('show'), 2400);
+      }
+
+      function lockAdmin() {
+        document.body.classList.add('locked');
+        document.body.classList.remove('authed');
+      }
+
+      function unlockAdmin() {
+        document.body.classList.remove('locked');
+        document.body.classList.add('authed');
+      }
+
+      function adminLogout() {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        lockAdmin();
+        toast('로그아웃되었습니다.');
+      }
+
+      function badge(status) {
+        const item = inquiryStatusLabel[status] || { text: status || '-', color: 'gray' };
+        return `<span class="badge ${item.color}">${item.text}</span>`;
+      }
+
       async function loadAdmin() {
+        const user = currentUser();
+        if (!user || user.role !== 'ADMIN') {
+          lockAdmin();
+          return;
+        }
+
         try {
           const summary = await api.request('/admin/summary');
+          unlockAdmin();
           $('#summary').innerHTML = `
-            <p>전체 약국: ${summary.totals.pharmacy_count}</p>
-            <p>활성 약국: ${summary.totals.active_pharmacy_count}</p>
-            <p>전체 고객: ${summary.totals.customer_count}</p>
-            <p>전체 주문: ${summary.totals.order_count}</p>
-            <p>전체 매출: ${money(summary.totals.total_sales)}</p>
+            <article class="stat-card">
+              <div class="label">전체 약국</div>
+              <div class="value">${Number(summary.totals.pharmacy_count || 0).toLocaleString()}</div>
+              <div class="hint">활성 ${Number(summary.totals.active_pharmacy_count || 0).toLocaleString()}곳</div>
+            </article>
+            <article class="stat-card">
+              <div class="label">전체 고객</div>
+              <div class="value">${Number(summary.totals.customer_count || 0).toLocaleString()}</div>
+              <div class="hint">가입 고객 수</div>
+            </article>
+            <article class="stat-card">
+              <div class="label">전체 주문</div>
+              <div class="value">${Number(summary.totals.order_count || 0).toLocaleString()}</div>
+              <div class="hint">누적 주문 건수</div>
+            </article>
+            <article class="stat-card">
+              <div class="label">전체 매출</div>
+              <div class="value">${money(summary.totals.total_sales)}</div>
+              <div class="hint">결제 완료 기준</div>
+            </article>
+            <article class="stat-card">
+              <div class="label">활성 약국</div>
+              <div class="value">${Number(summary.totals.active_pharmacy_count || 0).toLocaleString()}</div>
+              <div class="hint">운영 중 파트너</div>
+            </article>
           `;
 
+          const inquiryData = await api.request('/admin/inquiries');
+          $('#inquiryCounts').textContent =
+            `신규 ${Number(inquiryData.counts.new_count || 0)} · 진행 ${Number(inquiryData.counts.in_progress_count || 0)} · 완료 ${Number(inquiryData.counts.done_count || 0)}`;
+
+          $('#inquiriesBody').innerHTML = inquiryData.inquiries.length
+            ? `
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>접수</th>
+                      <th>약국/담당자</th>
+                      <th>연락</th>
+                      <th>약사 정보</th>
+                      <th>문의내용</th>
+                      <th>상태</th>
+                      <th>처리</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${inquiryData.inquiries.map((item) => `
+                      <tr>
+                        <td class="muted">${item.created_at || '-'}</td>
+                        <td>
+                          <strong>${item.pharmacy_name}</strong><br />
+                          <span class="muted">${item.contact_name}</span>
+                        </td>
+                        <td>
+                          <a href="tel:${item.phone}">${item.phone}</a><br />
+                          <a href="mailto:${item.email}">${item.email}</a>
+                        </td>
+                        <td>
+                          <div>면허번호 <strong>${item.license_number || '-'}</strong></div>
+                          ${item.license_file_path
+                            ? `<button class="btn secondary sm" type="button" style="margin-top:8px;" onclick="downloadLicense(${item.id}, '${String(item.license_file_name || 'license').replace(/'/g, "\\'")}')">등록증 보기</button>`
+                            : '<span class="muted">등록증 없음</span>'}
+                        </td>
+                        <td style="max-width:220px; white-space:pre-wrap;">${item.message}</td>
+                        <td>${badge(item.status)}</td>
+                        <td>
+                          <div class="actions">
+                            <button class="btn secondary sm" type="button" onclick="updateInquiry(${item.id}, 'IN_PROGRESS')">진행중</button>
+                            <button class="btn sm" type="button" onclick="updateInquiry(${item.id}, 'DONE')">완료</button>
+                            <button class="btn secondary sm" type="button" onclick="deleteInquiry(${item.id})">삭제</button>
+                          </div>
+                        </td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            `
+            : '<div class="empty">아직 입점 문의가 없습니다.</div>';
+
           const data = await api.request('/admin/pharmacies');
-          $('#pharmacies').innerHTML = `
-            <table>
-              <thead><tr><th>약국</th><th>코드</th><th>QR 가입 URL</th><th>고객/상품/주문</th><th>매출</th></tr></thead>
-              <tbody>
-                ${data.pharmacies.map((p) => `
-                  <tr>
-                    <td>${p.pharmacy_name}</td>
-                    <td>${p.pharmacy_code}</td>
-                    <td><a href="${p.qr_url}">${p.qr_url}</a><br />스캔 ${p.scan_count} / 가입 ${p.signup_count}</td>
-                    <td>${p.customer_count} / ${p.product_count} / ${p.order_count}</td>
-                    <td>${money(p.sales)}</td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          `;
+          $('#pharmaciesBody').innerHTML = data.pharmacies.length
+            ? `
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>약국</th>
+                      <th>코드</th>
+                      <th>QR 가입</th>
+                      <th>고객/상품/주문</th>
+                      <th>매출</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${data.pharmacies.map((p) => `
+                      <tr>
+                        <td><strong>${p.pharmacy_name}</strong></td>
+                        <td><span class="badge gray">${p.pharmacy_code}</span></td>
+                        <td>
+                          <a href="${p.qr_url}" target="_blank" rel="noreferrer">${p.qr_url}</a><br />
+                          <span class="muted">스캔 ${p.scan_count} · 가입 ${p.signup_count}</span>
+                        </td>
+                        <td>${p.customer_count} / ${p.product_count} / ${p.order_count}</td>
+                        <td><strong>${money(p.sales)}</strong></td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            `
+            : '<div class="empty">등록된 약국이 없습니다.</div>';
         } catch (error) {
-          message(error.message);
+          lockAdmin();
+          toast(error.message || '관리자 로그인이 필요합니다.');
+        }
+      }
+
+      async function updateInquiry(id, status) {
+        try {
+          await api.request(`/admin/inquiries/${id}`, {
+            method: 'PATCH',
+            body: { status }
+          });
+          toast(`문의 #${id} 상태를 변경했습니다.`);
+          loadAdmin();
+        } catch (error) {
+          toast(error.message);
+        }
+      }
+
+      async function deleteInquiry(id) {
+        if (!confirm(`문의 #${id}를 삭제할까요?`)) return;
+        try {
+          await api.request(`/admin/inquiries/${id}`, { method: 'DELETE' });
+          toast(`문의 #${id}를 삭제했습니다.`);
+          loadAdmin();
+        } catch (error) {
+          toast(error.message);
+        }
+      }
+
+      async function downloadLicense(id, fileName) {
+        try {
+          const token = localStorage.getItem('token');
+          const res = await fetch(`/api/admin/inquiries/${id}/license`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {}
+          });
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data.message || '등록증 다운로드에 실패했습니다.');
+          }
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = fileName || `license-${id}`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+        } catch (error) {
+          toast(error.message);
         }
       }
 
@@ -93,11 +762,19 @@
         event.preventDefault();
         try {
           const data = await api.login($('#loginForm').email.value, $('#loginForm').password.value);
+          if (data.user?.role !== 'ADMIN') {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            lockAdmin();
+            toast('관리자 계정으로만 로그인할 수 있습니다.');
+            return;
+          }
           saveSession(data);
-          message('로그인되었습니다.');
-          loadAdmin();
+          toast('로그인되었습니다.');
+          await loadAdmin();
         } catch (error) {
-          message(error.message);
+          lockAdmin();
+          toast(error.message);
         }
       });
 
@@ -108,14 +785,24 @@
             method: 'POST',
             body: serializeForm(event.target)
           });
-          message(`${data.pharmacy.pharmacy_name} 생성 완료`);
+          toast(`${data.pharmacy.pharmacy_name} 생성 완료`);
           loadAdmin();
         } catch (error) {
-          message(error.message);
+          toast(error.message);
         }
       });
 
-      if (currentUser()?.role === 'ADMIN') loadAdmin();
+      document.querySelectorAll('.nav a[href^="#"]').forEach((link) => {
+        link.addEventListener('click', () => {
+          document.querySelectorAll('.nav a').forEach((el) => el.classList.remove('active'));
+          link.classList.add('active');
+        });
+      });
+
+      lockAdmin();
+      if (currentUser()?.role === 'ADMIN') {
+        loadAdmin();
+      }
     </script>
   </body>
 </html>

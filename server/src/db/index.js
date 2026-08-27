@@ -28,6 +28,9 @@ function migrate() {
   addColumnIfMissing('orders', 'memo', 'TEXT');
   addColumnIfMissing('orders', 'contact_name', 'TEXT');
   addColumnIfMissing('orders', 'contact_phone', 'TEXT');
+  addColumnIfMissing('partnership_inquiries', 'license_number', "TEXT NOT NULL DEFAULT ''");
+  addColumnIfMissing('partnership_inquiries', 'license_file_name', 'TEXT');
+  addColumnIfMissing('partnership_inquiries', 'license_file_path', 'TEXT');
 }
 
 function getOne(sql, params = {}) {
