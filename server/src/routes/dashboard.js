@@ -29,7 +29,10 @@ router.get('/pharmacy', (req, res) => {
       (SELECT COUNT(*) FROM products
         WHERE pharmacy_id = @pharmacy_id AND status != 'HIDDEN'
           AND stock_quantity <= CASE WHEN COALESCE(safety_stock, 0) > 0 THEN safety_stock ELSE 5 END) AS low_stock_count,
-      (SELECT COUNT(*) FROM products WHERE pharmacy_id = @pharmacy_id AND status = 'SOLD_OUT') AS sold_out_count`,
+      (SELECT COUNT(*) FROM products WHERE pharmacy_id = @pharmacy_id AND status = 'SOLD_OUT') AS sold_out_count,
+      (SELECT COUNT(DISTINCT product_id) FROM product_lots
+        WHERE pharmacy_id = @pharmacy_id AND remaining_quantity > 0
+          AND expiry_date <= date('now', 'localtime', '+90 days')) AS expiry_alert_count`,
     { pharmacy_id: req.pharmacyId }
   );
 

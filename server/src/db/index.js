@@ -159,6 +159,27 @@ function migratePos(schema) {
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_point_ledger_customer ON point_ledger(customer_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_product_lots_product ON product_lots(product_id, expiry_date);
+    CREATE INDEX IF NOT EXISTS idx_product_lots_expiry ON product_lots(pharmacy_id, expiry_date) WHERE remaining_quantity > 0;
+
+    -- 재고가 줄면 로트 합계가 재고를 넘지 않도록 유통기한이 늦은 로트부터 남기고 나머지를 차감한다.
+    -- 로트 없이 들어온 재고(유통기한 미등록분)가 먼저 빠지고, 로트는 유통기한이 빠른 것부터 줄어든다.
+    CREATE TRIGGER IF NOT EXISTS trg_products_consume_lots
+    AFTER UPDATE OF stock_quantity ON products
+    WHEN NEW.stock_quantity < OLD.stock_quantity
+      AND (SELECT COALESCE(SUM(remaining_quantity), 0) FROM product_lots WHERE product_id = NEW.id) > NEW.stock_quantity
+    BEGIN
+      UPDATE product_lots
+      SET remaining_quantity = MAX(0, MIN(remaining_quantity, NEW.stock_quantity - (
+            SELECT COALESCE(SUM(l2.remaining_quantity), 0)
+            FROM product_lots l2
+            WHERE l2.product_id = product_lots.product_id
+              AND (l2.expiry_date > product_lots.expiry_date
+                   OR (l2.expiry_date = product_lots.expiry_date AND l2.id > product_lots.id))
+          ))),
+          updated_at = CURRENT_TIMESTAMP
+      WHERE product_id = NEW.id AND remaining_quantity > 0;
+    END;
     CREATE TRIGGER IF NOT EXISTS trg_customers_no_negative_points
     BEFORE UPDATE OF point_balance ON customers
     WHEN NEW.point_balance < 0

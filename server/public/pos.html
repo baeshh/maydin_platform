@@ -1577,7 +1577,7 @@
             api.request('/pos/inventory?filter=low')
           ]);
           setBadge('holdCount', holds.holds.length);
-          setBadge('stockAlertCount', inventory.alerts.low_count);
+          setBadge('stockAlertCount', stockAlertTotal(inventory.alerts));
           const pickupCount = document.getElementById('pickupCount');
           pickupCount.textContent = pickups.pickups.length;
           pickupCount.hidden = pickups.pickups.length === 0;
@@ -1954,9 +1954,29 @@
           line.product = product;
         } else {
           state.cart.push({ product, quantity: 1 });
+          if (product.nearest_expiry && daysLeft(product.nearest_expiry) < 0) {
+            toast(`${product.product_name}: 유통기한(${product.nearest_expiry})이 지난 재고가 있습니다. 상품의 유통기한을 확인하세요.`, 'error');
+          }
         }
         renderCart();
         focusSearch();
+      }
+
+      function daysLeft(date) {
+        const today = new Date(`${state.ctx?.today || new Date().toISOString().slice(0, 10)}T00:00:00`);
+        return Math.round((new Date(`${date}T00:00:00`) - today) / 86400000);
+      }
+
+      function expiryBadge(date, alertDays = 90) {
+        if (!date) return '';
+        const days = daysLeft(date);
+        if (days < 0) return `<span class="badge red">기한 경과 ${h(date)}</span>`;
+        if (days <= alertDays) return `<span class="badge orange">D-${days} · ${h(date)}</span>`;
+        return `<span class="badge gray">${h(date)}</span>`;
+      }
+
+      function stockAlertTotal(alerts) {
+        return (alerts?.low_count || 0) + (alerts?.expired_count || 0);
       }
 
       function changeQty(productId, delta) {
@@ -3504,13 +3524,15 @@
           const data = await api.request(`/pos/inventory?filter=${state.inventory.filter}&query=${encodeURIComponent(query)}`);
           cacheProducts(data.products);
           window.__inventory = data.products;
-          setBadge('stockAlertCount', data.alerts.low_count);
+          setBadge('stockAlertCount', stockAlertTotal(data.alerts));
           const filters = document.getElementById('invFilters');
           if (filters) {
             filters.innerHTML = [
               ['all', '전체'],
               ['low', `부족 · 품절 ${data.alerts.low_count}`],
-              ['out', `품절 ${data.alerts.out_count}`]
+              ['out', `품절 ${data.alerts.out_count}`],
+              ['expiring', `유통기한 임박 ${data.alerts.expiring_count}`],
+              ['expired', `기한 경과 ${data.alerts.expired_count}`]
             ]
               .map(([key, label]) => `<button class="chip ${state.inventory.filter === key ? 'active' : ''}" type="button" onclick="setInventoryFilter('${key}')">${label}</button>`)
               .join('');
@@ -3524,10 +3546,10 @@
                   .map(
                     (p) => `
                     <tr class="clickable" onclick="selectInventoryProduct(${p.id})" style="${state.inventory.selectedId === p.id ? 'background: var(--blue-soft);' : ''}">
-                      <td><div style="font-weight: 700;">${h(p.product_name)} ${p.product_type === 'OTC' ? '<span class="badge orange">일반의약품</span>' : ''}</div><div class="muted" style="font-size: 12px;">${p.barcode ? h(p.barcode) : '바코드 없음'}</div></td>
+                      <td><div style="font-weight: 700;">${h(p.product_name)} ${p.product_type === 'OTC' ? '<span class="badge orange">일반의약품</span>' : ''}</div><div class="muted" style="font-size: 12px;">${p.barcode ? h(p.barcode) : '바코드 없음'}${p.nearest_expiry ? ` · ${expiryBadge(p.nearest_expiry, data.alerts.expiry_alert_days)}` : ''}</div></td>
                       <td class="num" style="font-weight: 900; ${p.is_low ? 'color: var(--danger);' : ''}">${p.stock_quantity}</td>
                       <td class="num">${p.safety_stock || '-'}</td>
-                      <td>${p.stock_quantity <= 0 ? '<span class="badge red">품절</span>' : p.is_low ? '<span class="badge orange">부족</span>' : '<span class="badge green">정상</span>'}</td>
+                      <td>${p.stock_quantity <= 0 ? '<span class="badge red">품절</span>' : p.has_expired ? '<span class="badge red">기한 경과</span>' : p.is_low ? '<span class="badge orange">부족</span>' : '<span class="badge green">정상</span>'}</td>
                     </tr>`
                   )
                   .join('')}</tbody>
@@ -3550,14 +3572,36 @@
         loadInventory();
         try {
           const data = await api.request(`/pos/inventory/products/${id}/logs`);
-          renderInventoryDetail(data.product, data.logs);
+          renderInventoryDetail(data.product, data.logs, data.lots || [], data.expiry_alert_days);
           if (focusQty) setTimeout(() => document.getElementById('adjQty')?.focus(), 30);
         } catch (error) {
           toast(error.message, 'error');
         }
       }
 
-      function renderInventoryDetail(product, logs) {
+      function lotsSectionHtml(product, lots, alertDays, adjustAllowed) {
+        const tracked = lots.reduce((sum, lot) => sum + lot.remaining_quantity, 0);
+        const untracked = product.stock_quantity - tracked;
+        return `
+          <div class="section-title">유통기한 · 로트</div>
+          ${lots.length
+            ? `<table><thead><tr><th>로트</th><th>유통기한</th><th class="num">남은 수량</th>${adjustAllowed ? '<th></th>' : ''}</tr></thead><tbody>${lots
+                .map(
+                  (lot) => `<tr><td>${h(lot.lot_number || '-')}<div class="muted" style="font-size: 12px;">입고 ${fmtDateTime(lot.created_at).slice(0, 12)} · ${lot.received_quantity}개</div></td><td>${expiryBadge(lot.expiry_date, alertDays)}</td><td class="num" style="font-weight: 800;">${lot.remaining_quantity}</td>${adjustAllowed ? `<td><button class="btn btn-outline btn-sm" type="button" onclick="disposeLot(${product.id}, ${lot.id})">폐기</button></td>` : ''}</tr>`
+                )
+                .join('')}</tbody></table>`
+            : '<div class="muted" style="font-size: 13px;">등록된 로트가 없습니다. 입고할 때 유통기한을 입력하면 임박·경과 알림을 받을 수 있습니다.</div>'}
+          ${untracked > 0 && lots.length ? `<div class="muted" style="font-size: 12px; margin-top: 6px;">유통기한 미등록 재고 ${untracked}개 (판매 시 먼저 차감)</div>` : ''}
+        `;
+      }
+
+      function disposeLot(productId, lotId) {
+        state.inventory.adjustType = 'DISPOSE';
+        state.inventory.disposeLotId = lotId;
+        selectInventoryProduct(productId, { focusQty: true });
+      }
+
+      function renderInventoryDetail(product, logs, lots = [], alertDays = 90) {
         const box = document.getElementById('invDetail');
         if (!box) return;
         const adjustAllowed = can('can_adjust_stock');
@@ -3588,9 +3632,22 @@
             <div class="field"><label class="label" for="adjQty">${typeInfo.qtyLabel}</label><input id="adjQty" class="input big" type="number" min="0" value="${type === 'COUNT' ? product.stock_quantity : ''}" oninput="previewAdjust(${product.stock_quantity})" onkeydown="if (event.key === 'Enter') submitAdjust(${product.id})" /></div>
             <div class="field"><label class="label">처리 후 재고</label><div class="input big" id="adjPreview" style="background: var(--bg-canvas);">${product.stock_quantity}</div></div>
           </div>
-          <div class="field"><label class="label" for="adjReason">사유${type === 'RECEIVE' ? ' (선택)' : ' (필수)'}</label><input id="adjReason" class="input" /></div>
+          ${type === 'RECEIVE'
+            ? `<div class="pay-row-grid">
+                <div class="field"><label class="label" for="adjExpiry">유통기한 (권장)</label><input id="adjExpiry" class="input" type="date" min="${h(state.ctx.today)}" /></div>
+                <div class="field"><label class="label" for="adjLot">로트번호 (선택)</label><input id="adjLot" class="input" maxlength="40" placeholder="제조번호" /></div>
+              </div>`
+            : ''}
+          ${type === 'DISPOSE' && lots.length
+            ? `<div class="field"><label class="label" for="adjLotId">폐기할 로트</label><select id="adjLotId" class="input">
+                <option value="">로트 지정 안 함 (미등록 재고부터)</option>
+                ${lots.map((lot) => `<option value="${lot.id}" ${state.inventory.disposeLotId === lot.id ? 'selected' : ''}>${h(lot.lot_number || '로트번호 없음')} · ${h(lot.expiry_date)}${lot.days_left < 0 ? ' (경과)' : ''} · 남은 ${lot.remaining_quantity}개</option>`).join('')}
+              </select></div>`
+            : ''}
+          <div class="field"><label class="label" for="adjReason">사유${type === 'RECEIVE' ? ' (선택)' : ' (필수)'}</label><input id="adjReason" class="input" value="${type === 'DISPOSE' && lots.find((lot) => lot.id === state.inventory.disposeLotId)?.days_left < 0 ? '유통기한 경과' : ''}" /></div>
           ${reasonChips('adjReason', typeInfo.reasons)}
           <button class="btn ${type === 'DISPOSE' ? 'btn-danger' : 'btn-primary'} btn-block btn-lg" type="button" onclick="submitAdjust(${product.id})">${typeInfo.button}</button>
+          ${lotsSectionHtml(product, lots, alertDays, adjustAllowed)}
           <div class="section-title">재고 변동 이력</div>
           <div style="max-height: 26vh; overflow-y: auto;">
             ${logs.length
@@ -3608,6 +3665,7 @@
 
       function setAdjustType(type, productId) {
         state.inventory.adjustType = type;
+        state.inventory.disposeLotId = null;
         selectInventoryProduct(productId, { focusQty: true });
       }
 
@@ -3632,11 +3690,15 @@
               product_id: productId,
               adjust_type: state.inventory.adjustType,
               quantity: Number(quantity),
-              reason: document.getElementById('adjReason').value.trim()
+              reason: document.getElementById('adjReason').value.trim(),
+              expiry_date: document.getElementById('adjExpiry')?.value || undefined,
+              lot_number: document.getElementById('adjLot')?.value.trim() || undefined,
+              lot_id: Number(document.getElementById('adjLotId')?.value) || undefined
             }
           });
+          state.inventory.disposeLotId = null;
           toast(`${data.product.product_name} 재고 ${data.product.stock_quantity}개로 반영`);
-          setBadge('stockAlertCount', data.alerts.low_count);
+          setBadge('stockAlertCount', stockAlertTotal(data.alerts));
           loadProducts();
           await selectInventoryProduct(productId);
           document.getElementById('invQuery')?.focus();
@@ -3648,7 +3710,7 @@
           const value = Number(document.getElementById('safetyInput').value);
           const data = await api.request(`/pos/inventory/products/${productId}/safety-stock`, { method: 'PATCH', body: { safety_stock: value } });
           toast(`안전재고 ${data.product.safety_stock}개로 설정`);
-          setBadge('stockAlertCount', data.alerts.low_count);
+          setBadge('stockAlertCount', stockAlertTotal(data.alerts));
           await selectInventoryProduct(productId);
         });
       }

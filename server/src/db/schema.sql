@@ -340,6 +340,22 @@ CREATE TABLE IF NOT EXISTS point_ledger (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS product_lots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  lot_number TEXT,
+  expiry_date TEXT NOT NULL,
+  received_quantity INTEGER NOT NULL CHECK (received_quantity > 0),
+  remaining_quantity INTEGER NOT NULL CHECK (remaining_quantity >= 0),
+  unit_cost INTEGER,
+  supplier_id INTEGER,
+  purchase_order_id INTEGER,
+  received_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_users_role_pharmacy ON users(role, pharmacy_id);
 CREATE INDEX IF NOT EXISTS idx_products_pharmacy ON products(pharmacy_id);
 CREATE INDEX IF NOT EXISTS idx_orders_pharmacy ON orders(pharmacy_id);

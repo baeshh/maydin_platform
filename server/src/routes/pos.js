@@ -3,6 +3,7 @@ const { getAll, getOne, run, transaction } = require('../db');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { VAN_COMPANIES, VAN_MODES, VanError, adapterFor, demoAdapter } = require('../services/van');
 const { PointError, pointPolicy, changePoints, pointEligibleAmount, calcEarn } = require('../services/points');
+const { LotError, parseLotInput, insertLot, lotLabel } = require('../services/lots');
 
 const router = express.Router();
 
@@ -31,7 +32,7 @@ function handle(fn) {
       const result = fn(req, res);
       if (result !== undefined && !res.headersSent) res.json(result);
     } catch (error) {
-      if (error instanceof PosError || error instanceof VanError || error instanceof PointError) {
+      if (error instanceof PosError || error instanceof VanError || error instanceof PointError || error instanceof LotError) {
         return res.status(error.status).json({ message: error.message });
       }
       if (String(error.code || '').startsWith('SQLITE_CONSTRAINT')) {
@@ -626,9 +627,18 @@ function reverseEarnedPoints(req, original, refundOrderId, lines, { full }) {
   return { target, taken, shortfall };
 }
 
+const EXPIRY_ALERT_DAYS = 90;
+const NEAREST_EXPIRY_SQL =
+  '(SELECT MIN(pl.expiry_date) FROM product_lots pl WHERE pl.product_id = p.id AND pl.remaining_quantity > 0)';
+const EXPIRED_SQL = `EXISTS (SELECT 1 FROM product_lots pl WHERE pl.product_id = p.id AND pl.remaining_quantity > 0
+  AND pl.expiry_date < date('now', 'localtime'))`;
+const EXPIRING_SQL = `EXISTS (SELECT 1 FROM product_lots pl WHERE pl.product_id = p.id AND pl.remaining_quantity > 0
+  AND pl.expiry_date >= date('now', 'localtime') AND pl.expiry_date <= date('now', 'localtime', '+${EXPIRY_ALERT_DAYS} days'))`;
+
 const POS_PRODUCT_COLUMNS = `p.id, p.product_name, p.price, p.discount_price, COALESCE(p.discount_price, p.price) AS sale_price,
   p.stock_quantity, p.status, p.barcode, COALESCE(p.product_type, 'GENERAL') AS product_type,
-  p.safety_stock, p.thumbnail_url, p.category_id, c.category_name`;
+  p.safety_stock, p.thumbnail_url, p.category_id, c.category_name, ${NEAREST_EXPIRY_SQL} AS nearest_expiry,
+  (SELECT COALESCE(SUM(pl.remaining_quantity), 0) FROM product_lots pl WHERE pl.product_id = p.id) AS lot_quantity`;
 
 function getPosProduct(pharmacyId, id) {
   return getOne(
@@ -662,7 +672,10 @@ function inventoryAlerts(pharmacyId) {
   return getOne(
     `SELECT
       COUNT(CASE WHEN ${LOW_STOCK_SQL} THEN 1 END) AS low_count,
-      COUNT(CASE WHEN p.stock_quantity <= 0 THEN 1 END) AS out_count
+      COUNT(CASE WHEN p.stock_quantity <= 0 THEN 1 END) AS out_count,
+      COUNT(CASE WHEN ${EXPIRED_SQL} THEN 1 END) AS expired_count,
+      COUNT(CASE WHEN ${EXPIRING_SQL} THEN 1 END) AS expiring_count,
+      ${EXPIRY_ALERT_DAYS} AS expiry_alert_days
      FROM products p
      WHERE p.pharmacy_id = @pharmacy_id AND p.status != 'HIDDEN'`,
     { pharmacy_id: pharmacyId }
@@ -748,9 +761,7 @@ router.get(
     if (categoryId) conditions.push('p.category_id = @category_id');
 
     const products = getAll(
-      `SELECT p.id, p.product_name, p.price, p.discount_price, COALESCE(p.discount_price, p.price) AS sale_price,
-              p.stock_quantity, p.status, p.barcode, COALESCE(p.product_type, 'GENERAL') AS product_type,
-              p.safety_stock, p.thumbnail_url, p.category_id, c.category_name
+      `SELECT ${POS_PRODUCT_COLUMNS}
        FROM products p
        LEFT JOIN categories c ON c.id = p.category_id
        WHERE ${conditions.join(' AND ')}
@@ -1702,6 +1713,7 @@ router.post(
     const barcode = normalizeBarcode(req.body.barcode);
     if (!barcode) throw new PosError('바코드를 입력해 주세요.');
     const categoryId = req.body.category_id ? Number(req.body.category_id) : null;
+    const lot = stock > 0 ? parseLotInput(req.body) : null;
 
     const product = transaction(() => {
       assertBarcodeFree(req.pharmacyId, barcode);
@@ -1731,7 +1743,10 @@ router.post(
         }
       );
       const id = result.lastInsertRowid;
-      if (stock > 0) logStock(req, id, 0, stock, 'RECEIVE', 'POS 신규 등록 입고');
+      if (stock > 0) {
+        insertLot({ pharmacyId: req.pharmacyId, productId: id, quantity: stock, lot, userId: req.user.id });
+        logStock(req, id, 0, stock, 'RECEIVE', lot ? `POS 신규 등록 입고 · ${lotLabel(lot)}` : 'POS 신규 등록 입고');
+      }
       audit(req, 'POS_PRODUCT_CREATE', 'PRODUCT', id, `POS 신규 상품 등록 · ${productName} · ${won(price)} · 바코드 ${barcode}`);
       return getPosProduct(req.pharmacyId, id);
     })();
@@ -1947,6 +1962,17 @@ const STOCK_ADJUST_TYPES = {
   COUNT: { label: '실사 조정', logType: 'COUNT_ADJUST', action: 'POS_STOCK_COUNT' }
 };
 
+function activeLots(productId) {
+  return getAll(
+    `SELECT id, lot_number, expiry_date, received_quantity, remaining_quantity, created_at,
+            CAST(julianday(expiry_date) - julianday(date('now', 'localtime')) AS INTEGER) AS days_left
+     FROM product_lots
+     WHERE product_id = @id AND remaining_quantity > 0
+     ORDER BY expiry_date ASC, id ASC`,
+    { id: productId }
+  );
+}
+
 function logStock(req, productId, before, after, changeType, reason) {
   run(
     `INSERT INTO inventory_logs (
@@ -1962,19 +1988,23 @@ router.get(
   '/inventory',
   handle((req) => {
     const query = String(req.query.query || '').trim();
-    const filter = ['low', 'out'].includes(req.query.filter) ? req.query.filter : 'all';
+    const filter = ['low', 'out', 'expiring', 'expired'].includes(req.query.filter) ? req.query.filter : 'all';
     const conditions = ['p.pharmacy_id = @pharmacy_id', "p.status != 'HIDDEN'"];
     if (query) conditions.push('(p.barcode = @query OR p.product_name LIKE @like OR p.barcode LIKE @like)');
     if (filter === 'low') conditions.push(LOW_STOCK_SQL);
     if (filter === 'out') conditions.push('p.stock_quantity <= 0');
+    if (filter === 'expiring') conditions.push(EXPIRING_SQL);
+    if (filter === 'expired') conditions.push(EXPIRED_SQL);
+    const order = ['expiring', 'expired'].includes(filter) ? 'nearest_expiry ASC, p.product_name ASC' : 'is_low DESC, p.product_name ASC';
 
     const products = getAll(
       `SELECT ${POS_PRODUCT_COLUMNS}, p.cost_price,
         CASE WHEN ${LOW_STOCK_SQL} THEN 1 ELSE 0 END AS is_low,
+        CASE WHEN ${EXPIRED_SQL} THEN 1 ELSE 0 END AS has_expired,
         (SELECT MAX(created_at) FROM inventory_logs l WHERE l.product_id = p.id) AS last_changed_at
        FROM products p LEFT JOIN categories c ON c.id = p.category_id
        WHERE ${conditions.join(' AND ')}
-       ORDER BY CASE WHEN p.barcode = @query THEN 0 ELSE 1 END, is_low DESC, p.product_name ASC
+       ORDER BY CASE WHEN p.barcode = @query THEN 0 ELSE 1 END, ${order}
        LIMIT 200`,
       { pharmacy_id: req.pharmacyId, query, like: `%${query}%` }
     );
@@ -1998,7 +2028,7 @@ router.get(
        LIMIT 60`,
       { id: product.id, pharmacy_id: req.pharmacyId }
     );
-    return { product, logs };
+    return { product, logs, lots: activeLots(product.id), expiry_alert_days: EXPIRY_ALERT_DAYS };
   })
 );
 
@@ -2010,6 +2040,8 @@ router.post(
     if (!config) throw new PosError('입고·폐기·실사 조정 중 하나를 선택해 주세요.');
     if (type !== 'RECEIVE') requireOwner(req, config.label);
     const reason = cleanText(req.body.reason);
+    const lot = type === 'RECEIVE' ? parseLotInput(req.body) : null;
+    const lotId = type === 'DISPOSE' && req.body.lot_id ? Number(req.body.lot_id) : null;
 
     const product = transaction(() => {
       const current = getOne("SELECT * FROM products WHERE id = @id AND pharmacy_id = @pharmacy_id AND status != 'HIDDEN'", {
@@ -2019,12 +2051,35 @@ router.post(
       if (!current) throw new PosError('상품을 찾을 수 없습니다.', 404);
       const before = current.stock_quantity;
       let after;
+      let lotNote = '';
       if (type === 'RECEIVE') {
-        after = before + toInt(req.body.quantity, '입고 수량', { min: 1, max: 100000 });
+        const quantity = toInt(req.body.quantity, '입고 수량', { min: 1, max: 100000 });
+        after = before + quantity;
+        if (lot) {
+          insertLot({ pharmacyId: req.pharmacyId, productId: current.id, quantity, lot, userId: req.user.id });
+          lotNote = lotLabel(lot);
+        }
       } else if (type === 'DISPOSE') {
         const quantity = toInt(req.body.quantity, '폐기 수량', { min: 1, max: 100000 });
         if (quantity > before) throw new PosError(`현재 재고(${before}개)보다 많이 폐기할 수 없습니다.`);
         if (!reason) throw new PosError('폐기 사유를 입력해 주세요.');
+        if (lotId) {
+          const target = getOne('SELECT * FROM product_lots WHERE id = @id AND product_id = @product_id', {
+            id: lotId,
+            product_id: current.id
+          });
+          if (!target || target.remaining_quantity <= 0) throw new PosError('폐기할 로트를 찾을 수 없습니다.', 404);
+          if (quantity > target.remaining_quantity) {
+            throw new PosError(`선택한 로트의 남은 수량(${target.remaining_quantity}개)보다 많이 폐기할 수 없습니다.`);
+          }
+          // 재고보다 먼저 로트를 줄여야 트리거가 다른 로트를 건드리지 않는다.
+          run(
+            `UPDATE product_lots SET remaining_quantity = remaining_quantity - @quantity, updated_at = CURRENT_TIMESTAMP
+             WHERE id = @id`,
+            { id: target.id, quantity }
+          );
+          lotNote = lotLabel(target);
+        }
         after = before - quantity;
       } else {
         after = toInt(req.body.quantity, '실사 수량', { min: 0, max: 100000 });
@@ -2042,7 +2097,8 @@ router.post(
          WHERE id = @id AND stock_quantity = @before`,
         { id: current.id, before, after }
       );
-      const finalReason = reason || (type === 'RECEIVE' ? '입고' : '실사 확인 (차이 없음)');
+      const baseReason = reason || (type === 'RECEIVE' ? '입고' : '실사 확인 (차이 없음)');
+      const finalReason = lotNote ? `${baseReason} · ${lotNote}` : baseReason;
       logStock(req, current.id, before, after, config.logType, finalReason);
       audit(
         req,
@@ -2055,7 +2111,7 @@ router.post(
     })();
 
     res.status(201);
-    return { product, alerts: inventoryAlerts(req.pharmacyId) };
+    return { product, lots: activeLots(product.id), alerts: inventoryAlerts(req.pharmacyId) };
   })
 );
 

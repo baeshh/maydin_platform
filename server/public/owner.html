@@ -1085,7 +1085,8 @@
         $('#monthOrders').textContent = `이번 달 주문 ${Number(summary.month_order_count || 0).toLocaleString()}건`;
         $('#deliveredCount').textContent = `배송 완료 ${Number(summary.delivered_count || 0).toLocaleString()}건`;
         $('#stockWarnings').textContent =
-          `재고 부족 ${Number(summary.low_stock_count || 0).toLocaleString()}개 / 품절 ${Number(summary.sold_out_count || 0).toLocaleString()}개`;
+          `재고 부족 ${Number(summary.low_stock_count || 0).toLocaleString()}개 / 품절 ${Number(summary.sold_out_count || 0).toLocaleString()}개` +
+          (summary.expiry_alert_count ? ` / 유통기한 임박·경과 ${Number(summary.expiry_alert_count).toLocaleString()}개` : '');
         $('#navPendingBadge').textContent = Number(summary.pending_delivery_count || 0).toLocaleString();
       }
 
