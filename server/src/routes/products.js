@@ -18,6 +18,12 @@ function normalizeProductType(value) {
   return type;
 }
 
+function normalizeTaxType(value) {
+  const type = String(value || 'TAXABLE').toUpperCase();
+  if (!['TAXABLE', 'EXEMPT'].includes(type)) throw new Error('과세 구분이 올바르지 않습니다.');
+  return type;
+}
+
 function optionalInt(value) {
   if (value === undefined || value === null || value === '') return null;
   const number = Number(value);
@@ -92,9 +98,11 @@ router.post('/', (req, res) => {
 
   let barcode;
   let productType;
+  let taxType;
   try {
     barcode = normalizeBarcode(req.body.barcode);
     productType = normalizeProductType(req.body.product_type);
+    taxType = normalizeTaxType(req.body.tax_type);
     assertBarcodeAvailable(req.pharmacyId, barcode);
   } catch (error) {
     return res.status(400).json({ message: error.message });
@@ -117,10 +125,10 @@ router.post('/', (req, res) => {
   const result = run(
     `INSERT INTO products (
       pharmacy_id, category_id, product_name, description, price, discount_price,
-      stock_quantity, status, thumbnail_url, barcode, product_type, safety_stock, cost_price, pos_sale_enabled
+      stock_quantity, status, thumbnail_url, barcode, product_type, tax_type, safety_stock, cost_price, pos_sale_enabled
     ) VALUES (
       @pharmacy_id, @category_id, @product_name, @description, @price, @discount_price,
-      @stock_quantity, @status, @thumbnail_url, @barcode, @product_type, @safety_stock, @cost_price, @pos_sale_enabled
+      @stock_quantity, @status, @thumbnail_url, @barcode, @product_type, @tax_type, @safety_stock, @cost_price, @pos_sale_enabled
     )`,
     {
       pharmacy_id: req.pharmacyId,
@@ -134,6 +142,7 @@ router.post('/', (req, res) => {
       thumbnail_url,
       barcode,
       product_type: productType,
+      tax_type: taxType,
       safety_stock: Math.max(0, optionalInt(req.body.safety_stock) || 0),
       cost_price: optionalInt(req.body.cost_price),
       pos_sale_enabled: req.body.pos_sale_enabled === false || req.body.pos_sale_enabled === 0 ? 0 : 1
@@ -153,9 +162,11 @@ router.patch('/:id', (req, res) => {
   const next = { ...product, ...req.body };
   let barcode;
   let productType;
+  let taxType;
   try {
     barcode = normalizeBarcode(next.barcode);
     productType = normalizeProductType(next.product_type);
+    taxType = normalizeTaxType(next.tax_type);
     assertBarcodeAvailable(req.pharmacyId, barcode, product.id);
   } catch (error) {
     return res.status(400).json({ message: error.message });
@@ -177,6 +188,7 @@ router.patch('/:id', (req, res) => {
          thumbnail_url = @thumbnail_url,
          barcode = @barcode,
          product_type = @product_type,
+         tax_type = @tax_type,
          safety_stock = @safety_stock,
          cost_price = @cost_price,
          pos_sale_enabled = @pos_sale_enabled,
@@ -194,6 +206,7 @@ router.patch('/:id', (req, res) => {
       thumbnail_url: next.thumbnail_url,
       barcode,
       product_type: productType,
+      tax_type: taxType,
       safety_stock: Math.max(0, optionalInt(next.safety_stock) || 0),
       cost_price: optionalInt(next.cost_price),
       pos_sale_enabled: next.pos_sale_enabled === false || Number(next.pos_sale_enabled) === 0 ? 0 : 1

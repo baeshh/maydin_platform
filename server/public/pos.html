@@ -2727,7 +2727,7 @@
             ${items
               .map(
                 (i) => `
-                <div class="bold">${h(i.product_name)}${i.product_type === 'OTC' ? ' [일반의약품]' : ''}</div>
+                <div class="bold">${i.tax_type === 'EXEMPT' ? '*' : ''}${h(i.product_name)}${i.product_type === 'OTC' ? ' [일반의약품]' : ''}</div>
                 <div class="row"><span>${won(i.price)} × ${Math.abs(i.quantity)}</span><span>${signedWon(i.total_price)}</span></div>
                 ${!isRefund && i.refunded_quantity > 0 ? `<div class="row"><span>  └ 반품 ${i.refunded_quantity}개</span><span>-${won(i.refunded_amount)}</span></div>` : ''}
               `
@@ -2737,6 +2737,10 @@
             <div class="row"><span>상품 합계</span><span>${signedWon(order.total_product_amount)}</span></div>
             ${order.discount_amount ? `<div class="row"><span>할인${order.discount_reason ? `(${h(order.discount_reason)})` : ''}</span><span>${signedWon(-order.discount_amount)}</span></div>` : ''}
             <div class="row big"><span>${isRefund ? '환불 금액' : '결제 금액'}</span><span>${signedWon(order.final_amount)}</span></div>
+            ${r.tax ? `
+              <div class="row"><span>과세 물품가액</span><span>${signedWon(r.tax.supply)}</span></div>
+              <div class="row"><span>부가세</span><span>${signedWon(r.tax.vat)}</span></div>
+              ${r.tax.exempt ? `<div class="row"><span>면세 물품가액 (*)</span><span>${signedWon(r.tax.exempt)}</span></div>` : ''}` : ''}
             <div class="hr"></div>
             ${payments
               .map(
@@ -4031,6 +4035,7 @@
                 <div style="flex: 1;"></div>
                 <button class="chip ${tab === 'sales' ? 'active' : ''}" type="button" onclick="openReport('${from}', '${to}', 'sales')">매출</button>
                 ${can('can_view_audit') ? `<button class="chip ${tab === 'audit' ? 'active' : ''}" type="button" onclick="openReport('${from}', '${to}', 'audit')">감사 로그</button>` : ''}
+                ${can('can_view_audit') ? '<a class="chip" style="text-decoration: none;" href="/owner.html#reports" target="_blank" rel="noopener">상세 리포트 ↗</a>' : ''}
               </div>
               ${body}
             </div>

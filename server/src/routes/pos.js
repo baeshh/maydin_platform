@@ -4,6 +4,7 @@ const { authenticate, requireRole } = require('../middleware/auth');
 const { VAN_COMPANIES, VAN_MODES, VanError, adapterFor, demoAdapter } = require('../services/van');
 const { PointError, pointPolicy, changePoints, pointEligibleAmount, calcEarn } = require('../services/points');
 const { LotError, parseLotInput, insertLot, lotLabel } = require('../services/lots');
+const { taxBreakdown } = require('../services/tax');
 
 const router = express.Router();
 
@@ -442,6 +443,7 @@ function buildReceipt(req, orderId) {
     payments,
     refunds,
     points: order.customer_id ? { earned: order.points_earned || 0, balance: pointBalance } : null,
+    tax: taxBreakdown(items),
     payment_balances: order.order_type === 'POS_SALE' ? refundablePaymentBalances(order.id) : {},
     permissions: {
       can_cancel: isOwner(req) && order.order_type === 'POS_SALE' && order.order_status === 'COMPLETED' && sameDay,
@@ -501,9 +503,9 @@ function createRefundOrder(req, { original, lines, refundType, reason, payments,
   for (const { item, quantity, amount } of lines) {
     run(
       `INSERT INTO order_items (
-        order_id, product_id, product_name, quantity, price, total_price, product_type, discount_amount
+        order_id, product_id, product_name, quantity, price, total_price, product_type, tax_type, discount_amount
       ) VALUES (
-        @order_id, @product_id, @product_name, @quantity, @price, @total_price, @product_type, @discount_amount
+        @order_id, @product_id, @product_name, @quantity, @price, @total_price, @product_type, @tax_type, @discount_amount
       )`,
       {
         order_id: refundOrderId,
@@ -513,6 +515,7 @@ function createRefundOrder(req, { original, lines, refundType, reason, payments,
         price: item.price,
         total_price: -(item.price * quantity),
         product_type: item.product_type,
+        tax_type: item.tax_type,
         discount_amount: -(item.price * quantity - amount)
       }
     );
@@ -1066,9 +1069,9 @@ router.post(
 
         run(
           `INSERT INTO order_items (
-            order_id, product_id, product_name, quantity, price, total_price, product_type, discount_amount, discount_reason
+            order_id, product_id, product_name, quantity, price, total_price, product_type, tax_type, discount_amount, discount_reason
           ) VALUES (
-            @order_id, @product_id, @product_name, @quantity, @price, @total_price, @product_type, @discount_amount, @discount_reason
+            @order_id, @product_id, @product_name, @quantity, @price, @total_price, @product_type, @tax_type, @discount_amount, @discount_reason
           )`,
           {
             order_id: orderId,
@@ -1078,6 +1081,7 @@ router.post(
             price: line.price,
             total_price: line.total,
             product_type: line.product.product_type || 'GENERAL',
+            tax_type: line.product.tax_type || 'TAXABLE',
             discount_amount: share,
             discount_reason: share > 0 ? discountReason : null
           }
@@ -1711,6 +1715,8 @@ router.post(
     const safetyStock = toInt(req.body.safety_stock ?? 0, '안전재고', { min: 0, max: 100000 });
     const productType = String(req.body.product_type || 'GENERAL').toUpperCase();
     if (!['GENERAL', 'OTC'].includes(productType)) throw new PosError('상품 유형이 올바르지 않습니다.');
+    const taxType = String(req.body.tax_type || 'TAXABLE').toUpperCase();
+    if (!['TAXABLE', 'EXEMPT'].includes(taxType)) throw new PosError('과세 구분이 올바르지 않습니다.');
     const barcode = normalizeBarcode(req.body.barcode);
     if (!barcode) throw new PosError('바코드를 입력해 주세요.');
     const categoryId = req.body.category_id ? Number(req.body.category_id) : null;
@@ -1727,9 +1733,9 @@ router.post(
       }
       const result = run(
         `INSERT INTO products (
-          pharmacy_id, category_id, product_name, price, stock_quantity, status, barcode, product_type, safety_stock, pos_sale_enabled
+          pharmacy_id, category_id, product_name, price, stock_quantity, status, barcode, product_type, tax_type, safety_stock, pos_sale_enabled
         ) VALUES (
-          @pharmacy_id, @category_id, @product_name, @price, @stock, @status, @barcode, @product_type, @safety_stock, 1
+          @pharmacy_id, @category_id, @product_name, @price, @stock, @status, @barcode, @product_type, @tax_type, @safety_stock, 1
         )`,
         {
           pharmacy_id: req.pharmacyId,
@@ -1740,6 +1746,7 @@ router.post(
           status: stock > 0 ? 'ON_SALE' : 'SOLD_OUT',
           barcode,
           product_type: productType,
+          tax_type: taxType,
           safety_stock: safetyStock
         }
       );

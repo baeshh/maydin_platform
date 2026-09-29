@@ -157,6 +157,8 @@ function migratePos(schema) {
   addColumnIfMissing('customers', 'point_balance', 'INTEGER NOT NULL DEFAULT 0');
   addColumnIfMissing('orders', 'points_earned', 'INTEGER NOT NULL DEFAULT 0');
   addColumnIfMissing('products', 'supplier_id', 'INTEGER');
+  addColumnIfMissing('products', 'tax_type', "TEXT NOT NULL DEFAULT 'TAXABLE'");
+  addColumnIfMissing('order_items', 'tax_type', 'TEXT');
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_suppliers_pharmacy ON suppliers(pharmacy_id, status);

@@ -506,6 +506,114 @@
         display: none;
       }
 
+      .report-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 16px;
+      }
+
+      .report-controls .form-control {
+        width: auto;
+        padding: 8px 12px;
+      }
+
+      .report-metrics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+
+      .report-metric {
+        border: 1px solid var(--border-color);
+        border-radius: 14px;
+        padding: 14px 16px;
+      }
+
+      .report-metric span {
+        display: block;
+        color: var(--text-muted);
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .report-metric strong {
+        display: block;
+        margin: 6px 0 2px;
+        font-size: 20px;
+      }
+
+      .report-metric small {
+        color: var(--text-muted);
+        font-size: 12px;
+      }
+
+      .chart-grid {
+        display: grid;
+        grid-template-columns: 2fr 1fr;
+        gap: 16px;
+        margin-bottom: 18px;
+      }
+
+      .chart-box {
+        border: 1px solid var(--border-color);
+        border-radius: 14px;
+        padding: 14px 16px;
+      }
+
+      .chart-box h4 {
+        margin: 0 0 10px;
+        font-size: 14px;
+      }
+
+      .bar-chart {
+        display: flex;
+        align-items: flex-end;
+        gap: 3px;
+        height: 140px;
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .bar-chart .bar {
+        flex: 1;
+        min-width: 3px;
+        border-radius: 4px 4px 0 0;
+        background: var(--toss-blue);
+        opacity: 0.85;
+      }
+
+      .bar-chart .bar.negative {
+        background: #f04452;
+      }
+
+      .bar-labels {
+        display: flex;
+        gap: 3px;
+        margin-top: 4px;
+        color: var(--text-muted);
+        font-size: 10px;
+      }
+
+      .bar-labels span {
+        flex: 1;
+        overflow: hidden;
+        text-align: center;
+        white-space: nowrap;
+      }
+
+      td.num,
+      th.num {
+        text-align: right;
+      }
+
+      @media (max-width: 900px) {
+        .chart-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
       .tab-bar {
         display: flex;
         flex-wrap: wrap;
@@ -778,6 +886,7 @@
         </div>
         <nav class="nav-menu">
           <a href="#dashboard" class="nav-item active">대시보드</a>
+          <a href="#reports" class="nav-item">매출 리포트</a>
           <a href="#orders" class="nav-item">주문 관리 <span id="navPendingBadge" class="badge red">0</span></a>
           <a href="#products" class="nav-item">상품 관리</a>
           <a href="#customers" class="nav-item">고객 관리</a>
@@ -875,6 +984,31 @@
             <div id="ordersTable" class="loading">주문 정보를 불러오는 중입니다.</div>
           </section>
 
+          <section class="card full-width" id="reports">
+            <div class="card-header">
+              <h2 class="card-title">매출 리포트</h2>
+              <button class="btn btn-outline btn-sm" type="button" onclick="downloadReportCsv('summary')">요약 CSV</button>
+            </div>
+            <div class="report-controls">
+              <input id="reportFrom" class="form-control" type="date" />
+              <span class="list-meta">~</span>
+              <input id="reportTo" class="form-control" type="date" />
+              <select id="reportChannel" class="form-control">
+                <option value="ALL">전체 채널</option>
+                <option value="POS">매장 POS</option>
+                <option value="ONLINE">온라인</option>
+              </select>
+              <button class="btn btn-primary btn-sm" type="button" onclick="loadReport()">조회</button>
+              <span style="flex: 1;"></span>
+              <button class="tab-btn" type="button" data-report-preset="today" onclick="reportPreset('today')">오늘</button>
+              <button class="tab-btn" type="button" data-report-preset="7d" onclick="reportPreset('7d')">최근 7일</button>
+              <button class="tab-btn" type="button" data-report-preset="month" onclick="reportPreset('month')">이번 달</button>
+              <button class="tab-btn" type="button" data-report-preset="lastMonth" onclick="reportPreset('lastMonth')">지난 달</button>
+              <button class="tab-btn" type="button" data-report-preset="year" onclick="reportPreset('year')">올해</button>
+            </div>
+            <div id="reportBody" class="loading">매출 리포트를 불러오는 중입니다.</div>
+          </section>
+
           <section class="card full-width" id="purchasing">
             <div class="card-header">
               <h2 class="card-title">거래처 · 발주</h2>
@@ -965,6 +1099,17 @@
                   <option value="GENERAL">일반 상품 (온라인·현장 판매)</option>
                   <option value="OTC">일반의약품 (현장 판매 전용)</option>
                 </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="taxType">과세 구분</label>
+                <select id="taxType" class="form-control" name="tax_type">
+                  <option value="TAXABLE">과세 (부가세 10% 포함가)</option>
+                  <option value="EXEMPT">면세</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="costPrice">매입 원가</label>
+                <input id="costPrice" class="form-control" name="cost_price" type="number" min="0" placeholder="선택 · 이익 리포트에 사용" />
               </div>
               <div class="form-group">
                 <label class="form-label" for="productBarcode">바코드</label>
@@ -1118,6 +1263,8 @@
 
           allProducts = products.products;
           loadPurchasing();
+          if (report.data) loadReport(report.preset);
+          else reportPreset('month');
           renderStaff(staff.staff);
           renderHeader(qr.qr);
           renderSummary(dash.summary);
@@ -1426,6 +1573,13 @@
                           <option value="OTC" ${product.product_type === 'OTC' ? 'selected' : ''}>일반의약품</option>
                         </select>
                       </div>
+                      <div class="inline-actions" style="margin-top: 6px;">
+                        <input id="cost-${product.id}" class="form-control" style="width: 150px; padding: 7px 8px;" type="number" min="0" placeholder="매입 원가 (선택)" value="${product.cost_price ?? ''}" />
+                        <select id="tax-${product.id}" class="form-control" style="width: 118px; padding: 7px 8px;">
+                          <option value="TAXABLE" ${product.tax_type !== 'EXEMPT' ? 'selected' : ''}>과세</option>
+                          <option value="EXEMPT" ${product.tax_type === 'EXEMPT' ? 'selected' : ''}>면세</option>
+                        </select>
+                      </div>
                     </td>
                     <td>
                       <div class="inline-actions">
@@ -1470,7 +1624,9 @@
               stock_quantity: $(`#stock-${id}`).value,
               status: $(`#status-${id}`).value,
               barcode: $(`#barcode-${id}`).value,
-              product_type: $(`#type-${id}`).value
+              product_type: $(`#type-${id}`).value,
+              tax_type: $(`#tax-${id}`).value,
+              cost_price: $(`#cost-${id}`).value
             }
           });
           showToast('상품 정보가 저장되었습니다.');
@@ -1643,6 +1799,207 @@
           showToast(error.message);
         }
       });
+
+      /* ---------- 매출 리포트 ---------- */
+
+      const REPORT_TABS = [
+        ['products', '상품별'],
+        ['categories', '카테고리별'],
+        ['staff', '직원별'],
+        ['payments', '결제수단별'],
+        ['weekday', '요일별'],
+        ['hourly', '시간대별'],
+        ['trend', '기간별'],
+        ['tax', '과세구분']
+      ];
+      const report = { preset: 'month', tab: 'products', data: null };
+
+      function ymd(date) {
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      }
+
+      function reportPreset(key) {
+        const now = new Date();
+        const ranges = {
+          today: [now, now],
+          '7d': [new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6), now],
+          month: [new Date(now.getFullYear(), now.getMonth(), 1), now],
+          lastMonth: [new Date(now.getFullYear(), now.getMonth() - 1, 1), new Date(now.getFullYear(), now.getMonth(), 0)],
+          year: [new Date(now.getFullYear(), 0, 1), now]
+        };
+        const [from, to] = ranges[key];
+        report.preset = key;
+        $('#reportFrom').value = ymd(from);
+        $('#reportTo').value = ymd(to);
+        loadReport(key);
+      }
+
+      function reportQuery() {
+        return `from=${encodeURIComponent($('#reportFrom').value)}&to=${encodeURIComponent($('#reportTo').value)}&channel=${encodeURIComponent($('#reportChannel').value)}`;
+      }
+
+      async function loadReport(preset = null) {
+        report.preset = preset;
+        document.querySelectorAll('[data-report-preset]').forEach((b) => b.classList.toggle('active', b.dataset.reportPreset === preset));
+        try {
+          report.data = await api.request(`/reports/sales?${reportQuery()}`);
+          renderReport();
+        } catch (error) {
+          $('#reportBody').innerHTML = renderEmpty(error.message);
+        }
+      }
+
+      function pct(value) {
+        return value == null ? '-' : `${value}%`;
+      }
+
+      function barChart(rows, valueKey, labelFn, titleFn, { labelEvery = 1 } = {}) {
+        const max = Math.max(1, ...rows.map((r) => Math.abs(r[valueKey])));
+        return `
+          <div class="bar-chart">
+            ${rows.map((r) => `<div class="bar ${r[valueKey] < 0 ? 'negative' : ''}" style="height: ${Math.max(r[valueKey] ? 2 : 0, (Math.abs(r[valueKey]) / max) * 100)}%;" title="${h(titleFn(r))}"></div>`).join('')}
+          </div>
+          <div class="bar-labels">${rows.map((r, i) => `<span>${i % labelEvery === 0 ? h(labelFn(r)) : ''}</span>`).join('')}</div>
+        `;
+      }
+
+      function renderReport() {
+        const d = report.data;
+        const t = d.totals;
+        const monthly = d.granularity === 'MONTH';
+        const trendEvery = Math.max(1, Math.ceil(d.trend.length / 12));
+        $('#reportBody').classList.remove('loading');
+        $('#reportBody').innerHTML = `
+          <div class="report-metrics">
+            <div class="report-metric"><span>순매출</span><strong style="color: var(--toss-blue);">${money(t.net_amount)}</strong><small>총매출 ${money(t.gross_amount)} · 반품 ${money(t.refund_amount)}</small></div>
+            <div class="report-metric"><span>판매 건수 · 객단가</span><strong>${t.sale_count.toLocaleString()}건</strong><small>객단가 ${money(t.avg_ticket)} · 할인 ${money(t.discount_amount)}</small></div>
+            <div class="report-metric"><span>과세 매출 (부가세 포함)</span><strong>${money(d.tax.taxable_amount)}</strong><small>공급가 ${money(d.tax.supply_amount)} · 부가세 ${money(d.tax.vat_amount)}</small></div>
+            <div class="report-metric"><span>면세 매출</span><strong>${money(d.tax.exempt_amount)}</strong><small>면세 상품은 상품 관리에서 지정</small></div>
+            <div class="report-metric"><span>추정 매출총이익</span><strong>${d.margin.margin_amount == null ? '-' : money(d.margin.margin_amount)}</strong><small>이익률 ${pct(d.margin.margin_rate)} · 원가 등록 매출 ${pct(d.margin.coverage_rate)}</small></div>
+          </div>
+          <div class="chart-grid">
+            <div class="chart-box">
+              <h4>${monthly ? '월별' : '일별'} 순매출</h4>
+              ${barChart(d.trend, 'net_amount', (r) => (monthly ? r.period.slice(2) : r.period.slice(5)), (r) => `${r.period} · ${money(r.net_amount)} · ${r.sale_count}건`, { labelEvery: trendEvery })}
+            </div>
+            <div class="chart-box">
+              <h4>시간대별 순매출</h4>
+              ${barChart(d.hourly, 'net_amount', (r) => r.hour, (r) => `${r.hour}시 · ${money(r.net_amount)} · ${r.sale_count}건`, { labelEvery: 3 })}
+            </div>
+          </div>
+          <div class="inline-actions" style="justify-content: space-between; margin-bottom: 12px;">
+            <div class="tab-bar" style="margin: 0;">
+              ${REPORT_TABS.map(([key, label]) => `<button class="tab-btn ${report.tab === key ? 'active' : ''}" type="button" onclick="report.tab = '${key}'; renderReport()">${label}</button>`).join('')}
+            </div>
+            <button class="btn btn-outline btn-sm" type="button" onclick="downloadReportCsv(report.tab)">CSV 내려받기 (엑셀)</button>
+          </div>
+          ${renderReportTable(d)}
+          <p class="list-meta" style="margin: 12px 0 0;">
+            반품·취소는 처리한 날짜의 매출에서 차감됩니다. 부가세는 과세 매출(부가세 포함가)의 1/11로 계산한 참고값이며, 신고는 세무 대리인과 확인해 주세요.
+            추정 이익은 상품에 등록된 현재 매입 원가 기준입니다.
+          </p>
+        `;
+      }
+
+      function renderReportTable(d) {
+        const table = (head, rows, empty) => `
+          <div class="table-wrap"><table>
+            <thead><tr>${head.map(([label, num]) => `<th class="${num ? 'num' : ''}">${label}</th>`).join('')}</tr></thead>
+            <tbody>${rows.length ? rows.join('') : `<tr><td colspan="${head.length}">${empty}</td></tr>`}</tbody>
+          </table></div>`;
+        const tr = (cells) => `<tr>${cells.map(([value, num, style]) => `<td class="${num ? 'num' : ''}" ${style ? `style="${style}"` : ''}>${value}</td>`).join('')}</tr>`;
+        const bold = 'font-weight: 800;';
+        switch (report.tab) {
+          case 'categories':
+            return table(
+              [['카테고리'], ['상품 수', 1], ['순수량', 1], ['순매출', 1], ['비중', 1], ['추정 이익', 1], ['이익률', 1]],
+              d.categories.map((c) => tr([[h(c.category_name)], [c.product_count, 1], [c.net_quantity, 1], [money(c.net_amount), 1, bold], [pct(c.share), 1], [c.margin_amount == null ? '-' : money(c.margin_amount), 1], [pct(c.margin_rate), 1]])),
+              '판매 내역이 없습니다.'
+            );
+          case 'staff':
+            return table(
+              [['판매자'], ['판매', 1], ['반품', 1], ['총매출', 1], ['반품액', 1], ['순매출', 1], ['할인', 1], ['객단가', 1]],
+              d.staff.map((s) => tr([[`${h(s.staff_name)}${s.role === 'POS_STAFF' ? ' <span class="badge gray">직원</span>' : ''}`], [s.sale_count, 1], [s.refund_count, 1], [money(s.gross_amount), 1], [money(s.refund_amount), 1], [money(s.net_amount), 1, bold], [money(s.discount_amount), 1], [money(s.avg_ticket), 1]])),
+              d.channel === 'ONLINE' ? '온라인 주문은 판매자 구분이 없습니다.' : '매장 POS 판매 내역이 없습니다.'
+            );
+          case 'payments':
+            return table(
+              [['결제수단'], ['건수', 1], ['결제', 1], ['환불', 1], ['순액', 1]],
+              d.payments.map((p) => tr([[h(d.method_labels[p.payment_method] || p.payment_method)], [p.pay_count, 1], [money(p.paid_amount), 1], [money(p.refunded_amount), 1], [money(p.net_amount), 1, bold]])),
+              '결제 내역이 없습니다.'
+            );
+          case 'weekday':
+            return table(
+              [['요일'], ['일수', 1], ['판매 건수', 1], ['순매출', 1], ['일평균 순매출', 1]],
+              d.weekdays.map((w) => tr([[`${w.label}요일`], [w.days, 1], [w.sale_count, 1], [money(w.net_amount), 1, bold], [money(w.avg_net_amount), 1]])),
+              '-'
+            );
+          case 'hourly':
+            return table(
+              [['시간대'], ['판매 건수', 1], ['순매출', 1]],
+              d.hourly.filter((r) => r.sale_count || r.net_amount).map((r) => tr([[`${String(r.hour).padStart(2, '0')}:00 ~ ${String(r.hour).padStart(2, '0')}:59`], [r.sale_count, 1], [money(r.net_amount), 1, bold]])),
+              '판매 내역이 없습니다.'
+            );
+          case 'trend':
+            return table(
+              [[d.granularity === 'MONTH' ? '월' : '일자'], ['판매 건수', 1], ['총매출', 1], ['반품', 1], ['순매출', 1], ['매장 POS', 1], ['온라인', 1]],
+              d.trend.filter((r) => r.sale_count || r.net_amount || r.refund_amount).map((r) => tr([[h(r.period)], [r.sale_count, 1], [money(r.gross_amount), 1], [money(r.refund_amount), 1], [money(r.net_amount), 1, bold], [money(r.pos_amount), 1], [money(r.online_amount), 1]])),
+              '판매 내역이 없습니다.'
+            );
+          case 'tax':
+            return table(
+              [['구분'], ['금액', 1]],
+              [
+                tr([['과세 매출 (부가세 포함)'], [money(d.tax.taxable_amount), 1, bold]]),
+                tr([['&nbsp;&nbsp;공급가액'], [money(d.tax.supply_amount), 1]]),
+                tr([['&nbsp;&nbsp;부가세'], [money(d.tax.vat_amount), 1]]),
+                ...(d.tax.delivery_fee ? [tr([['&nbsp;&nbsp;(배송비 포함분)'], [money(d.tax.delivery_fee), 1]])] : []),
+                tr([['면세 매출'], [money(d.tax.exempt_amount), 1, bold]]),
+                tr([['합계'], [money(d.tax.taxable_amount + d.tax.exempt_amount), 1, bold]])
+              ],
+              '-'
+            );
+          default:
+            return table(
+              [['상품'], ['과세'], ['판매', 1], ['반품', 1], ['순매출', 1], ['비중', 1], ['원가', 1], ['추정 이익', 1], ['이익률', 1]],
+              d.products.map((p) => tr([
+                [`<div class="list-title">${h(p.product_name)}</div><div class="list-meta">${h(p.category_name)}${p.product_type === 'OTC' ? ' · 일반의약품' : ''}</div>`],
+                [p.tax_type === 'EXEMPT' ? '<span class="badge green">면세</span>' : '<span class="badge gray">과세</span>'],
+                [p.sold_quantity, 1],
+                [p.refunded_quantity || '-', 1],
+                [money(p.net_amount), 1, bold],
+                [pct(p.share), 1],
+                [p.cost_price == null ? '<span class="list-meta">미등록</span>' : money(p.cost_price), 1],
+                [p.margin_amount == null ? '-' : money(p.margin_amount), 1],
+                [pct(p.margin_rate), 1]
+              ])),
+              '판매 내역이 없습니다.'
+            );
+        }
+      }
+
+      async function downloadReportCsv(type) {
+        try {
+          const res = await fetch(`/api/reports/sales.csv?type=${encodeURIComponent(type)}&${reportQuery()}`, {
+            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+          });
+          if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || 'CSV를 내려받지 못했습니다.');
+          const disposition = res.headers.get('Content-Disposition') || '';
+          const match = disposition.match(/filename\*=UTF-8''([^;]+)/);
+          const filename = match ? decodeURIComponent(match[1]) : `sales-${type}.csv`;
+          const url = URL.createObjectURL(await res.blob());
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+          showToast(`${filename} 파일을 내려받았습니다.`);
+        } catch (error) {
+          showToast(error.message);
+        }
+      }
 
       /* ---------- 거래처 · 발주 ---------- */
 
@@ -2221,6 +2578,7 @@
           event.target.stock_quantity.value = '10';
           event.target.status.value = 'ON_SALE';
           event.target.product_type.value = 'GENERAL';
+          event.target.tax_type.value = 'TAXABLE';
           showToast('상품이 등록되었습니다.');
           loadOwner();
         } catch (error) {

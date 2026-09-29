@@ -41,8 +41,8 @@ function insertOrderItems(orderId, cartItems, pharmacyId, userId) {
   for (const item of cartItems) {
     const price = Number(item.discount_price || item.price);
     run(
-      `INSERT INTO order_items (order_id, product_id, product_name, quantity, price, total_price, product_type)
-       VALUES (@order_id, @product_id, @product_name, @quantity, @price, @total_price, @product_type)`,
+      `INSERT INTO order_items (order_id, product_id, product_name, quantity, price, total_price, product_type, tax_type)
+       VALUES (@order_id, @product_id, @product_name, @quantity, @price, @total_price, @product_type, @tax_type)`,
       {
         order_id: orderId,
         product_id: item.id,
@@ -50,7 +50,8 @@ function insertOrderItems(orderId, cartItems, pharmacyId, userId) {
         quantity: item.quantity,
         price,
         total_price: price * item.quantity,
-        product_type: item.product_type || 'GENERAL'
+        product_type: item.product_type || 'GENERAL',
+        tax_type: item.tax_type || 'TAXABLE'
       }
     );
 
