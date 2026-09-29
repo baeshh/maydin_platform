@@ -156,8 +156,12 @@ function migratePos(schema) {
   addColumnIfMissing('pharmacies', 'point_min_use', 'INTEGER NOT NULL DEFAULT 1000');
   addColumnIfMissing('customers', 'point_balance', 'INTEGER NOT NULL DEFAULT 0');
   addColumnIfMissing('orders', 'points_earned', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('products', 'supplier_id', 'INTEGER');
 
   db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_suppliers_pharmacy ON suppliers(pharmacy_id, status);
+    CREATE INDEX IF NOT EXISTS idx_purchase_orders_pharmacy ON purchase_orders(pharmacy_id, status, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_purchase_order_items_product ON purchase_order_items(product_id);
     CREATE INDEX IF NOT EXISTS idx_point_ledger_customer ON point_ledger(customer_id, id DESC);
     CREATE INDEX IF NOT EXISTS idx_product_lots_product ON product_lots(product_id, expiry_date);
     CREATE INDEX IF NOT EXISTS idx_product_lots_expiry ON product_lots(pharmacy_id, expiry_date) WHERE remaining_quantity > 0;

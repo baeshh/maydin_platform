@@ -356,6 +356,55 @@ CREATE TABLE IF NOT EXISTS product_lots (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS suppliers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  business_number TEXT,
+  contact_name TEXT,
+  phone TEXT,
+  email TEXT,
+  memo TEXT,
+  status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'INACTIVE')),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS purchase_orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  supplier_id INTEGER NOT NULL REFERENCES suppliers(id),
+  po_number TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'DRAFT'
+    CHECK (status IN ('DRAFT', 'ORDERED', 'PARTIAL', 'RECEIVED', 'CLOSED', 'CANCELLED')),
+  expected_date TEXT,
+  memo TEXT,
+  total_amount INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  ordered_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  ordered_at TEXT,
+  received_at TEXT,
+  closed_at TEXT,
+  cancelled_at TEXT,
+  cancel_reason TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (pharmacy_id, po_number)
+);
+
+CREATE TABLE IF NOT EXISTS purchase_order_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  purchase_order_id INTEGER NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+  product_id INTEGER NOT NULL REFERENCES products(id),
+  product_name TEXT NOT NULL,
+  barcode TEXT,
+  quantity INTEGER NOT NULL CHECK (quantity > 0),
+  received_quantity INTEGER NOT NULL DEFAULT 0 CHECK (received_quantity >= 0 AND received_quantity <= quantity),
+  unit_cost INTEGER NOT NULL DEFAULT 0 CHECK (unit_cost >= 0),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (purchase_order_id, product_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_users_role_pharmacy ON users(role, pharmacy_id);
 CREATE INDEX IF NOT EXISTS idx_products_pharmacy ON products(pharmacy_id);
 CREATE INDEX IF NOT EXISTS idx_orders_pharmacy ON orders(pharmacy_id);

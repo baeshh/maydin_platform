@@ -1643,7 +1643,8 @@ router.get(
       `SELECT l.id, l.action, l.target_type, l.target_id, l.description, l.created_at, u.name AS user_name, u.role AS user_role
        FROM admin_logs l
        LEFT JOIN users u ON u.id = l.user_id
-       WHERE l.pharmacy_id = @pharmacy_id AND l.action LIKE 'POS_%'
+       WHERE l.pharmacy_id = @pharmacy_id
+         AND (l.action GLOB 'POS_*' OR l.action GLOB 'POINT_*' OR l.action GLOB 'PO_*' OR l.action GLOB 'SUPPLIER_*')
        ORDER BY l.id DESC
        LIMIT 150`,
       { pharmacy_id: req.pharmacyId }
