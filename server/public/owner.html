@@ -788,10 +788,33 @@
 
           <section class="card" id="customers">
             <div class="card-header">
-              <h2 class="card-title">고객 목록</h2>
-              <span id="customerListCount" class="list-meta">0명</span>
+              <h2 class="card-title">고객 목록 <span id="customerListCount" class="list-meta">0명</span></h2>
+              <button class="btn btn-outline btn-sm" type="button" onclick="togglePointPolicy()">포인트 정책</button>
             </div>
+            <form id="pointPolicyForm" class="form-grid" hidden style="margin-bottom: 16px;">
+              <div class="form-group full">
+                <label class="form-label" style="display: flex; align-items: center; gap: 8px;">
+                  <input type="checkbox" name="enabled" id="pointEnabled" /> 멤버십 포인트 사용
+                </label>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="pointEarnRate">적립률 (%)</label>
+                <input id="pointEarnRate" class="form-control" name="earn_rate" type="number" min="0" max="10" step="0.1" />
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="pointMinUse">최소 사용 포인트 (P)</label>
+                <input id="pointMinUse" class="form-control" name="min_use" type="number" min="0" max="100000" step="100" />
+              </div>
+              <p class="list-meta full" style="grid-column: 1 / -1; margin: 0;">
+                매장 POS 결제 금액 중 일반의약품을 뺀 금액에 적립되고, 1P = 1원으로 사용합니다. 일반의약품은 적립·사용 대상이 아닙니다.
+              </p>
+              <div class="form-group full inline-actions">
+                <button class="btn btn-primary" type="submit">저장</button>
+                <button class="btn btn-outline" type="button" onclick="togglePointPolicy(false)">닫기</button>
+              </div>
+            </form>
             <div id="customerList" class="loading">고객 정보를 불러오는 중입니다.</div>
+            <div id="pointPanel" hidden style="margin-top: 16px;"></div>
           </section>
 
           <section class="card full-width" id="orders">
@@ -1100,11 +1123,110 @@
                   <div class="list-title">${h(customer.name)}</div>
                   <div class="list-meta">${h(customer.email)}<br />주문 ${Number(customer.order_count || 0).toLocaleString()}건 · 최근 ${h(formatDate(customer.last_order_at))}</div>
                 </div>
-                <div class="list-value">누적 ${money(customer.total_purchase_amount)}</div>
+                <div class="list-value" style="text-align: right;">
+                  누적 ${money(customer.total_purchase_amount)}
+                  <div><button class="muted-link" type="button" onclick="openCustomerPoints(${customer.id})">포인트 ${Number(customer.point_balance || 0).toLocaleString()}P</button></div>
+                </div>
               </div>
             `).join('')}
           </div>
         `;
+      }
+
+      const POINT_ENTRY_LABELS = { EARN: '적립', USE: '사용', EARN_CANCEL: '적립 취소', USE_RESTORE: '사용 복원', ADJUST: '수동 조정' };
+
+      async function togglePointPolicy(show) {
+        const form = $('#pointPolicyForm');
+        form.hidden = show === undefined ? !form.hidden : !show;
+        if (form.hidden) return;
+        try {
+          const { policy } = await api.request('/points/settings');
+          $('#pointEnabled').checked = policy.enabled;
+          $('#pointEarnRate').value = policy.earn_rate;
+          $('#pointMinUse').value = policy.min_use;
+        } catch (error) {
+          showToast(error.message);
+        }
+      }
+
+      $('#pointPolicyForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try {
+          const { policy } = await api.request('/points/settings', {
+            method: 'PATCH',
+            body: {
+              enabled: $('#pointEnabled').checked,
+              earn_rate: Number($('#pointEarnRate').value),
+              min_use: Number($('#pointMinUse').value)
+            }
+          });
+          showToast(`포인트 정책을 저장했습니다. (${policy.enabled ? `적립 ${policy.earn_rate}%` : '사용 중지'})`);
+          togglePointPolicy(false);
+        } catch (error) {
+          showToast(error.message);
+        }
+      });
+
+      function renderPointPanel(data) {
+        const { customer, ledger } = data;
+        const panel = $('#pointPanel');
+        panel.hidden = false;
+        panel.innerHTML = `
+          <div class="card-header" style="margin-bottom: 10px;">
+            <h3 class="card-title" style="font-size: 16px;">${h(customer.name)} · 보유 ${Number(customer.point_balance).toLocaleString()}P</h3>
+            <button class="muted-link" type="button" onclick="$('#pointPanel').hidden = true">닫기</button>
+          </div>
+          <form class="inline-actions" style="margin-bottom: 12px;" onsubmit="adjustPoints(event, ${customer.id})">
+            <input class="form-control" name="points" type="number" step="1" placeholder="+500 / -300" style="width: 130px;" required />
+            <input class="form-control" name="reason" placeholder="조정 사유 (필수)" style="flex: 1; min-width: 160px;" required />
+            <button class="btn btn-primary btn-sm" type="submit">수동 조정</button>
+          </form>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>일시</th><th>구분</th><th>포인트</th><th>잔액</th></tr></thead>
+              <tbody>
+                ${
+                  ledger
+                    .map(
+                      (l) => `<tr>
+                        <td>${h(formatDate(l.created_at))}</td>
+                        <td>${POINT_ENTRY_LABELS[l.entry_type] || h(l.entry_type)}<div class="list-meta">${h(l.order_number || l.reason || '')}${l.created_by_name ? ` · ${h(l.created_by_name)}` : ''}</div></td>
+                        <td style="font-weight: 800; color: ${l.points > 0 ? '#3182f6' : '#f04452'};">${l.points > 0 ? '+' : ''}${l.points.toLocaleString()}P</td>
+                        <td>${l.balance_after.toLocaleString()}P</td>
+                      </tr>`
+                    )
+                    .join('') || '<tr><td colspan="4">포인트 내역이 없습니다.</td></tr>'
+                }
+              </tbody>
+            </table>
+          </div>
+        `;
+      }
+
+      async function openCustomerPoints(id) {
+        try {
+          renderPointPanel(await api.request(`/points/customers/${id}`));
+          $('#pointPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } catch (error) {
+          showToast(error.message);
+        }
+      }
+
+      async function adjustPoints(event, id) {
+        event.preventDefault();
+        const form = event.target;
+        try {
+          const data = await api.request(`/points/customers/${id}/adjust`, {
+            method: 'POST',
+            body: { points: Number(form.points.value), reason: form.reason.value }
+          });
+          showToast(`포인트를 조정했습니다. 잔액 ${data.balance.toLocaleString()}P`);
+          renderPointPanel(data);
+          const { customers } = await api.request('/dashboard/customers');
+          renderCustomers(customers);
+        } catch (error) {
+          showToast(error.message);
+        }
       }
 
       function renderOrders(orders) {

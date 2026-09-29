@@ -30,6 +30,8 @@
       .member-barcode svg, .pickup-code svg { display:block; margin:0 auto; max-width:100%; }
       .pickup-code { background:#f9fafb; border:1px dashed var(--line); border-radius:14px; margin-top:12px; padding:10px 10px 4px; text-align:center; }
       .pickup-code p { color:var(--sub); font-size:12px; font-weight:700; margin-bottom:4px; }
+      .point-balance { background:rgba(255,255,255,.18); border:0; border-radius:999px; color:#fff; cursor:pointer; font-size:13px; font-weight:700; margin-top:8px; padding:6px 12px; }
+      .point-row { align-items:center; border-top:1px solid var(--line); display:flex; justify-content:space-between; padding:10px 0; }
       .toast { background:rgba(25,31,40,.92); border-radius:12px; bottom:24px; color:#fff; font-size:14px; font-weight:700; left:50%; opacity:0; padding:12px 16px; pointer-events:none; position:fixed; transform:translateX(-50%) translateY(12px); transition:.2s ease; z-index:50; }
       .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
     </style>
@@ -110,16 +112,50 @@
             <div>
               <p class="muted" style="color:rgba(255,255,255,.82);">${membership.pharmacy_name} 멤버십</p>
               <h2>${membership.name}님</h2>
-              <p class="muted" style="margin-top:6px;">매장 결제 때 QR을 보여 주시면<br />구매 내역이 자동으로 쌓입니다.</p>
+              ${membership.point_enabled
+                ? `<button class="point-balance" type="button" onclick="togglePoints()">보유 포인트 <b>${Number(membership.point_balance || 0).toLocaleString()}P</b> ›</button>`
+                : ''}
+              <p class="muted" style="margin-top:6px;">매장 결제 때 QR을 보여 주시면<br />${membership.point_enabled ? '포인트가 적립되고 구매 내역이 쌓입니다.' : '구매 내역이 자동으로 쌓입니다.'}</p>
             </div>
             <div class="member-qr" id="memberQr"></div>
             <div class="member-barcode"><svg data-barcode="${membership.member_code}" data-height="40" data-width="1.5"></svg></div>
           </article>
+          <article class="card" id="pointHistory" hidden></article>
         `;
         await Promise.all([
           ScanKit.renderQr($('#memberQr'), membership.qr_payload, { cellSize: 4 }),
           ScanKit.renderBarcodes($('#membership'))
         ]);
+      }
+
+      const POINT_ENTRY_LABELS = { EARN: '적립', USE: '사용', EARN_CANCEL: '적립 취소', USE_RESTORE: '사용 취소', ADJUST: '약국 조정' };
+
+      function formatDate(value) {
+        const date = new Date(`${String(value).replace(' ', 'T')}Z`);
+        return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
+      }
+
+      async function togglePoints() {
+        const box = $('#pointHistory');
+        box.hidden = !box.hidden;
+        if (box.hidden) return;
+        try {
+          const data = await api.request('/points/me');
+          box.innerHTML = `
+            <div class="top"><strong>포인트 내역</strong><span class="badge">${data.balance.toLocaleString()}P</span></div>
+            <p class="muted" style="margin-bottom:10px;">매장 구매 금액의 ${data.policy.earn_rate}% 적립 · ${data.policy.min_use.toLocaleString()}P 이상부터 1P = 1원으로 사용할 수 있어요. 일반의약품은 적립·사용 대상이 아닙니다.</p>
+            ${data.ledger.length
+              ? data.ledger.map((l) => `
+                  <div class="point-row">
+                    <div><b>${POINT_ENTRY_LABELS[l.entry_type] || l.entry_type}</b><p class="muted">${formatDate(l.created_at)}${l.order_number ? ` · ${l.order_number}` : ''}</p></div>
+                    <div style="text-align:right;"><b style="color:${l.points > 0 ? 'var(--blue)' : '#f04452'};">${l.points > 0 ? '+' : ''}${l.points.toLocaleString()}P</b><p class="muted">잔액 ${l.balance_after.toLocaleString()}P</p></div>
+                  </div>`).join('')
+              : '<p class="muted">아직 포인트 내역이 없습니다.</p>'}
+          `;
+        } catch (error) {
+          box.hidden = true;
+          toast(error.message);
+        }
       }
 
       if (requireCustomerLogin(pharmacyCode)) {

@@ -158,7 +158,7 @@ router.get('/me', authenticate, (req, res) => {
 router.get('/membership', authenticate, (req, res) => {
   if (req.user.role !== 'CUSTOMER') return res.status(403).json({ message: '고객 계정만 멤버십을 조회할 수 있습니다.' });
   const customer = getOne(
-    `SELECT c.id, c.name, c.phone, c.member_code, p.pharmacy_name
+    `SELECT c.id, c.name, c.phone, c.member_code, c.point_balance, p.pharmacy_name, p.point_enabled
      FROM customers c
      JOIN pharmacies p ON p.id = c.pharmacy_id
      WHERE c.user_id = @user_id`,
@@ -171,7 +171,9 @@ router.get('/membership', authenticate, (req, res) => {
       name: customer.name,
       pharmacy_name: customer.pharmacy_name,
       member_code: memberCode,
-      qr_payload: `MAYDIN-MEMBER:${memberCode}`
+      qr_payload: `MAYDIN-MEMBER:${memberCode}`,
+      point_balance: customer.point_balance,
+      point_enabled: customer.point_enabled === 1
     }
   });
 });

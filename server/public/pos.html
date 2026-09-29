@@ -477,6 +477,19 @@
         font-weight: 600;
       }
 
+      .point-chip {
+        margin-top: 6px;
+        border: 0;
+        border-radius: 8px;
+        background: var(--blue-soft);
+        color: var(--toss-blue);
+        padding: 4px 10px;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
       .linked-counsel {
         display: flex;
         align-items: center;
@@ -1284,6 +1297,7 @@
         CASH: '현금',
         TRANSFER: '계좌이체',
         EASY_PAY: '간편결제',
+        POINT: '포인트',
         MOCK_CARD: '온라인 카드',
         NONE: '결제 없음'
       };
@@ -1312,8 +1326,12 @@
         POS_STAFF_CREATE: '직원 등록',
         POS_STAFF_UPDATE: '직원 수정',
         POS_STAFF_DEACTIVATE: '직원 중지',
-        POS_STAFF_PASSWORD_RESET: '직원 비밀번호'
+        POS_STAFF_PASSWORD_RESET: '직원 비밀번호',
+        POINT_SETTING: '포인트 정책',
+        POINT_ADJUST: '포인트 조정',
+        POINT_SHORTFALL: '포인트 미회수'
       };
+      const POINT_ENTRY_LABELS = { EARN: '적립', USE: '사용', EARN_CANCEL: '적립 취소', USE_RESTORE: '사용 복원', ADJUST: '수동 조정' };
       const STOCK_LOG_LABELS = {
         RECEIVE: '입고',
         DISPOSE: '폐기',
@@ -1974,6 +1992,26 @@
         return { subtotal, discount, final: subtotal - discount };
       }
 
+      function pointsEnabled() {
+        return !!state.ctx?.point_policy?.enabled;
+      }
+
+      // 서버와 같은 기준: 일반의약품을 뺀 금액(할인 비례 차감)까지만 포인트로 결제할 수 있다.
+      function pointEligibleAmount() {
+        const t = totals();
+        const general = state.cart
+          .filter((line) => line.product.product_type !== 'OTC')
+          .reduce((sum, line) => sum + line.product.sale_price * line.quantity, 0);
+        if (t.subtotal === 0) return 0;
+        return Math.max(0, general - Math.ceil((t.discount * general) / t.subtotal));
+      }
+
+      function maxUsablePoints() {
+        if (!state.customer || !pointsEnabled() || state.payMode !== 'sale') return 0;
+        const other = state.payRows.filter((row) => row.method !== 'POINT').reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
+        return Math.max(0, Math.min(state.customer.point_balance || 0, pointEligibleAmount(), payTarget() - other));
+      }
+
       function renderCart() {
         const box = document.getElementById('cartLines');
         if (state.cart.length === 0) {
@@ -2020,6 +2058,7 @@
               <div>
                 <div class="customer-name">${h(c.name)} <span class="badge blue">회원 M${c.id}</span></div>
                 <div class="customer-sub">${h(maskPhone(c.phone))} · 구매 ${Number(c.order_count || 0)}회${recent ? ` · 최근 ${fmtDateTime(recent.created_at).slice(0, 12)}` : ''}</div>
+                ${pointsEnabled() ? `<button class="point-chip" type="button" onclick="openPointHistory(${c.id})">포인트 <b>${Number(c.point_balance || 0).toLocaleString()}P</b></button>` : ''}
               </div>
               <div class="chips">
                 <button class="btn btn-outline btn-sm" type="button" onclick="openCustomerSearch()">변경</button>
@@ -2113,7 +2152,7 @@
                       <div class="muted" style="font-size: 13px; font-weight: 600; margin-top: 2px;">${h(c.phone)}</div>
                     </div>
                     <div style="text-align: right; font-size: 13px; font-weight: 700;">
-                      구매 ${Number(c.order_count)}회<br /><span class="muted">${won(c.total_amount)}</span>
+                      구매 ${Number(c.order_count)}회<br /><span class="muted">${won(c.total_amount)}</span>${pointsEnabled() ? `<br /><span style="color: var(--toss-blue);">${Number(c.point_balance || 0).toLocaleString()}P</span>` : ''}
                     </div>
                   </button>
                 `
@@ -2138,6 +2177,38 @@
             closeModal();
             toast(`${data.customer.name} 회원으로 판매합니다.`);
           }
+        } catch (error) {
+          toast(error.message, 'error');
+        }
+      }
+
+      async function openPointHistory(customerId) {
+        try {
+          const data = await api.request(`/points/customers/${customerId}`);
+          const policy = state.ctx.point_policy;
+          openModal(`
+            ${modalHead(`${h(data.customer.name)} 회원 포인트`)}
+            <div class="modal-body">
+              <div class="pay-total">
+                <span class="muted" style="font-weight: 700;">보유 포인트</span>
+                <div class="amount">${Number(data.customer.point_balance).toLocaleString()}P</div>
+                <div class="muted" style="font-size: 13px; font-weight: 600;">적립 ${policy.earn_rate}% · ${Number(policy.min_use).toLocaleString()}P 이상부터 1P = 1원으로 사용 · 일반의약품은 적립·사용 제외</div>
+              </div>
+              <table class="table">
+                <thead><tr><th>일시</th><th>구분</th><th class="num">포인트</th><th class="num">잔액</th></tr></thead>
+                <tbody>
+                  ${
+                    data.ledger
+                      .map(
+                        (l) => `<tr><td>${fmtDateTime(l.created_at)}</td><td>${POINT_ENTRY_LABELS[l.entry_type] || h(l.entry_type)}${l.order_number ? `<div class="muted" style="font-size: 12px;">${h(l.order_number)}</div>` : ''}${l.reason && l.entry_type === 'ADJUST' ? `<div class="muted" style="font-size: 12px;">${h(l.reason)}</div>` : ''}</td><td class="num" style="font-weight: 800; color: ${l.points > 0 ? 'var(--toss-blue)' : 'var(--danger)'};">${l.points > 0 ? '+' : ''}${l.points.toLocaleString()}P</td><td class="num">${l.balance_after.toLocaleString()}P</td></tr>`
+                      )
+                      .join('') || '<tr><td colspan="4" class="muted">포인트 내역이 없습니다.</td></tr>'
+                  }
+                </tbody>
+              </table>
+            </div>
+            <div class="modal-foot"><button class="btn btn-primary" type="button" onclick="closeModal()">닫기</button></div>
+          `);
         } catch (error) {
           toast(error.message, 'error');
         }
@@ -2219,7 +2290,41 @@
         return !!state.ctx?.van?.is_demo;
       }
 
+      function addPointRow() {
+        const policy = state.ctx.point_policy;
+        if (state.payRows.some((row) => row.method === 'POINT')) return toast('포인트는 한 번만 추가할 수 있습니다.', 'error');
+        if ((state.customer?.point_balance || 0) < policy.min_use) {
+          return toast(`보유 포인트가 ${Number(policy.min_use).toLocaleString()}P 미만이라 사용할 수 없습니다.`, 'error');
+        }
+        const usable = Math.min(state.customer.point_balance, pointEligibleAmount(), payTarget());
+        if (usable < policy.min_use) return toast('포인트로 결제할 수 있는 금액이 부족합니다. (일반의약품 제외)', 'error');
+
+        let excess = paidSum() + usable - payTarget();
+        for (const row of state.payRows) {
+          if (excess <= 0) break;
+          if (row.van || row.cash_receipt_number) continue;
+          const cut = Math.min(excess, Number(row.amount) || 0);
+          row.amount = (Number(row.amount) || 0) - cut;
+          excess -= cut;
+        }
+        state.payRows = state.payRows.filter((row) => row.van || Number(row.amount) > 0);
+        state.payRows.unshift({ method: 'POINT', amount: excess > 0 ? usable - excess : usable });
+        renderPayment();
+      }
+
+      function useMaxPoints(index) {
+        const row = state.payRows[index];
+        row.amount = maxUsablePoints();
+        renderPayment();
+      }
+
+      function pointRowHtml(row, index) {
+        const policy = state.ctx.point_policy;
+        return `<div class="notice">보유 <b>${Number(state.customer?.point_balance || 0).toLocaleString()}P</b> · 이번 결제 최대 <b>${maxUsablePoints().toLocaleString()}P</b> · ${Number(policy.min_use).toLocaleString()}P 이상부터 사용 · 일반의약품 금액은 포인트 결제 불가 <button class="discount-link" type="button" onclick="useMaxPoints(${index})">최대 사용</button></div><div class="notice" id="point-warn-${index}" style="display: none;"></div>`;
+      }
+
       function addPayRow(method, fillRemaining = true) {
+        if (method === 'POINT') return addPointRow();
         const remaining = payTarget() - paidSum();
         state.payRows.push({
           method,
@@ -2255,7 +2360,7 @@
 
       function payAll(method) {
         voidPendingVan();
-        state.payRows = [];
+        state.payRows = state.payRows.filter((row) => row.method === 'POINT');
         addPayRow(method);
       }
 
@@ -2419,7 +2524,9 @@
                   ? cashRowHtml(row, index, common)
                   : row.method === 'EASY_PAY'
                     ? easyPayRowHtml(row, index, common)
-                    : '';
+                    : row.method === 'POINT'
+                      ? pointRowHtml(row, index)
+                      : '';
             return `
               <div class="pay-row">
                 <div class="pay-row-head">
@@ -2450,7 +2557,9 @@
             ${vanDemo() ? '<div class="notice" style="margin-bottom: 10px; background: #f3e8ff; color: #6d28d9;">VAN 자동 승인 <b>(데모)</b> 모드입니다. 실제 VAN 계약 전이라 승인번호를 모의로 발급하며, 실제 돈은 결제되지 않습니다.</div>' : ''}
             <label class="label">결제수단 추가 (여러 개 선택하면 복합결제)</label>
             <div class="method-grid">
-              ${['CARD', 'CASH', 'TRANSFER', 'EASY_PAY'].map((m) => `<button class="method-btn" type="button" onclick="addPayRow('${m}')">${METHOD_LABELS[m]}</button>`).join('')}
+              ${['CARD', 'CASH', 'TRANSFER', 'EASY_PAY', ...(state.payMode === 'sale' && state.customer && pointsEnabled() ? ['POINT'] : [])]
+                .map((m) => `<button class="method-btn" type="button" onclick="addPayRow('${m}')">${m === 'POINT' ? `포인트 <span class="muted" style="font-size: 12px;">${Number(state.customer.point_balance || 0).toLocaleString()}P</span>` : METHOD_LABELS[m]}</button>`)
+                .join('')}
             </div>
             ${rowsHtml || '<div class="notice">결제수단을 선택하세요.</div>'}
             <div class="remain" id="payRemain"></div>
@@ -2491,7 +2600,29 @@
           else changeEl.innerHTML = `거스름돈 <b style="font-size: 16px;">${won(received - amount)}</b>`;
         });
         const cardMissing = state.payRows.some((row) => row.method === 'CARD' && !String(row.approval_number).trim());
-        document.getElementById('payConfirm').disabled = remaining !== 0 || (state.payRows.length === 0 && target !== 0) || cardMissing;
+        let pointInvalid = false;
+        state.payRows.forEach((row, index) => {
+          if (row.method !== 'POINT') return;
+          const warn = document.getElementById(`point-warn-${index}`);
+          const amount = Number(row.amount) || 0;
+          const policy = state.ctx.point_policy;
+          const message =
+            amount > (state.customer?.point_balance || 0)
+              ? '보유 포인트보다 많이 사용할 수 없습니다.'
+              : amount > pointEligibleAmount()
+                ? '일반의약품을 뺀 금액까지만 포인트로 결제할 수 있습니다.'
+                : amount < policy.min_use
+                  ? `${Number(policy.min_use).toLocaleString()}P 이상부터 사용할 수 있습니다.`
+                  : '';
+          if (message) pointInvalid = true;
+          if (warn) {
+            warn.style.display = message ? '' : 'none';
+            warn.className = 'notice danger';
+            warn.textContent = message;
+          }
+        });
+        document.getElementById('payConfirm').disabled =
+          remaining !== 0 || (state.payRows.length === 0 && target !== 0) || cardMissing || pointInvalid;
       }
 
       function payloadPayments() {
@@ -2590,6 +2721,13 @@
               `
               )
               .join('')}
+            ${
+              r.points && (r.points.earned || payments.some((p) => p.payment_method === 'POINT'))
+                ? `<div class="hr"></div>
+                   ${r.points.earned ? `<div class="row"><span>${r.points.earned > 0 ? '적립 포인트' : '적립 취소'}</span><span>${r.points.earned > 0 ? '+' : ''}${r.points.earned.toLocaleString()}P</span></div>` : ''}
+                   ${r.points.balance != null ? `<div class="row"><span>현재 포인트 잔액</span><span>${r.points.balance.toLocaleString()}P</span></div>` : ''}`
+                : ''
+            }
             ${order.order_status === 'CANCELED' ? '<div class="title-tag">전체 취소된 거래</div>' : ''}
             ${order.refund_reason && isRefund ? `<div>사유: ${h(order.refund_reason)}</div>` : ''}
             <div class="hr"></div>

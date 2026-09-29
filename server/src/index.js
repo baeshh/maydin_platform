@@ -17,6 +17,7 @@ const qrCodeRoutes = require('./routes/qrcodes');
 const inquiryRoutes = require('./routes/inquiries');
 const posRoutes = require('./routes/pos');
 const staffRoutes = require('./routes/staff');
+const pointRoutes = require('./routes/points');
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -43,6 +44,7 @@ app.use('/api/qrcodes', qrCodeRoutes);
 app.use('/api/inquiries', inquiryRoutes);
 app.use('/api/pos', posRoutes);
 app.use('/api/staff', staffRoutes);
+app.use('/api/points', pointRoutes);
 
 const nodeModules = path.join(__dirname, '../node_modules');
 const vendorFiles = {

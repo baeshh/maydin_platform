@@ -151,6 +151,22 @@ function migratePos(schema) {
   addColumnIfMissing('payments', 'van_transaction_id', 'INTEGER');
   addColumnIfMissing('payments', 'installment_months', 'INTEGER');
 
+  addColumnIfMissing('pharmacies', 'point_enabled', 'INTEGER NOT NULL DEFAULT 1');
+  addColumnIfMissing('pharmacies', 'point_earn_rate', 'REAL NOT NULL DEFAULT 1');
+  addColumnIfMissing('pharmacies', 'point_min_use', 'INTEGER NOT NULL DEFAULT 1000');
+  addColumnIfMissing('customers', 'point_balance', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('orders', 'points_earned', 'INTEGER NOT NULL DEFAULT 0');
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_point_ledger_customer ON point_ledger(customer_id, id DESC);
+    CREATE TRIGGER IF NOT EXISTS trg_customers_no_negative_points
+    BEFORE UPDATE OF point_balance ON customers
+    WHEN NEW.point_balance < 0
+    BEGIN
+      SELECT RAISE(ABORT, '포인트 잔액이 부족합니다.');
+    END;
+  `);
+
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_member_code
       ON customers(member_code) WHERE member_code IS NOT NULL;

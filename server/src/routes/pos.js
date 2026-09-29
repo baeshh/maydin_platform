@@ -2,6 +2,7 @@ const express = require('express');
 const { getAll, getOne, run, transaction } = require('../db');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { VAN_COMPANIES, VAN_MODES, VanError, adapterFor, demoAdapter } = require('../services/van');
+const { PointError, pointPolicy, changePoints, pointEligibleAmount, calcEarn } = require('../services/points');
 
 const router = express.Router();
 
@@ -9,7 +10,8 @@ const PAYMENT_METHODS = {
   CARD: '카드',
   CASH: '현금',
   TRANSFER: '계좌이체',
-  EASY_PAY: '간편결제'
+  EASY_PAY: '간편결제',
+  POINT: '포인트'
 };
 
 const PICKUP_DONE_STATUSES = ['PICKED_UP', 'COMPLETED', 'CANCELED'];
@@ -29,7 +31,7 @@ function handle(fn) {
       const result = fn(req, res);
       if (result !== undefined && !res.headersSent) res.json(result);
     } catch (error) {
-      if (error instanceof PosError || error instanceof VanError) {
+      if (error instanceof PosError || error instanceof VanError || error instanceof PointError) {
         return res.status(error.status).json({ message: error.message });
       }
       if (String(error.code || '').startsWith('SQLITE_CONSTRAINT')) {
@@ -131,11 +133,12 @@ function nextOrderNumber(prefix, pharmacyId) {
   return `${base}${String(seq).padStart(4, '0')}`;
 }
 
-function normalizePayments(payments, expectedTotal, { requireCardApproval = true, allowChange = true } = {}) {
+function normalizePayments(payments, expectedTotal, { requireCardApproval = true, allowChange = true, allowPoint = true } = {}) {
   const list = Array.isArray(payments) ? payments : [];
   const normalized = list.map((payment) => {
     const method = String(payment.method || payment.payment_method || '').toUpperCase();
     if (!PAYMENT_METHODS[method]) throw new PosError('결제수단을 선택해 주세요.');
+    if (method === 'POINT' && !allowPoint) throw new PosError('이 결제에는 포인트를 사용할 수 없습니다.');
     const label = PAYMENT_METHODS[method];
     const amount = Number(payment.amount);
     if (!Number.isInteger(amount) || amount <= 0) throw new PosError(`${label} 금액이 올바르지 않습니다.`);
@@ -241,10 +244,22 @@ function attachVanOriginals(originalOrderId, payments) {
   });
 }
 
-function insertPayments(orderId, payments, { sign = 1, session, terminal, userId }) {
+function insertPayments(orderId, payments, { sign = 1, session, terminal, userId, customerId = null }) {
   for (const input of payments) {
     const payment = { ...input, provider: input.method === 'CARD' ? 'VAN_MANUAL' : 'POS' };
-    if (sign > 0 && input.van_transaction_id) {
+    if (input.method === 'POINT') {
+      if (!customerId) throw new PosError('포인트는 회원 거래에서만 사용할 수 있습니다.');
+      changePoints({
+        pharmacyId: terminal.pharmacy_id,
+        customerId,
+        orderId,
+        entryType: sign > 0 ? 'USE' : 'USE_RESTORE',
+        points: sign * -input.amount,
+        reason: sign > 0 ? '현장 결제 포인트 사용' : '취소·반품 포인트 복원',
+        userId
+      });
+      Object.assign(payment, { provider: 'POINT', approval_number: null, card_company: null, van_transaction_id: null });
+    } else if (sign > 0 && input.van_transaction_id) {
       const tx = claimVanTransaction(terminal.pharmacy_id, input, orderId);
       Object.assign(payment, {
         approval_number: tx.approval_number,
@@ -415,6 +430,9 @@ function buildReceipt(req, orderId) {
   const sameDay = getOne("SELECT date(@created_at, 'localtime') = date('now', 'localtime') AS same_day", {
     created_at: order.created_at
   }).same_day === 1;
+  const pointBalance = order.customer_id
+    ? getOne('SELECT point_balance FROM customers WHERE id = @id', { id: order.customer_id })?.point_balance ?? null
+    : null;
 
   return {
     pharmacy,
@@ -422,6 +440,7 @@ function buildReceipt(req, orderId) {
     items,
     payments,
     refunds,
+    points: order.customer_id ? { earned: order.points_earned || 0, balance: pointBalance } : null,
     payment_balances: order.order_type === 'POS_SALE' ? refundablePaymentBalances(order.id) : {},
     permissions: {
       can_cancel: isOwner(req) && order.order_type === 'POS_SALE' && order.order_status === 'COMPLETED' && sameDay,
@@ -533,7 +552,13 @@ function createRefundOrder(req, { original, lines, refundType, reason, payments,
     }
   }
 
-  insertPayments(refundOrderId, payments, { sign: -1, session, terminal, userId: req.user.id });
+  insertPayments(refundOrderId, payments, {
+    sign: -1,
+    session,
+    terminal,
+    userId: req.user.id,
+    customerId: original.customer_id
+  });
 
   run(
     `INSERT INTO refunds (
@@ -553,6 +578,52 @@ function createRefundOrder(req, { original, lines, refundType, reason, payments,
   );
 
   return { refundOrderId, refundTotal };
+}
+
+// 적립 포인트를 이미 써 버린 고객은 잔액까지만 회수하고, 못 돌려받은 포인트는 원장 사유에 남긴다.
+function reverseEarnedPoints(req, original, refundOrderId, lines, { full }) {
+  const earned = original.points_earned || 0;
+  if (!original.customer_id || earned <= 0) return null;
+  const reversedSoFar = -getOne(
+    'SELECT COALESCE(SUM(points_earned), 0) AS total FROM orders WHERE original_order_id = @id AND id != @refund_id',
+    { id: original.id, refund_id: refundOrderId }
+  ).total;
+  const remaining = earned - reversedSoFar;
+  if (remaining <= 0) return null;
+
+  let target = remaining;
+  if (!full) {
+    const items = getAll('SELECT total_price, discount_amount, product_type FROM order_items WHERE order_id = @id', {
+      id: original.id
+    });
+    const eligibleTotal = pointEligibleAmount(items);
+    const eligibleRefund = lines
+      .filter((line) => (line.item.product_type || 'GENERAL') !== 'OTC')
+      .reduce((sum, line) => sum + line.amount, 0);
+    target = eligibleTotal > 0 ? Math.min(remaining, Math.floor((earned * eligibleRefund) / eligibleTotal)) : 0;
+  }
+  if (target <= 0) return null;
+
+  const balance = getOne('SELECT point_balance FROM customers WHERE id = @id', { id: original.customer_id }).point_balance;
+  const taken = Math.min(balance, target);
+  const shortfall = target - taken;
+  run('UPDATE orders SET points_earned = @points WHERE id = @id', { id: refundOrderId, points: -target });
+  if (taken > 0 || shortfall > 0) {
+    const reason = `${original.order_number} ${full ? '취소' : '반품'} 적립 회수${shortfall > 0 ? ` · 잔액 부족으로 ${shortfall}P 미회수` : ''}`;
+    if (taken > 0) {
+      changePoints({
+        pharmacyId: req.pharmacyId,
+        customerId: original.customer_id,
+        orderId: refundOrderId,
+        entryType: 'EARN_CANCEL',
+        points: -taken,
+        reason,
+        userId: req.user.id
+      });
+    }
+    if (shortfall > 0) audit(req, 'POINT_SHORTFALL', 'ORDER', original.id, reason);
+  }
+  return { target, taken, shortfall };
 }
 
 const POS_PRODUCT_COLUMNS = `p.id, p.product_name, p.price, p.discount_price, COALESCE(p.discount_price, p.price) AS sale_price,
@@ -649,6 +720,7 @@ router.get(
       today: localToday(),
       categories,
       payment_methods: PAYMENT_METHODS,
+      point_policy: pointPolicy(req.pharmacyId),
       hold_count: heldCount(req.pharmacyId),
       inventory_alerts: inventoryAlerts(req.pharmacyId),
       permissions: {
@@ -701,7 +773,7 @@ router.get(
     const scannedCode = parseMemberCode(query);
 
     const customers = getAll(
-      `SELECT c.id, c.name, c.phone, c.email, c.created_at, c.member_code,
+      `SELECT c.id, c.name, c.phone, c.email, c.created_at, c.member_code, c.point_balance,
         COUNT(CASE WHEN o.order_type NOT IN ('POS_REFUND', 'COUNSEL') THEN o.id END) AS order_count,
         COALESCE(SUM(o.final_amount), 0) AS total_amount,
         MAX(o.created_at) AS last_order_at
@@ -733,7 +805,7 @@ router.get(
 router.get(
   '/customers/:id',
   handle((req) => {
-    const customer = getOne('SELECT id, name, phone, email, created_at, member_code FROM customers WHERE id = @id AND pharmacy_id = @pharmacy_id', {
+    const customer = getOne('SELECT id, name, phone, email, created_at, member_code, point_balance FROM customers WHERE id = @id AND pharmacy_id = @pharmacy_id', {
       id: Number(req.params.id),
       pharmacy_id: req.pharmacyId
     });
@@ -1020,7 +1092,35 @@ router.post(
         );
       });
 
-      insertPayments(orderId, payments, { session, terminal, userId: req.user.id });
+      const policy = pointPolicy(req.pharmacyId);
+      const pointsUsed = payments.filter((p) => p.method === 'POINT').reduce((sum, p) => sum + p.amount, 0);
+      const eligible = pointEligibleAmount(
+        getAll('SELECT total_price, discount_amount, product_type FROM order_items WHERE order_id = @id', { id: orderId })
+      );
+      if (pointsUsed > 0) {
+        if (!customer) throw new PosError('포인트는 회원을 선택한 뒤 사용할 수 있습니다.');
+        if (!policy.enabled) throw new PosError('이 약국은 포인트 사용을 중지했습니다.');
+        if (pointsUsed < policy.min_use) throw new PosError(`포인트는 ${policy.min_use.toLocaleString('ko-KR')}P 이상부터 사용할 수 있습니다.`);
+        if (pointsUsed > eligible) {
+          throw new PosError(`일반의약품 금액은 포인트로 결제할 수 없습니다. (포인트 사용 가능 ${won(eligible)})`);
+        }
+      }
+
+      insertPayments(orderId, payments, { session, terminal, userId: req.user.id, customerId: customer ? customer.id : null });
+
+      const earned = customer ? calcEarn(policy, eligible, pointsUsed) : 0;
+      if (earned > 0) {
+        run('UPDATE orders SET points_earned = @points WHERE id = @id', { id: orderId, points: earned });
+        changePoints({
+          pharmacyId: req.pharmacyId,
+          customerId: customer.id,
+          orderId,
+          entryType: 'EARN',
+          points: earned,
+          reason: `현장 구매 적립 ${policy.earn_rate}%`,
+          userId: req.user.id
+        });
+      }
 
       if (counsel && COUNSEL_OPEN_STATUSES.includes(counsel.order_status)) {
         run("UPDATE orders SET order_status = 'COMPLETED', updated_at = CURRENT_TIMESTAMP WHERE id = @id", {
@@ -1034,7 +1134,7 @@ router.post(
         'POS_SALE',
         'ORDER',
         orderId,
-        `현장 판매 ${won(finalAmount)} (${methods || '결제 없음'})${customer ? ` · 회원 ${customer.name}` : ' · 비회원'}`
+        `현장 판매 ${won(finalAmount)} (${methods || '결제 없음'})${customer ? ` · 회원 ${customer.name}` : ' · 비회원'}${earned > 0 ? ` · 적립 ${earned}P` : ''}`
       );
       if (discountAmount > 0) {
         audit(req, 'POS_DISCOUNT', 'ORDER', orderId, `할인 ${won(discountAmount)} · 사유: ${discountReason}`);
@@ -1156,6 +1256,7 @@ router.post(
         session,
         terminal
       });
+      reverseEarnedPoints(req, original, refundOrderId, lines, { full: true });
 
       run(
         `UPDATE payments SET payment_status = 'CANCELED', canceled_at = CURRENT_TIMESTAMP
@@ -1262,6 +1363,7 @@ router.post(
         { id: original.id }
       ).remaining;
       const nextStatus = remainingQuantity > 0 ? 'PARTIALLY_REFUNDED' : 'REFUNDED';
+      reverseEarnedPoints(req, original, refundOrderId, lines, { full: nextStatus === 'REFUNDED' });
       run(
         `UPDATE orders SET order_status = @status, payment_status = @status, updated_at = CURRENT_TIMESTAMP
          WHERE id = @id`,
@@ -1354,7 +1456,7 @@ router.post(
       let counterPayment = null;
       if (order.payment_status !== 'PAID') {
         const { terminal, session } = requireOpenSession(req);
-        const payments = normalizePayments(req.body.payments, order.final_amount);
+        const payments = normalizePayments(req.body.payments, order.final_amount, { allowPoint: false });
         insertPayments(order.id, payments, { session, terminal, userId: req.user.id });
         run(
           `UPDATE orders
