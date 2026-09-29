@@ -18,6 +18,71 @@ const METHOD_LABELS = {
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 const MONTHLY_THRESHOLD_DAYS = 62;
 const MAX_RANGE_DAYS = 1096;
+const DAY_MS = 86400000;
+
+const GROUPS = {
+  HOUR: { label: '시간', maxDays: 7, expr: "strftime('%Y-%m-%d %H', o.created_at, 'localtime')" },
+  DAY: { label: '일', maxDays: 366, expr: "date(o.created_at, 'localtime')" },
+  WEEK: { label: '주', maxDays: MAX_RANGE_DAYS, expr: "date(o.created_at, 'localtime', 'weekday 0', '-6 days')" },
+  MONTH: { label: '월', maxDays: MAX_RANGE_DAYS, expr: "strftime('%Y-%m', o.created_at, 'localtime')" },
+  YEAR: { label: '연', maxDays: MAX_RANGE_DAYS, expr: "strftime('%Y', o.created_at, 'localtime')" }
+};
+const GROUP_HEADERS = { HOUR: '시간', DAY: '일자', WEEK: '주 (월요일 시작)', MONTH: '월', YEAR: '연도' };
+
+const toMs = (date) => Date.parse(`${date}T00:00:00Z`);
+const fromMs = (ms) => new Date(ms).toISOString().slice(0, 10);
+const addDays = (date, n) => fromMs(toMs(date) + n * DAY_MS);
+const minDate = (a, b) => (a < b ? a : b);
+const maxDate = (a, b) => (a > b ? a : b);
+
+function addMonths(date, n) {
+  const [year, month] = date.split('-').map(Number);
+  return fromMs(Date.UTC(year, month - 1 + n, 1));
+}
+
+function monthEnd(date) {
+  const [year, month] = date.split('-').map(Number);
+  return fromMs(Date.UTC(year, month, 0));
+}
+
+function mondayOf(date) {
+  return addDays(date, -((new Date(toMs(date)).getUTCDay() + 6) % 7));
+}
+
+function formatMonthDay(date) {
+  return `${Number(date.slice(5, 7))}월 ${Number(date.slice(8, 10))}일`;
+}
+
+const PERIODS = {
+  DAY: {
+    compareLabel: '전일',
+    group: 'HOUR',
+    range: (anchor) => [anchor, anchor],
+    shift: (anchor, n) => addDays(anchor, n),
+    label: (from) => `${from.slice(0, 4)}년 ${formatMonthDay(from)} (${WEEKDAYS[new Date(toMs(from)).getUTCDay()]})`
+  },
+  WEEK: {
+    compareLabel: '전주',
+    group: 'DAY',
+    range: (anchor) => [mondayOf(anchor), addDays(mondayOf(anchor), 6)],
+    shift: (anchor, n) => addDays(mondayOf(anchor), 7 * n),
+    label: (from, to) => `${from.slice(0, 4)}년 ${formatMonthDay(from)} ~ ${formatMonthDay(to)}`
+  },
+  MONTH: {
+    compareLabel: '전월',
+    group: 'DAY',
+    range: (anchor) => [`${anchor.slice(0, 8)}01`, monthEnd(anchor)],
+    shift: (anchor, n) => addMonths(anchor, n),
+    label: (from) => `${from.slice(0, 4)}년 ${Number(from.slice(5, 7))}월`
+  },
+  YEAR: {
+    compareLabel: '전년',
+    group: 'MONTH',
+    range: (anchor) => [`${anchor.slice(0, 4)}-01-01`, `${anchor.slice(0, 4)}-12-31`],
+    shift: (anchor, n) => `${Number(anchor.slice(0, 4)) + n}-01-01`,
+    label: (from) => `${from.slice(0, 4)}년`
+  }
+};
 
 class ReportError extends Error {
   constructor(message, status = 400) {
@@ -41,28 +106,152 @@ function parseDate(value, fallback) {
 }
 
 function parseQuery(query) {
-  const { today, month_start: monthStart } = getOne(
-    "SELECT date('now', 'localtime') AS today, date('now', 'localtime', 'start of month') AS month_start"
-  );
-  const from = parseDate(query.from, monthStart);
-  const to = parseDate(query.to, today);
+  const { today, now } = getOne("SELECT date('now', 'localtime') AS today, datetime('now', 'localtime') AS now");
+  const period = String(query.period || (query.from || query.to ? 'RANGE' : 'MONTH')).toUpperCase();
+  if (period !== 'RANGE' && !PERIODS[period]) throw new ReportError('조회 단위가 올바르지 않습니다.');
+
+  let from;
+  let to;
+  let anchor = null;
+  if (period === 'RANGE') {
+    from = parseDate(query.from, `${today.slice(0, 8)}01`);
+    to = parseDate(query.to, today);
+  } else {
+    anchor = parseDate(query.date, today);
+    [from, to] = PERIODS[period].range(anchor);
+  }
   if (from > to) throw new ReportError('조회 시작일이 종료일보다 늦습니다.');
-  const days = Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000) + 1;
+  if (from < '2000-01-01' || to > '2100-12-31') throw new ReportError('조회할 수 없는 날짜입니다.');
+  const days = Math.round((toMs(to) - toMs(from)) / DAY_MS) + 1;
   if (days > MAX_RANGE_DAYS) throw new ReportError('조회 기간은 최대 3년까지 가능합니다.');
+
   const channel = String(query.channel || 'ALL').toUpperCase();
   if (!CHANNELS[channel]) throw new ReportError('판매 채널이 올바르지 않습니다.');
-  return { from, to, days, channel };
+
+  const defaultGroup = period === 'RANGE' ? (days === 1 ? 'HOUR' : days > MONTHLY_THRESHOLD_DAYS ? 'MONTH' : 'DAY') : PERIODS[period].group;
+  const group = String(query.group || defaultGroup).toUpperCase();
+  if (!GROUPS[group]) throw new ReportError('차트 단위가 올바르지 않습니다.');
+  if (days > GROUPS[group].maxDays) {
+    throw new ReportError(`${GROUPS[group].label} 단위 차트는 ${GROUPS[group].maxDays}일 이하 기간에서만 볼 수 있습니다.`);
+  }
+
+  return { period, anchor, from, to, days, channel, group, compare: query.compare !== '0', today, now };
 }
 
-function orderFilter(channel, alias = 'o') {
+function orderFilter(channel, alias = 'o', { until = false } = {}) {
   const conditions = [
     `${alias}.pharmacy_id = @pharmacy_id`,
     `${alias}.order_type != 'COUNSEL'`,
     `date(${alias}.created_at, 'localtime') BETWEEN @from AND @to`
   ];
+  if (until) conditions.push(`datetime(${alias}.created_at, 'localtime') < @until`);
   if (channel === 'POS') conditions.push(`${alias}.sales_channel = 'POS'`);
   if (channel === 'ONLINE') conditions.push(`COALESCE(${alias}.sales_channel, 'ONLINE') != 'POS'`);
   return conditions.join(' AND ');
+}
+
+function periodMeta({ period, anchor, from, to, today }) {
+  if (period === 'RANGE') {
+    return { anchor: null, period_label: `${from} ~ ${to}`, prev_anchor: null, next_anchor: null, compare_label: '이전 기간' };
+  }
+  const config = PERIODS[period];
+  const next = config.shift(anchor, 1);
+  return {
+    anchor,
+    period_label: config.label(from, to),
+    prev_anchor: config.shift(anchor, -1),
+    next_anchor: config.range(next)[0] <= today ? next : null,
+    compare_label: config.compareLabel
+  };
+}
+
+function comparisonRange({ period, anchor, from, days }) {
+  if (period === 'RANGE') return [addDays(from, -days), addDays(from, -1)];
+  return PERIODS[period].range(PERIODS[period].shift(anchor, -1));
+}
+
+function naiveMs(datetime) {
+  return Date.parse(`${datetime.replace(' ', 'T')}Z`);
+}
+
+function naiveDatetime(ms) {
+  return new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function trendSlots(group, from, to) {
+  switch (group) {
+    case 'HOUR':
+      return eachDate(from, to).flatMap((date) =>
+        Array.from({ length: 24 }, (_, hour) => {
+          const hh = String(hour).padStart(2, '0');
+          return { period: `${date} ${hh}`, start: `${date} ${hh}:00:00`, end: `${date} ${hh}:59:59` };
+        })
+      );
+    case 'WEEK': {
+      const slots = [];
+      for (let monday = mondayOf(from); monday <= to; monday = addDays(monday, 7)) {
+        slots.push({ period: monday, start: maxDate(monday, from), end: minDate(addDays(monday, 6), to) });
+      }
+      return slots;
+    }
+    case 'MONTH':
+      return eachMonth(from, to).map((month) => ({
+        period: month,
+        start: maxDate(`${month}-01`, from),
+        end: minDate(monthEnd(`${month}-01`), to)
+      }));
+    case 'YEAR': {
+      const slots = [];
+      for (let year = Number(from.slice(0, 4)); year <= Number(to.slice(0, 4)); year += 1) {
+        slots.push({ period: String(year), start: maxDate(`${year}-01-01`, from), end: minDate(`${year}-12-31`, to) });
+      }
+      return slots;
+    }
+    default:
+      return eachDate(from, to).map((date) => ({ period: date, start: date, end: date }));
+  }
+}
+
+function totalsFor(where, params) {
+  const totals = getOne(
+    `SELECT
+       COUNT(CASE WHEN o.final_amount > 0 THEN 1 END) AS sale_count,
+       COUNT(CASE WHEN o.final_amount < 0 THEN 1 END) AS refund_count,
+       COALESCE(SUM(CASE WHEN o.final_amount > 0 THEN o.final_amount ELSE 0 END), 0) AS gross_amount,
+       COALESCE(SUM(CASE WHEN o.final_amount < 0 THEN o.final_amount ELSE 0 END), 0) AS refund_amount,
+       COALESCE(SUM(o.final_amount), 0) AS net_amount,
+       COALESCE(SUM(CASE WHEN o.final_amount > 0 THEN o.discount_amount ELSE 0 END), 0) AS discount_amount,
+       COALESCE(SUM(o.delivery_fee), 0) AS delivery_fee,
+       COUNT(DISTINCT CASE WHEN o.final_amount > 0 THEN o.customer_id END) AS member_count,
+       COUNT(CASE WHEN o.final_amount > 0 AND o.customer_id IS NULL THEN 1 END) AS walk_in_count
+     FROM orders o WHERE ${where}`,
+    params
+  );
+  totals.avg_ticket = totals.sale_count ? Math.round(totals.gross_amount / totals.sale_count) : 0;
+  return totals;
+}
+
+function trendFor(where, params, group, from, to, { today, now }) {
+  const rows = getAll(
+    `SELECT ${GROUPS[group].expr} AS period,
+       COUNT(CASE WHEN o.final_amount > 0 THEN 1 END) AS sale_count,
+       COALESCE(SUM(CASE WHEN o.final_amount > 0 THEN o.final_amount ELSE 0 END), 0) AS gross_amount,
+       COALESCE(SUM(CASE WHEN o.final_amount < 0 THEN o.final_amount ELSE 0 END), 0) AS refund_amount,
+       COALESCE(SUM(o.final_amount), 0) AS net_amount,
+       COALESCE(SUM(CASE WHEN o.sales_channel = 'POS' THEN o.final_amount ELSE 0 END), 0) AS pos_amount,
+       COALESCE(SUM(CASE WHEN COALESCE(o.sales_channel, 'ONLINE') != 'POS' THEN o.final_amount ELSE 0 END), 0) AS online_amount
+     FROM orders o WHERE ${where}
+     GROUP BY period`,
+    params
+  );
+  const byPeriod = new Map(rows.map((r) => [r.period, r]));
+  const empty = { sale_count: 0, gross_amount: 0, refund_amount: 0, net_amount: 0, pos_amount: 0, online_amount: 0 };
+  return trendSlots(group, from, to).map((slot) => {
+    const row = { ...slot, ...empty, ...byPeriod.get(slot.period) };
+    row.avg_ticket = row.sale_count ? Math.round(row.gross_amount / row.sale_count) : 0;
+    row.future = group === 'HOUR' ? slot.start > now : slot.start > today;
+    return row;
+  });
 }
 
 const ITEM_NET = '(oi.total_price - COALESCE(oi.discount_amount, 0))';
@@ -104,25 +293,36 @@ function marginOf(row) {
   };
 }
 
-function salesReport(pharmacyId, { from, to, days, channel }) {
+function comparisonReport(pharmacyId, query) {
+  const { from, to, channel, group, today, now } = query;
+  const [cmpFrom, cmpTo] = comparisonRange(query);
+  const nowMs = naiveMs(now);
+  const inProgress = nowMs >= toMs(from) && nowMs < toMs(to) + DAY_MS;
+  // 진행 중인 기간은 비교 기간도 같은 경과 시점까지만 합계를 낸다 (예: 이번 달 1~30일 04시 ↔ 지난달 1~30일 04시).
+  const until = inProgress ? naiveDatetime(Math.min(toMs(cmpFrom) + (nowMs - toMs(from)), toMs(cmpTo) + DAY_MS)) : null;
+  const params = { pharmacy_id: pharmacyId, from: cmpFrom, to: cmpTo };
+  const totals = totalsFor(orderFilter(channel, 'o', { until: Boolean(until) }), until ? { ...params, until } : params);
+  const trend = trendFor(orderFilter(channel), params, group, cmpFrom, cmpTo, { today, now }).map(
+    ({ period, start, end, sale_count, net_amount, gross_amount, avg_ticket, future }) => ({
+      period,
+      start,
+      end,
+      sale_count,
+      net_amount,
+      gross_amount,
+      avg_ticket,
+      future
+    })
+  );
+  return { from: cmpFrom, to: cmpTo, until, partial: Boolean(until), totals, trend };
+}
+
+function salesReport(pharmacyId, query) {
+  const { from, to, channel, group, today, now } = query;
   const params = { pharmacy_id: pharmacyId, from, to };
   const where = orderFilter(channel);
 
-  const totals = getOne(
-    `SELECT
-       COUNT(CASE WHEN o.final_amount > 0 THEN 1 END) AS sale_count,
-       COUNT(CASE WHEN o.final_amount < 0 THEN 1 END) AS refund_count,
-       COALESCE(SUM(CASE WHEN o.final_amount > 0 THEN o.final_amount ELSE 0 END), 0) AS gross_amount,
-       COALESCE(SUM(CASE WHEN o.final_amount < 0 THEN o.final_amount ELSE 0 END), 0) AS refund_amount,
-       COALESCE(SUM(o.final_amount), 0) AS net_amount,
-       COALESCE(SUM(CASE WHEN o.final_amount > 0 THEN o.discount_amount ELSE 0 END), 0) AS discount_amount,
-       COALESCE(SUM(o.delivery_fee), 0) AS delivery_fee,
-       COUNT(DISTINCT CASE WHEN o.final_amount > 0 THEN o.customer_id END) AS member_count,
-       COUNT(CASE WHEN o.final_amount > 0 AND o.customer_id IS NULL THEN 1 END) AS walk_in_count
-     FROM orders o WHERE ${where}`,
-    params
-  );
-  totals.avg_ticket = totals.sale_count ? Math.round(totals.gross_amount / totals.sale_count) : 0;
+  const totals = totalsFor(where, params);
 
   const taxRows = getAll(
     `SELECT ${ITEM_TAX} AS tax_type, COALESCE(SUM(${ITEM_NET}), 0) AS net_amount, COALESCE(SUM(oi.quantity), 0) AS quantity
@@ -157,23 +357,7 @@ function salesReport(pharmacyId, { from, to, days, channel }) {
     coverage_rate: costRow.item_net ? Math.round((costRow.cost_known_net / costRow.item_net) * 1000) / 10 : null
   };
 
-  const monthly = days > MONTHLY_THRESHOLD_DAYS;
-  const periodExpr = monthly ? "strftime('%Y-%m', o.created_at, 'localtime')" : "date(o.created_at, 'localtime')";
-  const trendRows = getAll(
-    `SELECT ${periodExpr} AS period,
-       COUNT(CASE WHEN o.final_amount > 0 THEN 1 END) AS sale_count,
-       COALESCE(SUM(CASE WHEN o.final_amount > 0 THEN o.final_amount ELSE 0 END), 0) AS gross_amount,
-       COALESCE(SUM(CASE WHEN o.final_amount < 0 THEN o.final_amount ELSE 0 END), 0) AS refund_amount,
-       COALESCE(SUM(o.final_amount), 0) AS net_amount,
-       COALESCE(SUM(CASE WHEN o.sales_channel = 'POS' THEN o.final_amount ELSE 0 END), 0) AS pos_amount,
-       COALESCE(SUM(CASE WHEN COALESCE(o.sales_channel, 'ONLINE') != 'POS' THEN o.final_amount ELSE 0 END), 0) AS online_amount
-     FROM orders o WHERE ${where}
-     GROUP BY period`,
-    params
-  );
-  const trendMap = new Map(trendRows.map((r) => [r.period, r]));
-  const empty = { sale_count: 0, gross_amount: 0, refund_amount: 0, net_amount: 0, pos_amount: 0, online_amount: 0 };
-  const trend = (monthly ? eachMonth(from, to) : eachDate(from, to)).map((period) => ({ period, ...empty, ...trendMap.get(period) }));
+  const trend = trendFor(where, params, group, from, to, { today, now });
 
   const hourRows = getAll(
     `SELECT CAST(strftime('%H', o.created_at, 'localtime') AS INTEGER) AS hour,
@@ -196,7 +380,9 @@ function salesReport(pharmacyId, { from, to, days, channel }) {
   );
   const weekdayMap = new Map(weekdayRows.map((r) => [r.weekday, r]));
   const dayCounts = Array(7).fill(0);
-  for (const date of eachDate(from, to)) dayCounts[new Date(`${date}T00:00:00Z`).getUTCDay()] += 1;
+  if (from <= today) {
+    for (const date of eachDate(from, minDate(to, today))) dayCounts[new Date(toMs(date)).getUTCDay()] += 1;
+  }
   const weekdays = WEEKDAYS.map((label, weekday) => {
     const row = { weekday, label, sale_count: 0, net_amount: 0, ...weekdayMap.get(weekday) };
     return { ...row, days: dayCounts[weekday], avg_net_amount: dayCounts[weekday] ? Math.round(row.net_amount / dayCounts[weekday]) : 0 };
@@ -288,10 +474,15 @@ function salesReport(pharmacyId, { from, to, days, channel }) {
   );
 
   return {
+    period: query.period,
+    ...periodMeta(query),
     from,
     to,
+    today,
     channel,
-    granularity: monthly ? 'MONTH' : 'DAY',
+    granularity: group,
+    groups_allowed: Object.keys(GROUPS).filter((key) => query.days <= GROUPS[key].maxDays),
+    comparison: query.compare ? comparisonReport(pharmacyId, query) : null,
     totals,
     tax,
     margin,
@@ -308,6 +499,11 @@ function salesReport(pharmacyId, { from, to, days, channel }) {
 
 /* ---------- CSV ---------- */
 
+function changeRate(current, previous) {
+  if (!previous) return null;
+  return Math.round(((current - previous) / Math.abs(previous)) * 1000) / 10;
+}
+
 function csvCell(value) {
   if (value === null || value === undefined) return '';
   const text = String(value);
@@ -323,6 +519,13 @@ const CSV_TABLES = {
       ['항목', '값'],
       ['조회 기간', `${r.from} ~ ${r.to}`],
       ['판매 채널', CHANNELS[r.channel]],
+      ...(r.comparison
+        ? [
+            [`비교 기간 (${r.compare_label})`, `${r.comparison.from} ~ ${r.comparison.until ? r.comparison.until.slice(0, 16) : r.comparison.to}`],
+            ['비교 기간 순매출', r.comparison.totals.net_amount],
+            ['순매출 증감률(%)', changeRate(r.totals.net_amount, r.comparison.totals.net_amount)]
+          ]
+        : []),
       ['판매 건수', r.totals.sale_count],
       ['총매출', r.totals.gross_amount],
       ['반품·취소', r.totals.refund_amount],
@@ -341,8 +544,31 @@ const CSV_TABLES = {
   trend: {
     label: '기간별',
     build: (r) => [
-      [r.granularity === 'MONTH' ? '월' : '일자', '판매 건수', '총매출', '반품·취소', '순매출', '매장 POS', '온라인'],
-      ...r.trend.map((t) => [t.period, t.sale_count, t.gross_amount, t.refund_amount, t.net_amount, t.pos_amount, t.online_amount])
+      [
+        GROUP_HEADERS[r.granularity],
+        '판매 건수',
+        '총매출',
+        '반품·취소',
+        '순매출',
+        '객단가',
+        '매장 POS',
+        '온라인',
+        ...(r.comparison ? [`${r.compare_label} ${GROUP_HEADERS[r.granularity]}`, `${r.compare_label} 순매출`, '증감률(%)'] : [])
+      ],
+      ...r.trend.map((t, i) => {
+        const prev = r.comparison && r.comparison.trend[i];
+        return [
+          r.granularity === 'HOUR' ? `${t.period}시` : t.period,
+          t.sale_count,
+          t.gross_amount,
+          t.refund_amount,
+          t.net_amount,
+          t.avg_ticket,
+          t.pos_amount,
+          t.online_amount,
+          ...(r.comparison ? (prev ? [r.granularity === 'HOUR' ? `${prev.period}시` : prev.period, prev.net_amount, changeRate(t.net_amount, prev.net_amount)] : ['', '', '']) : [])
+        ];
+      })
     ]
   },
   hourly: {
