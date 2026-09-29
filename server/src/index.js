@@ -15,6 +15,8 @@ const orderRoutes = require('./routes/orders');
 const dashboardRoutes = require('./routes/dashboard');
 const qrCodeRoutes = require('./routes/qrcodes');
 const inquiryRoutes = require('./routes/inquiries');
+const posRoutes = require('./routes/pos');
+const staffRoutes = require('./routes/staff');
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -39,6 +41,21 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/qrcodes', qrCodeRoutes);
 app.use('/api/inquiries', inquiryRoutes);
+app.use('/api/pos', posRoutes);
+app.use('/api/staff', staffRoutes);
+
+const nodeModules = path.join(__dirname, '../node_modules');
+const vendorFiles = {
+  'jsbarcode.min.js': path.join(nodeModules, 'jsbarcode/dist/JsBarcode.all.min.js'),
+  'qrcode.js': path.join(nodeModules, 'qrcode-generator/dist/qrcode.js'),
+  'html5-qrcode.min.js': path.join(nodeModules, 'html5-qrcode/html5-qrcode.min.js')
+};
+app.get('/vendor/:file', (req, res, next) => {
+  const file = vendorFiles[req.params.file];
+  if (!file) return next();
+  res.set('Cache-Control', 'public, max-age=86400');
+  return res.sendFile(file);
+});
 
 app.use(express.static(path.join(__dirname, '../public')));
 

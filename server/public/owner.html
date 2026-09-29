@@ -124,6 +124,38 @@
         border-top: 1px solid var(--border-color);
       }
 
+      .pos-launch {
+        padding: 16px 24px 0;
+      }
+
+      .pos-launch-btn {
+        display: flex;
+        width: 100%;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        border-radius: 12px;
+        background: var(--toss-blue);
+        box-shadow: 0 6px 16px rgba(49, 130, 246, 0.28);
+        color: #ffffff;
+        font-size: 16px;
+        font-weight: 800;
+        padding: 15px 16px;
+        transition: 0.2s;
+      }
+
+      .pos-launch-btn:hover {
+        background: var(--toss-blue-hover);
+      }
+
+      .pos-launch-caption {
+        margin-top: 8px;
+        color: var(--text-muted);
+        font-size: 12px;
+        font-weight: 600;
+        text-align: center;
+      }
+
       .main-content {
         display: flex;
         max-width: 1440px;
@@ -426,6 +458,14 @@
         grid-column: 1 / -1;
       }
 
+      .form-group.inline-actions {
+        flex-direction: row;
+      }
+
+      .form-grid[hidden] {
+        display: none;
+      }
+
       .form-label {
         color: var(--text-sub);
         font-size: 13px;
@@ -617,8 +657,13 @@
           overflow-x: auto;
         }
 
-        .logout-wrap {
+        .logout-wrap,
+        .pos-launch-caption {
           display: none;
+        }
+
+        .pos-launch {
+          padding: 0 16px 12px;
         }
 
         .main-content {
@@ -687,8 +732,13 @@
           <a href="#orders" class="nav-item">주문 관리 <span id="navPendingBadge" class="badge red">0</span></a>
           <a href="#products" class="nav-item">상품 관리</a>
           <a href="#customers" class="nav-item">고객 관리</a>
+          <a href="#staff" class="nav-item">POS 직원</a>
           <a href="#qr" class="nav-item">QR 가입</a>
         </nav>
+        <div class="pos-launch">
+          <a class="pos-launch-btn" href="/pos.html">POS 열기</a>
+          <p class="pos-launch-caption">매장 카운터 판매 · 픽업 수령 · 일마감</p>
+        </div>
         <div class="logout-wrap">
           <a class="btn btn-outline" href="/">홈으로</a>
           <button class="btn btn-outline" type="button" onclick="logout()">로그아웃</button>
@@ -752,6 +802,39 @@
             <div id="ordersTable" class="loading">주문 정보를 불러오는 중입니다.</div>
           </section>
 
+          <section class="card full-width" id="staff">
+            <div class="card-header">
+              <h2 class="card-title">POS 직원 계정</h2>
+              <button class="btn btn-outline btn-sm" type="button" onclick="toggleStaffForm()">+ 직원 추가</button>
+            </div>
+            <p class="list-meta" style="margin: -4px 0 14px;">
+              직원 계정은 POS 판매·픽업 수령·입고만 할 수 있고, 취소·반품·일반의약품 판매·현금 입출금·일마감·폐기는 약국 관리자 계정으로만 처리됩니다.
+            </p>
+            <form id="staffForm" class="form-grid" hidden style="margin-bottom: 16px;">
+              <div class="form-group">
+                <label class="form-label" for="staffName">이름</label>
+                <input id="staffName" class="form-control" name="name" required placeholder="홍길동" />
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="staffPhone">연락처</label>
+                <input id="staffPhone" class="form-control" name="phone" placeholder="010-0000-0000 (선택)" />
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="staffEmail">로그인 이메일</label>
+                <input id="staffEmail" class="form-control" name="email" type="email" required placeholder="staff1@pharmacy.kr" autocomplete="off" />
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="staffPassword">초기 비밀번호</label>
+                <input id="staffPassword" class="form-control" name="password" type="password" required placeholder="영문+숫자 8자 이상" autocomplete="new-password" />
+              </div>
+              <div class="form-group full inline-actions">
+                <button class="btn btn-primary" type="submit">직원 계정 만들기</button>
+                <button class="btn btn-outline" type="button" onclick="toggleStaffForm(false)">취소</button>
+              </div>
+            </form>
+            <div id="staffTable" class="loading">직원 정보를 불러오는 중입니다.</div>
+          </section>
+
           <section class="card" id="productFormCard">
             <div class="card-header">
               <h2 class="card-title">신규 상품 등록</h2>
@@ -791,6 +874,20 @@
                 <input id="stockQuantity" class="form-control" name="stock_quantity" type="number" min="0" value="10" />
               </div>
               <div class="form-group">
+                <label class="form-label" for="productType">상품 유형</label>
+                <select id="productType" class="form-control" name="product_type">
+                  <option value="GENERAL">일반 상품 (온라인·현장 판매)</option>
+                  <option value="OTC">일반의약품 (현장 판매 전용)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="productBarcode">바코드</label>
+                <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px;">
+                  <input id="productBarcode" class="form-control" name="barcode" inputmode="numeric" placeholder="스캐너로 찍거나 직접 입력" />
+                  <button class="btn btn-outline btn-sm" type="button" onclick="scanBarcodeInto('productBarcode')">카메라</button>
+                </div>
+              </div>
+              <div class="form-group">
                 <label class="form-label" for="thumbnailUrl">대표 이미지 URL</label>
                 <input id="thumbnailUrl" class="form-control" name="thumbnail_url" placeholder="선택 입력" />
               </div>
@@ -825,6 +922,7 @@
 
     <pre id="message" class="notice"></pre>
     <script src="/app.js"></script>
+    <script src="/scan-kit.js"></script>
     <script>
       let latestQrUrl = '';
 
@@ -844,24 +942,31 @@
           READY_FOR_PICKUP: { text: '픽업준비', color: 'orange' },
           PICKED_UP: { text: '픽업완료', color: 'green' },
           COMPLETED: { text: '완료', color: 'green' },
-          CANCELED: { text: '취소', color: 'gray' }
+          CANCELED: { text: '취소', color: 'gray' },
+          PARTIALLY_REFUNDED: { text: '부분반품', color: 'orange' },
+          REFUNDED: { text: '반품완료', color: 'gray' }
         },
         deliveryStatus: {
           NOT_SHIPPED: { text: '미배송', color: 'red' },
           SHIPPING: { text: '배송중', color: 'blue' },
           DELIVERED: { text: '배송완료', color: 'green' },
           READY_FOR_PICKUP: { text: '픽업대기', color: 'orange' },
-          PICKED_UP: { text: '픽업완료', color: 'green' }
+          PICKED_UP: { text: '픽업완료', color: 'green' },
+          NOT_APPLICABLE: { text: '현장 수령', color: 'gray' }
         },
         orderType: {
           DELIVERY: { text: '배송', color: 'blue' },
           PICKUP: { text: '픽업', color: 'green' },
-          COUNSEL: { text: '상담', color: 'orange' }
+          COUNSEL: { text: '상담', color: 'orange' },
+          POS_SALE: { text: '현장 판매', color: 'blue' },
+          POS_REFUND: { text: '현장 반품', color: 'red' }
         },
         paymentStatus: {
           PAID: { text: '결제완료', color: 'blue' },
           READY: { text: '결제대기', color: 'gray' },
-          CANCELED: { text: '결제취소', color: 'gray' }
+          CANCELED: { text: '결제취소', color: 'gray' },
+          REFUNDED: { text: '환불완료', color: 'gray' },
+          PARTIALLY_REFUNDED: { text: '부분환불', color: 'orange' }
         }
       };
 
@@ -916,14 +1021,16 @@
       async function loadOwner() {
         try {
           setGuestMode(false);
-          const [dash, qr, products, orders, customers] = await Promise.all([
+          const [dash, qr, products, orders, customers, staff] = await Promise.all([
             api.request('/dashboard/pharmacy'),
             api.request('/qrcodes/mine'),
             api.request('/products'),
             api.request('/orders'),
-            api.request('/dashboard/customers')
+            api.request('/dashboard/customers'),
+            api.request('/staff')
           ]);
 
+          renderStaff(staff.staff);
           renderHeader(qr.qr);
           renderSummary(dash.summary);
           renderQr(qr.qr);
@@ -1107,6 +1214,8 @@
                     <td>
                       <div class="list-title">${h(product.product_name)}</div>
                       <span class="badge gray">${h(product.category_name || '미분류')}</span>
+                      ${product.product_type === 'OTC' ? '<span class="badge orange">일반의약품 · 현장 판매 전용</span>' : ''}
+                      <div class="list-meta">${product.barcode ? `바코드 ${h(product.barcode)}` : '바코드 미등록'}</div>
                     </td>
                     <td>
                       <div class="list-title">${money(product.discount_price || product.price)}</div>
@@ -1120,6 +1229,13 @@
                           <option value="ON_SALE" ${product.status === 'ON_SALE' ? 'selected' : ''}>판매중</option>
                           <option value="SOLD_OUT" ${product.status === 'SOLD_OUT' ? 'selected' : ''}>품절</option>
                           <option value="STOPPED" ${product.status === 'STOPPED' ? 'selected' : ''}>판매중지</option>
+                        </select>
+                      </div>
+                      <div class="inline-actions" style="margin-top: 6px;">
+                        <input id="barcode-${product.id}" class="form-control barcode-input" style="width: 150px; padding: 7px 8px;" placeholder="바코드" value="${h(product.barcode || '')}" />
+                        <select id="type-${product.id}" class="form-control" style="width: 118px; padding: 7px 8px;">
+                          <option value="GENERAL" ${product.product_type !== 'OTC' ? 'selected' : ''}>일반 상품</option>
+                          <option value="OTC" ${product.product_type === 'OTC' ? 'selected' : ''}>일반의약품</option>
                         </select>
                       </div>
                     </td>
@@ -1164,7 +1280,9 @@
             method: 'PATCH',
             body: {
               stock_quantity: $(`#stock-${id}`).value,
-              status: $(`#status-${id}`).value
+              status: $(`#status-${id}`).value,
+              barcode: $(`#barcode-${id}`).value,
+              product_type: $(`#type-${id}`).value
             }
           });
           showToast('상품 정보가 저장되었습니다.');
@@ -1237,6 +1355,107 @@
         }
       }
 
+      function scanBarcodeInto(inputId) {
+        ScanKit.openCameraScanner({
+          title: '상품 바코드 스캔',
+          hint: '상품 포장의 바코드를 네모 칸 안에 맞춰 주세요.',
+          onResult: (code) => {
+            const input = document.getElementById(inputId);
+            input.value = code;
+            input.focus();
+            showToast(`바코드 ${code}을(를) 입력했습니다.`);
+          }
+        });
+      }
+
+      function toggleStaffForm(show) {
+        const form = $('#staffForm');
+        form.hidden = show === undefined ? !form.hidden : !show;
+        if (!form.hidden) setTimeout(() => $('#staffName').focus(), 30);
+      }
+
+      let staffList = [];
+
+      function staffName(id) {
+        return staffList.find((s) => s.id === id)?.name || '직원';
+      }
+
+      function renderStaff(staff) {
+        staffList = staff;
+        if (staff.length === 0) {
+          $('#staffTable').innerHTML = renderEmpty('등록된 POS 직원이 없습니다. 카운터 직원 계정을 만들어 주세요.');
+          return;
+        }
+        $('#staffTable').innerHTML = `
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>직원</th><th>로그인 이메일</th><th>상태</th><th>오늘 판매</th><th>최근 POS 활동</th><th>관리</th></tr></thead>
+              <tbody>
+                ${staff.map((s) => `
+                  <tr>
+                    <td><div class="list-title">${h(s.name)}</div><div class="list-meta">${h(s.phone || '연락처 없음')}</div></td>
+                    <td>${h(s.email)}</td>
+                    <td>${s.status === 'ACTIVE' ? '<span class="badge green">사용 중</span>' : '<span class="badge gray">사용 중지</span>'}</td>
+                    <td>${Number(s.today_sale_count || 0).toLocaleString()}건</td>
+                    <td class="list-meta">${h(formatDate(s.last_pos_activity_at))}</td>
+                    <td>
+                      <div class="inline-actions">
+                        <button class="btn btn-outline btn-sm" type="button" onclick="resetStaffPassword(${Number(s.id)})">비밀번호 재설정</button>
+                        ${s.status === 'ACTIVE'
+                          ? `<button class="btn btn-danger btn-sm" type="button" onclick="setStaffStatus(${Number(s.id)}, 'INACTIVE')">사용 중지</button>`
+                          : `<button class="btn btn-primary btn-sm" type="button" onclick="setStaffStatus(${Number(s.id)}, 'ACTIVE')">사용 재개</button>`}
+                      </div>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+      }
+
+      async function reloadStaff() {
+        const data = await api.request('/staff');
+        renderStaff(data.staff);
+      }
+
+      async function setStaffStatus(id, status) {
+        const name = staffName(id);
+        const text = status === 'INACTIVE' ? `${name} 직원 계정을 사용 중지할까요? 즉시 POS에 로그인할 수 없게 됩니다.` : `${name} 직원 계정을 다시 사용할까요?`;
+        if (!confirm(text)) return;
+        try {
+          await api.request(`/staff/${id}`, { method: 'PATCH', body: { status } });
+          showToast(status === 'INACTIVE' ? '계정을 사용 중지했습니다.' : '계정을 다시 사용합니다.');
+          reloadStaff();
+        } catch (error) {
+          showToast(error.message);
+        }
+      }
+
+      async function resetStaffPassword(id) {
+        const password = prompt(`${staffName(id)} 직원의 새 비밀번호 (영문+숫자 8자 이상)`);
+        if (!password) return;
+        try {
+          await api.request(`/staff/${id}/reset-password`, { method: 'POST', body: { password } });
+          showToast('비밀번호를 재설정했습니다. 직원에게 새 비밀번호를 전달해 주세요.');
+        } catch (error) {
+          showToast(error.message);
+        }
+      }
+
+      $('#staffForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try {
+          const data = await api.request('/staff', { method: 'POST', body: serializeForm(event.target) });
+          event.target.reset();
+          toggleStaffForm(false);
+          showToast(`${data.staff.name} 직원 계정을 만들었습니다. POS 로그인: ${data.staff.email}`);
+          reloadStaff();
+        } catch (error) {
+          showToast(error.message);
+        }
+      });
+
       async function copyJoinLink() {
         if (!latestQrUrl) return showToast('복사할 가입 링크가 없습니다.');
         try {
@@ -1273,10 +1492,17 @@
           event.target.category_name.value = '건강기능식품';
           event.target.stock_quantity.value = '10';
           event.target.status.value = 'ON_SALE';
+          event.target.product_type.value = 'GENERAL';
           showToast('상품이 등록되었습니다.');
           loadOwner();
         } catch (error) {
           showToast(error.message);
+        }
+      });
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && (event.target.id === 'productBarcode' || event.target.classList.contains('barcode-input'))) {
+          event.preventDefault();
         }
       });
 

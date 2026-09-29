@@ -1,7 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
-const { getOne, run, transaction } = require('../db');
+const { getOne, run, transaction, assignMemberCode } = require('../db');
 const { authenticate, signToken } = require('../middleware/auth');
 
 const router = express.Router();
@@ -89,6 +89,8 @@ router.post('/customer/signup', (req, res) => {
       }
     );
 
+    assignMemberCode(customerResult.lastInsertRowid);
+
     let addressId = null;
     if (address) {
       const addressResult = run(
@@ -151,6 +153,27 @@ router.post('/customer/phone-login', (req, res) => {
 
 router.get('/me', authenticate, (req, res) => {
   res.json({ user: publicUser(req.user) });
+});
+
+router.get('/membership', authenticate, (req, res) => {
+  if (req.user.role !== 'CUSTOMER') return res.status(403).json({ message: '고객 계정만 멤버십을 조회할 수 있습니다.' });
+  const customer = getOne(
+    `SELECT c.id, c.name, c.phone, c.member_code, p.pharmacy_name
+     FROM customers c
+     JOIN pharmacies p ON p.id = c.pharmacy_id
+     WHERE c.user_id = @user_id`,
+    { user_id: req.user.id }
+  );
+  if (!customer) return res.status(404).json({ message: '고객 정보를 찾을 수 없습니다.' });
+  const memberCode = customer.member_code || assignMemberCode(customer.id);
+  return res.json({
+    membership: {
+      name: customer.name,
+      pharmacy_name: customer.pharmacy_name,
+      member_code: memberCode,
+      qr_payload: `MAYDIN-MEMBER:${memberCode}`
+    }
+  });
 });
 
 module.exports = router;

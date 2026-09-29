@@ -26,6 +26,9 @@ router.post('/', (req, res) => {
     pharmacy_id: req.pharmacyId
   });
   if (!product) return res.status(404).json({ message: '상품을 찾을 수 없습니다.' });
+  if (product.product_type === 'OTC') {
+    return res.status(400).json({ message: '일반의약품은 온라인 결제가 불가합니다. 약국 방문 시 구매해 주세요.' });
+  }
   if (product.status !== 'ON_SALE') return res.status(400).json({ message: '판매중인 상품이 아닙니다.' });
 
   run(

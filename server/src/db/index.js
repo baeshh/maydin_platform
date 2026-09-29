@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
@@ -19,6 +20,168 @@ function addColumnIfMissing(table, column, definition) {
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 
+function tableColumns(table) {
+  return db.prepare(`PRAGMA table_info(${table})`).all();
+}
+
+function tableDefinitionFromSchema(schema, table) {
+  const match = schema.match(new RegExp(`CREATE TABLE IF NOT EXISTS ${table} \\(([\\s\\S]*?)\\n\\);`));
+  if (!match) throw new Error(`schema.sql에서 ${table} 테이블 정의를 찾을 수 없습니다.`);
+  return match[1];
+}
+
+// SQLite는 CHECK·NOT NULL·UNIQUE 제약을 ALTER로 바꿀 수 없어서 새 정의로 테이블을 다시 만든다.
+function rebuildTable(schema, table) {
+  const tempTable = `${table}__rebuild`;
+  const oldColumns = tableColumns(table);
+  const indexes = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL")
+    .all(table)
+    .map((row) => row.sql);
+
+  db.pragma('foreign_keys = OFF');
+  try {
+    db.transaction(() => {
+      db.exec(`DROP TABLE IF EXISTS ${tempTable}`);
+      db.exec(`CREATE TABLE ${tempTable} (${tableDefinitionFromSchema(schema, table)}\n)`);
+
+      const newNames = new Set(tableColumns(tempTable).map((col) => col.name));
+      for (const col of oldColumns) {
+        if (newNames.has(col.name)) continue;
+        const defaultClause = col.dflt_value === null ? '' : ` DEFAULT ${col.dflt_value}`;
+        db.exec(`ALTER TABLE ${tempTable} ADD COLUMN ${col.name} ${col.type || 'TEXT'}${defaultClause}`);
+      }
+
+      const columnList = oldColumns.map((col) => col.name).join(', ');
+      db.exec(`INSERT INTO ${tempTable} (${columnList}) SELECT ${columnList} FROM ${table}`);
+      db.exec(`DROP TABLE ${table}`);
+      db.exec(`ALTER TABLE ${tempTable} RENAME TO ${table}`);
+      for (const sql of indexes) db.exec(sql);
+
+      const violations = db.pragma('foreign_key_check');
+      if (violations.length > 0) {
+        throw new Error(`${table} 재생성 후 외래키 무결성 오류 ${violations.length}건`);
+      }
+    })();
+  } finally {
+    db.pragma('foreign_keys = ON');
+  }
+}
+
+function needsUsersRebuild() {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'users'").get();
+  return row && !row.sql.includes("'POS_STAFF'");
+}
+
+function needsOrdersRebuild() {
+  const customerId = tableColumns('orders').find((col) => col.name === 'customer_id');
+  return customerId && customerId.notnull === 1;
+}
+
+function needsPaymentsRebuild() {
+  return db
+    .prepare('PRAGMA index_list(payments)')
+    .all()
+    .some((index) => {
+      if (!index.unique || index.origin === 'pk') return false;
+      const columns = db.prepare(`PRAGMA index_info(${index.name})`).all();
+      return columns.length === 1 && columns[0].name === 'order_id';
+    });
+}
+
+// 회원 QR·바코드에 쓰는 추측하기 어려운 코드. 순번(M12)만으로는 다른 회원을 사칭할 수 있다.
+function assignMemberCode(customerId) {
+  const existing = db.prepare('SELECT member_code FROM customers WHERE id = ?').get(customerId);
+  if (!existing) return null;
+  if (existing.member_code) return existing.member_code;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const code = `MD${String(crypto.randomInt(0, 1e10)).padStart(10, '0')}`;
+    const taken = db.prepare('SELECT 1 FROM customers WHERE member_code = ?').get(code);
+    if (taken) continue;
+    db.prepare('UPDATE customers SET member_code = ? WHERE id = ? AND member_code IS NULL').run(code, customerId);
+    return db.prepare('SELECT member_code FROM customers WHERE id = ?').get(customerId).member_code;
+  }
+  throw new Error('회원 코드를 만들지 못했습니다.');
+}
+
+function migratePos(schema) {
+  if (needsUsersRebuild()) rebuildTable(schema, 'users');
+  if (needsOrdersRebuild()) rebuildTable(schema, 'orders');
+  if (needsPaymentsRebuild()) rebuildTable(schema, 'payments');
+
+  addColumnIfMissing('products', 'barcode', 'TEXT');
+  addColumnIfMissing('products', 'product_type', "TEXT NOT NULL DEFAULT 'GENERAL'");
+  addColumnIfMissing('products', 'safety_stock', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('products', 'cost_price', 'INTEGER');
+  addColumnIfMissing('products', 'pos_sale_enabled', 'INTEGER NOT NULL DEFAULT 1');
+
+  addColumnIfMissing('orders', 'sales_channel', "TEXT NOT NULL DEFAULT 'ONLINE'");
+  addColumnIfMissing('orders', 'pos_terminal_id', 'INTEGER');
+  addColumnIfMissing('orders', 'pos_session_id', 'INTEGER');
+  addColumnIfMissing('orders', 'cashier_user_id', 'INTEGER');
+  addColumnIfMissing('orders', 'original_order_id', 'INTEGER');
+  addColumnIfMissing('orders', 'counsel_order_id', 'INTEGER');
+  addColumnIfMissing('orders', 'refund_reason', 'TEXT');
+  addColumnIfMissing('orders', 'discount_reason', 'TEXT');
+  addColumnIfMissing('orders', 'picked_up_at', 'TEXT');
+  addColumnIfMissing('orders', 'picked_up_by', 'INTEGER');
+
+  addColumnIfMissing('order_items', 'product_type', 'TEXT');
+  addColumnIfMissing('order_items', 'discount_amount', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('order_items', 'discount_reason', 'TEXT');
+  addColumnIfMissing('order_items', 'refunded_quantity', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('order_items', 'refunded_amount', 'INTEGER NOT NULL DEFAULT 0');
+
+  addColumnIfMissing('payments', 'approval_number', 'TEXT');
+  addColumnIfMissing('payments', 'terminal_id', 'TEXT');
+  addColumnIfMissing('payments', 'card_company', 'TEXT');
+  addColumnIfMissing('payments', 'cash_receipt_number', 'TEXT');
+  addColumnIfMissing('payments', 'received_amount', 'INTEGER');
+  addColumnIfMissing('payments', 'change_amount', 'INTEGER');
+  addColumnIfMissing('payments', 'pos_session_id', 'INTEGER');
+  addColumnIfMissing('payments', 'created_by', 'INTEGER');
+
+  addColumnIfMissing('inventory_logs', 'reference_type', 'TEXT');
+  addColumnIfMissing('inventory_logs', 'reference_id', 'INTEGER');
+  addColumnIfMissing('admin_logs', 'pharmacy_id', 'INTEGER');
+
+  addColumnIfMissing('customers', 'member_code', 'TEXT');
+  addColumnIfMissing('pos_terminals', 'van_mode', "TEXT NOT NULL DEFAULT 'MANUAL'");
+  addColumnIfMissing('pos_terminals', 'updated_at', 'TEXT');
+  addColumnIfMissing('payments', 'van_transaction_id', 'INTEGER');
+  addColumnIfMissing('payments', 'installment_months', 'INTEGER');
+
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_member_code
+      ON customers(member_code) WHERE member_code IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_pos_holds_pharmacy ON pos_holds(pharmacy_id, status, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_van_transactions_pharmacy ON van_transactions(pharmacy_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_inventory_logs_product ON inventory_logs(product_id, id DESC);
+  `);
+
+  const missingCodes = db.prepare('SELECT id FROM customers WHERE member_code IS NULL').all();
+  for (const row of missingCodes) assignMemberCode(row.id);
+
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_products_pharmacy_barcode
+      ON products(pharmacy_id, barcode) WHERE barcode IS NOT NULL AND barcode != '';
+    CREATE INDEX IF NOT EXISTS idx_payments_order ON payments(order_id);
+    CREATE INDEX IF NOT EXISTS idx_payments_session ON payments(pos_session_id);
+    CREATE INDEX IF NOT EXISTS idx_orders_channel_created ON orders(pharmacy_id, sales_channel, created_at);
+    CREATE INDEX IF NOT EXISTS idx_orders_original ON orders(original_order_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_pos_sessions_one_open
+      ON pos_sessions(terminal_id) WHERE status = 'OPEN';
+    CREATE INDEX IF NOT EXISTS idx_admin_logs_pharmacy ON admin_logs(pharmacy_id, id DESC);
+
+    CREATE TRIGGER IF NOT EXISTS trg_products_no_negative_stock
+    BEFORE UPDATE OF stock_quantity ON products
+    WHEN NEW.stock_quantity < 0
+    BEGIN
+      SELECT RAISE(ABORT, '재고가 부족합니다.');
+    END;
+  `);
+}
+
 function migrate() {
   const schema = fs.readFileSync(schemaPath, 'utf8');
   db.exec(schema);
@@ -31,6 +194,8 @@ function migrate() {
   addColumnIfMissing('partnership_inquiries', 'license_number', "TEXT NOT NULL DEFAULT ''");
   addColumnIfMissing('partnership_inquiries', 'license_file_name', 'TEXT');
   addColumnIfMissing('partnership_inquiries', 'license_file_path', 'TEXT');
+
+  migratePos(schema);
 }
 
 function getOne(sql, params = {}) {
@@ -48,6 +213,7 @@ function run(sql, params = {}) {
 module.exports = {
   db,
   migrate,
+  assignMemberCode,
   getOne,
   getAll,
   run,

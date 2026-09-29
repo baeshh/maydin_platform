@@ -81,7 +81,9 @@ function orderTypeLabel(type) {
     {
       DELIVERY: '배송 주문',
       PICKUP: '매장 픽업',
-      COUNSEL: '복약상담'
+      COUNSEL: '복약상담',
+      POS_SALE: '현장 판매',
+      POS_REFUND: '현장 반품'
     }[type] || type || '배송 주문'
   );
 }
@@ -97,7 +99,9 @@ function orderStatusLabel(status) {
       READY_FOR_PICKUP: '픽업준비',
       PICKED_UP: '픽업완료',
       COMPLETED: '완료',
-      CANCELED: '취소'
+      CANCELED: '취소',
+      PARTIALLY_REFUNDED: '부분반품',
+      REFUNDED: '반품완료'
     }[status] || status || '-'
   );
 }
@@ -109,7 +113,8 @@ function deliveryStatusLabel(status) {
       SHIPPING: '배송중',
       DELIVERED: '배송완료',
       READY_FOR_PICKUP: '픽업대기',
-      PICKED_UP: '픽업완료'
+      PICKED_UP: '픽업완료',
+      NOT_APPLICABLE: '현장 수령'
     }[status] || status || '-'
   );
 }

@@ -10,13 +10,14 @@ router.use(authenticate, requireRole('PHARMACY_OWNER', 'ADMIN'), requirePharmacy
 router.get('/pharmacy', (req, res) => {
   const summary = getOne(
     `SELECT
-      COALESCE(SUM(CASE WHEN date(created_at) = date('now', 'localtime') THEN final_amount ELSE 0 END), 0) AS today_sales,
-      COALESCE(SUM(CASE WHEN strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now', 'localtime') THEN final_amount ELSE 0 END), 0) AS month_sales,
+      COALESCE(SUM(CASE WHEN date(created_at, 'localtime') = date('now', 'localtime') THEN final_amount ELSE 0 END), 0) AS today_sales,
+      COALESCE(SUM(CASE WHEN strftime('%Y-%m', created_at, 'localtime') = strftime('%Y-%m', 'now', 'localtime') THEN final_amount ELSE 0 END), 0) AS month_sales,
       COALESCE(SUM(final_amount), 0) AS total_sales,
-      COUNT(CASE WHEN date(created_at) = date('now', 'localtime') THEN 1 END) AS today_order_count,
-      COUNT(CASE WHEN strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now', 'localtime') THEN 1 END) AS month_order_count,
-      COUNT(CASE WHEN delivery_status != 'DELIVERED' THEN 1 END) AS pending_delivery_count,
-      COUNT(CASE WHEN delivery_status = 'DELIVERED' THEN 1 END) AS delivered_count
+      COALESCE(SUM(CASE WHEN date(created_at, 'localtime') = date('now', 'localtime') AND sales_channel = 'POS' THEN final_amount ELSE 0 END), 0) AS today_pos_sales,
+      COUNT(CASE WHEN date(created_at, 'localtime') = date('now', 'localtime') AND order_type != 'POS_REFUND' THEN 1 END) AS today_order_count,
+      COUNT(CASE WHEN strftime('%Y-%m', created_at, 'localtime') = strftime('%Y-%m', 'now', 'localtime') AND order_type != 'POS_REFUND' THEN 1 END) AS month_order_count,
+      COUNT(CASE WHEN order_type = 'DELIVERY' AND delivery_status != 'DELIVERED' THEN 1 END) AS pending_delivery_count,
+      COUNT(CASE WHEN order_type = 'DELIVERY' AND delivery_status = 'DELIVERED' THEN 1 END) AS delivered_count
      FROM orders
      WHERE pharmacy_id = @pharmacy_id`,
     { pharmacy_id: req.pharmacyId }
@@ -25,7 +26,9 @@ router.get('/pharmacy', (req, res) => {
   const counts = getOne(
     `SELECT
       (SELECT COUNT(*) FROM users WHERE role = 'CUSTOMER' AND pharmacy_id = @pharmacy_id) AS customer_count,
-      (SELECT COUNT(*) FROM products WHERE pharmacy_id = @pharmacy_id AND stock_quantity <= 5) AS low_stock_count,
+      (SELECT COUNT(*) FROM products
+        WHERE pharmacy_id = @pharmacy_id AND status != 'HIDDEN'
+          AND stock_quantity <= CASE WHEN COALESCE(safety_stock, 0) > 0 THEN safety_stock ELSE 5 END) AS low_stock_count,
       (SELECT COUNT(*) FROM products WHERE pharmacy_id = @pharmacy_id AND status = 'SOLD_OUT') AS sold_out_count`,
     { pharmacy_id: req.pharmacyId }
   );
@@ -42,9 +45,9 @@ router.get('/pharmacy', (req, res) => {
   );
 
   const recentOrders = getAll(
-    `SELECT o.*, c.name AS customer_name
+    `SELECT o.*, COALESCE(c.name, o.contact_name, '비회원') AS customer_name
      FROM orders o
-     JOIN customers c ON c.id = o.customer_id
+     LEFT JOIN customers c ON c.id = o.customer_id
      WHERE o.pharmacy_id = @pharmacy_id
      ORDER BY o.id DESC
      LIMIT 10`,
@@ -59,7 +62,7 @@ router.get('/customers', (req, res) => {
     `SELECT c.*,
       COALESCE(SUM(o.final_amount), 0) AS total_purchase_amount,
       MAX(o.created_at) AS last_order_at,
-      COUNT(o.id) AS order_count
+      COUNT(CASE WHEN o.order_type != 'POS_REFUND' THEN o.id END) AS order_count
      FROM customers c
      LEFT JOIN orders o ON o.customer_id = c.id
      WHERE c.pharmacy_id = @pharmacy_id

@@ -27,6 +27,9 @@ function assertCartReady(cartItems) {
 
   let total = 0;
   for (const item of cartItems) {
+    if (item.product_type === 'OTC') {
+      throw new Error(`${item.product_name} 상품은 일반의약품으로 온라인 결제가 불가합니다. 약국 방문 시 구매해 주세요.`);
+    }
     if (item.status !== 'ON_SALE') throw new Error(`${item.product_name} 상품은 판매중이 아닙니다.`);
     if (item.stock_quantity < item.quantity) throw new Error(`${item.product_name} 재고가 부족합니다.`);
     total += Number(item.discount_price || item.price) * item.quantity;
@@ -38,26 +41,28 @@ function insertOrderItems(orderId, cartItems, pharmacyId, userId) {
   for (const item of cartItems) {
     const price = Number(item.discount_price || item.price);
     run(
-      `INSERT INTO order_items (order_id, product_id, product_name, quantity, price, total_price)
-       VALUES (@order_id, @product_id, @product_name, @quantity, @price, @total_price)`,
+      `INSERT INTO order_items (order_id, product_id, product_name, quantity, price, total_price, product_type)
+       VALUES (@order_id, @product_id, @product_name, @quantity, @price, @total_price, @product_type)`,
       {
         order_id: orderId,
         product_id: item.id,
         product_name: item.product_name,
         quantity: item.quantity,
         price,
-        total_price: price * item.quantity
+        total_price: price * item.quantity,
+        product_type: item.product_type || 'GENERAL'
       }
     );
 
-    run(
+    const stockResult = run(
       `UPDATE products
        SET stock_quantity = stock_quantity - @quantity,
            status = CASE WHEN stock_quantity - @quantity <= 0 THEN 'SOLD_OUT' ELSE status END,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = @product_id AND pharmacy_id = @pharmacy_id`,
+       WHERE id = @product_id AND pharmacy_id = @pharmacy_id AND stock_quantity >= @quantity`,
       { quantity: item.quantity, product_id: item.id, pharmacy_id: pharmacyId }
     );
+    if (stockResult.changes === 0) throw new Error(`${item.product_name} 재고가 부족합니다.`);
 
     run(
       `INSERT INTO inventory_logs (
@@ -97,9 +102,9 @@ router.get('/', requireRole('CUSTOMER', 'PHARMACY_OWNER', 'ADMIN'), requirePharm
        ORDER BY o.id DESC`
     : `SELECT o.*, c.name AS customer_name, c.phone AS customer_phone, d.receiver_name, d.address, d.courier, d.tracking_number
        FROM orders o
-       JOIN customers c ON c.id = o.customer_id
+       LEFT JOIN customers c ON c.id = o.customer_id
        LEFT JOIN deliveries d ON d.order_id = o.id
-       WHERE o.pharmacy_id = @pharmacy_id
+       WHERE o.pharmacy_id = @pharmacy_id AND COALESCE(o.sales_channel, 'ONLINE') != 'POS'
        ORDER BY o.id DESC`;
 
   const orders = getAll(sql, { pharmacy_id: req.pharmacyId, user_id: req.user.id });
@@ -124,9 +129,9 @@ router.get('/:id', requireRole('CUSTOMER', 'PHARMACY_OWNER', 'ADMIN'), requirePh
   }
 
   const items = getAll('SELECT * FROM order_items WHERE order_id = @order_id', { order_id: order.id });
-  const payment = getOne('SELECT * FROM payments WHERE order_id = @order_id', { order_id: order.id });
+  const payments = getAll('SELECT * FROM payments WHERE order_id = @order_id ORDER BY id ASC', { order_id: order.id });
   const delivery = getOne('SELECT * FROM deliveries WHERE order_id = @order_id', { order_id: order.id });
-  res.json({ order, items, payment, delivery });
+  res.json({ order, items, payment: payments[0] || null, payments, delivery });
 });
 
 router.post('/', requireRole('CUSTOMER'), requirePharmacyScope, (req, res) => {

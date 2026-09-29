@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   name TEXT NOT NULL,
   phone TEXT,
-  role TEXT NOT NULL CHECK (role IN ('CUSTOMER', 'PHARMACY_OWNER', 'ADMIN')),
+  role TEXT NOT NULL CHECK (role IN ('CUSTOMER', 'PHARMACY_OWNER', 'ADMIN', 'POS_STAFF')),
   pharmacy_id INTEGER REFERENCES pharmacies(id) ON DELETE CASCADE,
   status TEXT NOT NULL DEFAULT 'ACTIVE',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS orders (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   order_number TEXT NOT NULL UNIQUE,
   pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
-  customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
+  customer_id INTEGER REFERENCES customers(id) ON DELETE RESTRICT,
   order_type TEXT NOT NULL DEFAULT 'DELIVERY',
   total_product_amount INTEGER NOT NULL,
   delivery_fee INTEGER NOT NULL DEFAULT 0,
@@ -133,7 +133,7 @@ CREATE TABLE IF NOT EXISTS order_items (
 
 CREATE TABLE IF NOT EXISTS payments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  order_id INTEGER NOT NULL UNIQUE REFERENCES orders(id) ON DELETE CASCADE,
+  order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
   payment_method TEXT NOT NULL DEFAULT 'MOCK_CARD',
   payment_provider TEXT NOT NULL DEFAULT 'MOCK',
   payment_status TEXT NOT NULL DEFAULT 'PAID',
@@ -230,6 +230,101 @@ CREATE TABLE IF NOT EXISTS partnership_inquiries (
   admin_note TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS pos_terminals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  terminal_name TEXT NOT NULL,
+  van_company TEXT,
+  tid TEXT,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS pos_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  terminal_id INTEGER NOT NULL REFERENCES pos_terminals(id) ON DELETE RESTRICT,
+  business_date TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'CLOSED')),
+  opening_cash INTEGER NOT NULL DEFAULT 0,
+  opened_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  opened_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expected_cash INTEGER,
+  actual_cash INTEGER,
+  cash_difference INTEGER,
+  summary_json TEXT,
+  close_note TEXT,
+  closed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  closed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS cash_movements (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  session_id INTEGER NOT NULL REFERENCES pos_sessions(id) ON DELETE CASCADE,
+  movement_type TEXT NOT NULL CHECK (movement_type IN ('DEPOSIT', 'WITHDRAW')),
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  reason TEXT NOT NULL,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS refunds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  original_order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE RESTRICT,
+  refund_order_id INTEGER NOT NULL UNIQUE REFERENCES orders(id) ON DELETE RESTRICT,
+  refund_type TEXT NOT NULL CHECK (refund_type IN ('CANCEL', 'PARTIAL')),
+  refund_amount INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS pos_holds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  terminal_id INTEGER REFERENCES pos_terminals(id) ON DELETE SET NULL,
+  session_id INTEGER REFERENCES pos_sessions(id) ON DELETE SET NULL,
+  hold_number INTEGER NOT NULL,
+  label TEXT,
+  customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL,
+  counsel_order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+  items_json TEXT NOT NULL,
+  item_count INTEGER NOT NULL DEFAULT 0,
+  total_amount INTEGER NOT NULL DEFAULT 0,
+  discount_amount INTEGER NOT NULL DEFAULT 0,
+  discount_reason TEXT,
+  status TEXT NOT NULL DEFAULT 'HELD' CHECK (status IN ('HELD', 'RECALLED', 'DISCARDED')),
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  resolved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  resolved_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS van_transactions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  terminal_id INTEGER REFERENCES pos_terminals(id) ON DELETE SET NULL,
+  van_company TEXT,
+  tid TEXT,
+  transaction_type TEXT NOT NULL CHECK (transaction_type IN ('APPROVE', 'CANCEL', 'CASH_RECEIPT')),
+  payment_method TEXT NOT NULL,
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  installment_months INTEGER NOT NULL DEFAULT 0,
+  approval_number TEXT NOT NULL,
+  card_company TEXT,
+  masked_identity TEXT,
+  original_approval_number TEXT,
+  status TEXT NOT NULL DEFAULT 'APPROVED' CHECK (status IN ('APPROVED', 'USED', 'VOIDED', 'DECLINED')),
+  order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+  is_demo INTEGER NOT NULL DEFAULT 1,
+  message TEXT,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_role_pharmacy ON users(role, pharmacy_id);
