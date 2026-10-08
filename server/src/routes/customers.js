@@ -15,6 +15,8 @@ const {
   normalizeProfile,
   validateBirthday
 } = require('../services/customers');
+const { customerMembership } = require('../services/members');
+const { pointPolicy } = require('../services/points');
 
 const router = express.Router();
 router.use(authenticate);
@@ -80,15 +82,28 @@ function myCustomer(req) {
 router.get('/me', requireRole('CUSTOMER'), (req, res) => {
   try {
     const customer = myCustomer(req);
-    return res.json({ customer, consents: currentConsents(customer.id), labels: labels() });
+    const pharmacy = getOne('SELECT pharmacy_code, pharmacy_name FROM pharmacies WHERE id = @id', { id: customer.pharmacy_id });
+    return res.json({
+      customer,
+      consents: currentConsents(customer.id),
+      membership: customerMembership(customer.pharmacy_id, customer.id),
+      point_enabled: pointPolicy(customer.pharmacy_id).enabled,
+      pharmacy,
+      labels: labels()
+    });
   } catch (error) {
     return fail(res, error);
   }
 });
 
+// 생일 달 적립 배수가 있어서, 한 번 등록한 생일은 고객이 직접 바꾸지 못하게 한다.
 router.patch('/me/profile', requireRole('CUSTOMER'), (req, res) => {
   try {
     const customer = myCustomer(req);
+    const changesBirthday = ['birth_month', 'birth_day'].some(
+      (key) => key in req.body && customer[key] != null && Number(req.body[key]) !== customer[key]
+    );
+    if (changesBirthday) throw new CustomerError('생일은 한 번 등록하면 앱에서 바꿀 수 없어요. 약국에 문의해 주세요.');
     updateProfile(customer, req.body);
     return res.json({ customer: profileOf(customer.id) });
   } catch (error) {

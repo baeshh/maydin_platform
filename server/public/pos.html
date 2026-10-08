@@ -196,6 +196,17 @@
         color: var(--text-sub);
       }
 
+      .badge.grade {
+        color: #fff;
+      }
+
+      .member-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 6px;
+      }
+
       .muted {
         color: var(--text-muted);
       }
@@ -1339,7 +1350,7 @@
         PO_RECEIVE: '발주 입고',
         PO_CLOSE: '입고 종료'
       };
-      const POINT_ENTRY_LABELS = { EARN: '적립', USE: '사용', EARN_CANCEL: '적립 취소', USE_RESTORE: '사용 복원', ADJUST: '수동 조정' };
+      const POINT_ENTRY_LABELS = { EARN: '적립', USE: '사용', EARN_CANCEL: '적립 취소', USE_RESTORE: '사용 복원', ADJUST: '수동 조정', REWARD: '추천 보상' };
       const STOCK_LOG_LABELS = {
         RECEIVE: '입고',
         DISPOSE: '폐기',
@@ -2087,6 +2098,7 @@
               <div>
                 <div class="customer-name">${h(c.name)} <span class="badge blue">회원 M${c.id}</span></div>
                 <div class="customer-sub">${h(maskPhone(c.phone))} · 구매 ${Number(c.order_count || 0)}회${recent ? ` · 최근 ${fmtDateTime(recent.created_at).slice(0, 12)}` : ''}</div>
+                ${memberBadges(c.membership)}
                 ${pointsEnabled() ? `<button class="point-chip" type="button" onclick="openPointHistory(${c.id})">포인트 <b>${Number(c.point_balance || 0).toLocaleString()}P</b></button>` : ''}
               </div>
               <div class="chips">
@@ -2109,6 +2121,23 @@
         document.getElementById('counselBox').innerHTML = state.counsel
           ? `<div class="linked-counsel"><span>복약상담 연결 · ${h(state.counsel.order_number)}</span><button class="line-remove" type="button" onclick="unlinkCounsel()">해제</button></div>`
           : '';
+      }
+
+      function memberBadges(m) {
+        if (!m) return '';
+        const badges = [];
+        const bonus = pointsEnabled() && m.grade_bonus > 0 ? ` +${m.grade_bonus}%p` : '';
+        badges.push(`<span class="badge grade" style="background: ${h(m.grade_color)};">${h(m.grade_label)}${bonus}</span>`);
+        if (m.birthday_this_month) {
+          badges.push(`<span class="badge orange">생일 달${pointsEnabled() && m.birthday_multiplier > 1 ? ` 적립 ${m.birthday_multiplier}배` : ''}</span>`);
+        }
+        if (m.status === 'AT_RISK') badges.push(`<span class="badge red">이탈 위험 · ${Number(m.days_since_last)}일 만에 방문</span>`);
+        if (m.status === 'DORMANT') badges.push(`<span class="badge red">휴면 · ${Number(m.days_since_last)}일 만에 방문</span>`);
+        if (m.status === 'NEW') badges.push('<span class="badge green">신규</span>');
+        if (m.refill_due.length) {
+          badges.push(`<span class="badge blue" title="${h(m.refill_due.join(', '))}">재구매 시기 ${h(m.refill_due[0])}${m.refill_due.length > 1 ? ` 외 ${m.refill_due.length - 1}` : ''}</span>`);
+        }
+        return `<div class="member-badges">${badges.join('')}</div>`;
       }
 
       function unsetCustomer() {
@@ -2199,7 +2228,11 @@
         try {
           const data = await api.request(`/pos/customers/${id}`);
           const summary = (window.__customerResults || []).find((c) => c.id === id);
-          state.customer = { ...data.customer, order_count: summary?.order_count ?? data.orders.filter((o) => o.order_type !== 'POS_REFUND').length };
+          state.customer = {
+            ...data.customer,
+            membership: data.membership,
+            order_count: summary?.order_count ?? data.orders.filter((o) => o.order_type !== 'POS_REFUND').length
+          };
           state.customerOrders = data.orders;
           renderCustomer();
           if (!silent) {
@@ -2221,7 +2254,7 @@
               <div class="pay-total">
                 <span class="muted" style="font-weight: 700;">보유 포인트</span>
                 <div class="amount">${Number(data.customer.point_balance).toLocaleString()}P</div>
-                <div class="muted" style="font-size: 13px; font-weight: 600;">적립 ${policy.earn_rate}% · ${Number(policy.min_use).toLocaleString()}P 이상부터 1P = 1원으로 사용 · 일반의약품은 적립·사용 제외</div>
+                <div class="muted" style="font-size: 13px; font-weight: 600;">기본 적립 ${policy.earn_rate}% (등급·생일 달 추가) · ${Number(policy.min_use).toLocaleString()}P 이상부터 1P = 1원으로 사용 · 일반의약품은 적립·사용 제외</div>
               </div>
               <table class="table">
                 <thead><tr><th>일시</th><th>구분</th><th class="num">포인트</th><th class="num">잔액</th></tr></thead>
@@ -2229,7 +2262,7 @@
                   ${
                     data.ledger
                       .map(
-                        (l) => `<tr><td>${fmtDateTime(l.created_at)}</td><td>${POINT_ENTRY_LABELS[l.entry_type] || h(l.entry_type)}${l.order_number ? `<div class="muted" style="font-size: 12px;">${h(l.order_number)}</div>` : ''}${l.reason && l.entry_type === 'ADJUST' ? `<div class="muted" style="font-size: 12px;">${h(l.reason)}</div>` : ''}</td><td class="num" style="font-weight: 800; color: ${l.points > 0 ? 'var(--toss-blue)' : 'var(--danger)'};">${l.points > 0 ? '+' : ''}${l.points.toLocaleString()}P</td><td class="num">${l.balance_after.toLocaleString()}P</td></tr>`
+                        (l) => `<tr><td>${fmtDateTime(l.created_at)}</td><td>${POINT_ENTRY_LABELS[l.entry_type] || h(l.entry_type)}${l.order_number ? `<div class="muted" style="font-size: 12px;">${h(l.order_number)}</div>` : ''}${l.reason && ['ADJUST', 'REWARD', 'EARN'].includes(l.entry_type) ? `<div class="muted" style="font-size: 12px;">${h(l.reason)}</div>` : ''}</td><td class="num" style="font-weight: 800; color: ${l.points > 0 ? 'var(--toss-blue)' : 'var(--danger)'};">${l.points > 0 ? '+' : ''}${l.points.toLocaleString()}P</td><td class="num">${l.balance_after.toLocaleString()}P</td></tr>`
                       )
                       .join('') || '<tr><td colspan="4" class="muted">포인트 내역이 없습니다.</td></tr>'
                   }
@@ -2755,9 +2788,10 @@
               )
               .join('')}
             ${
-              r.points && (r.points.earned || payments.some((p) => p.payment_method === 'POINT'))
+              r.points && (r.points.earned || r.points.reward || payments.some((p) => p.payment_method === 'POINT'))
                 ? `<div class="hr"></div>
                    ${r.points.earned ? `<div class="row"><span>${r.points.earned > 0 ? '적립 포인트' : '적립 취소'}</span><span>${r.points.earned > 0 ? '+' : ''}${r.points.earned.toLocaleString()}P</span></div>` : ''}
+                   ${r.points.reward ? `<div class="row"><span>친구 추천 보상</span><span>+${r.points.reward.toLocaleString()}P</span></div>` : ''}
                    ${r.points.balance != null ? `<div class="row"><span>현재 포인트 잔액</span><span>${r.points.balance.toLocaleString()}P</span></div>` : ''}`
                 : ''
             }

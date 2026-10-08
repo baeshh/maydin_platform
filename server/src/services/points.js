@@ -5,7 +5,8 @@ const POINT_ENTRY_LABELS = {
   USE: '사용',
   EARN_CANCEL: '적립 취소',
   USE_RESTORE: '사용 취소(복원)',
-  ADJUST: '수동 조정'
+  ADJUST: '수동 조정',
+  REWARD: '추천 보상'
 };
 
 class PointError extends Error {
@@ -66,10 +67,17 @@ function pointEligibleAmount(items) {
     .reduce((sum, item) => sum + (item.total_price - (item.discount_amount || 0)), 0);
 }
 
-function calcEarn(policy, eligibleAmount, pointsUsed) {
+// 적립률 = (기본 적립률 + 등급 추가 적립률) × 생일 달 배수. 약국이 기본 적립률을 0으로 두면 적립하지 않는다.
+function earnRate(policy, { bonus = 0, multiplier = 1 } = {}) {
   if (!policy.enabled || policy.earn_rate <= 0) return 0;
+  return Math.round((policy.earn_rate + bonus) * multiplier * 100) / 100;
+}
+
+function calcEarn(policy, eligibleAmount, pointsUsed, boost) {
+  const rate = earnRate(policy, boost);
+  if (rate <= 0) return 0;
   const base = Math.max(0, eligibleAmount - pointsUsed);
-  return Math.floor((base * policy.earn_rate) / 100);
+  return Math.floor((base * Math.round(rate * 100)) / 10000);
 }
 
 function customerLedger(pharmacyId, customerId, limit = 50) {
@@ -92,6 +100,7 @@ module.exports = {
   pointPolicy,
   changePoints,
   pointEligibleAmount,
+  earnRate,
   calcEarn,
   customerLedger
 };

@@ -2,7 +2,8 @@ const express = require('express');
 const { getAll, getOne, run, transaction } = require('../db');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { VAN_COMPANIES, VAN_MODES, VanError, adapterFor, demoAdapter } = require('../services/van');
-const { PointError, pointPolicy, changePoints, pointEligibleAmount, calcEarn } = require('../services/points');
+const { PointError, pointPolicy, changePoints, pointEligibleAmount, earnRate, calcEarn } = require('../services/points');
+const { earningContext, grantReferralReward, posBadges } = require('../services/members');
 const { LotError, parseLotInput, insertLot, lotLabel } = require('../services/lots');
 const { taxBreakdown } = require('../services/tax');
 
@@ -442,7 +443,17 @@ function buildReceipt(req, orderId) {
     items,
     payments,
     refunds,
-    points: order.customer_id ? { earned: order.points_earned || 0, balance: pointBalance } : null,
+    points: order.customer_id
+      ? {
+          earned: order.points_earned || 0,
+          reward:
+            getOne("SELECT COALESCE(SUM(points), 0) AS total FROM point_ledger WHERE order_id = @id AND customer_id = @customer_id AND entry_type = 'REWARD'", {
+              id: order.id,
+              customer_id: order.customer_id
+            }).total,
+          balance: pointBalance
+        }
+      : null,
     tax: taxBreakdown(items),
     payment_balances: order.order_type === 'POS_SALE' ? refundablePaymentBalances(order.id) : {},
     permissions: {
@@ -833,7 +844,7 @@ router.get(
        LIMIT 10`,
       { id: customer.id, pharmacy_id: req.pharmacyId }
     );
-    return { customer, orders };
+    return { customer, orders, membership: posBadges(req.pharmacyId, customer.id) };
   })
 );
 
@@ -1123,8 +1134,13 @@ router.post(
 
       insertPayments(orderId, payments, { session, terminal, userId: req.user.id, customerId: customer ? customer.id : null });
 
-      const earned = customer ? calcEarn(policy, eligible, pointsUsed) : 0;
+      const boost = customer ? earningContext(req.pharmacyId, customer.id, { excludeOrderId: orderId }) : null;
+      const earned = customer ? calcEarn(policy, eligible, pointsUsed, boost) : 0;
       if (earned > 0) {
+        const extras = [
+          boost.bonus > 0 ? `${boost.grade_label} +${boost.bonus}%p` : null,
+          boost.multiplier > 1 ? `생일 달 ${boost.multiplier}배` : null
+        ].filter(Boolean);
         run('UPDATE orders SET points_earned = @points WHERE id = @id', { id: orderId, points: earned });
         changePoints({
           pharmacyId: req.pharmacyId,
@@ -1132,10 +1148,13 @@ router.post(
           orderId,
           entryType: 'EARN',
           points: earned,
-          reason: `현장 구매 적립 ${policy.earn_rate}%`,
+          reason: `현장 구매 적립 ${earnRate(policy, boost)}%${extras.length ? ` (기본 ${policy.earn_rate}% · ${extras.join(' · ')})` : ''}`,
           userId: req.user.id
         });
       }
+      const referral = customer
+        ? grantReferralReward({ pharmacyId: req.pharmacyId, customerId: customer.id, orderId, userId: req.user.id })
+        : null;
 
       if (counsel && COUNSEL_OPEN_STATUSES.includes(counsel.order_status)) {
         run("UPDATE orders SET order_status = 'COMPLETED', updated_at = CURRENT_TIMESTAMP WHERE id = @id", {
@@ -1149,7 +1168,7 @@ router.post(
         'POS_SALE',
         'ORDER',
         orderId,
-        `현장 판매 ${won(finalAmount)} (${methods || '결제 없음'})${customer ? ` · 회원 ${customer.name}` : ' · 비회원'}${earned > 0 ? ` · 적립 ${earned}P` : ''}`
+        `현장 판매 ${won(finalAmount)} (${methods || '결제 없음'})${customer ? ` · 회원 ${customer.name}` : ' · 비회원'}${earned > 0 ? ` · 적립 ${earned}P` : ''}${referral ? ` · 추천 보상 ${referral.points}P (추천인 ${referral.referrer_name})` : ''}`
       );
       if (discountAmount > 0) {
         audit(req, 'POS_DISCOUNT', 'ORDER', orderId, `할인 ${won(discountAmount)} · 사유: ${discountReason}`);

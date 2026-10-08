@@ -32,6 +32,27 @@
       .pickup-code p { color:var(--sub); font-size:12px; font-weight:700; margin-bottom:4px; }
       .point-balance { background:rgba(255,255,255,.18); border:0; border-radius:999px; color:#fff; cursor:pointer; font-size:13px; font-weight:700; margin-top:8px; padding:6px 12px; }
       .point-row { align-items:center; border-top:1px solid var(--line); display:flex; justify-content:space-between; padding:10px 0; }
+      .grade-chip { border-radius:999px; color:#fff; font-size:12px; font-weight:800; padding:6px 10px; }
+      .progress { background:#eef1f4; border-radius:999px; height:8px; margin:10px 0 6px; overflow:hidden; }
+      .progress span { background:var(--blue); border-radius:999px; display:block; height:100%; }
+      .notice { background:#fff7ed; border-radius:12px; color:#c2410c; font-size:13px; font-weight:700; margin-top:10px; padding:10px 12px; }
+      details summary { color:var(--sub); cursor:pointer; font-size:13px; font-weight:700; margin-top:10px; }
+      .grade-table { border-collapse:collapse; font-size:13px; margin-top:8px; width:100%; }
+      .grade-table td { border-top:1px solid var(--line); padding:8px 4px; }
+      .grade-table td:last-child { text-align:right; }
+      .list-row { align-items:center; border-top:1px solid var(--line); display:flex; gap:10px; justify-content:space-between; padding:10px 0; }
+      .list-row:first-of-type { border-top:0; }
+      .list-row b { font-size:14px; }
+      .reply { background:#f9fafb; border-radius:10px; color:var(--sub); font-size:13px; margin-top:6px; padding:8px 10px; }
+      .small-btn { background:#f2f4f6; border:0; border-radius:10px; color:var(--sub); cursor:pointer; font-size:13px; font-weight:700; padding:8px 12px; text-decoration:none; white-space:nowrap; }
+      .small-btn.primary { background:var(--blue); color:#fff; }
+      .ref-code { font-size:22px; font-weight:800; letter-spacing:2px; margin:6px 0 10px; }
+      .form-grid { display:grid; gap:10px; grid-template-columns:repeat(2, 1fr); margin-top:10px; }
+      .form-grid label { color:var(--sub); display:grid; font-size:12px; font-weight:700; gap:4px; }
+      .form-grid select { border:1px solid var(--line); border-radius:10px; font-size:14px; padding:9px 10px; }
+      .check-row { align-items:flex-start; display:flex; font-size:14px; gap:8px; padding:8px 0; }
+      .check-row input { margin-top:3px; }
+      .section-title { color:var(--sub); font-size:14px; font-weight:800; margin:8px 2px 0; }
       .toast { background:rgba(25,31,40,.92); border-radius:12px; bottom:24px; color:#fff; font-size:14px; font-weight:700; left:50%; opacity:0; padding:12px 16px; pointer-events:none; position:fixed; transform:translateX(-50%) translateY(12px); transition:.2s ease; z-index:50; }
       .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
     </style>
@@ -46,6 +67,8 @@
     </header>
     <main>
       <section id="membership"></section>
+      <section id="myInfo" style="display:grid; gap:12px;"></section>
+      <h2 class="section-title">주문 · 예약 내역</h2>
       <div id="list" style="display:grid; gap:12px;"></div>
     </main>
     <div id="message" class="toast"></div>
@@ -128,7 +151,256 @@
         ]);
       }
 
-      const POINT_ENTRY_LABELS = { EARN: '적립', USE: '사용', EARN_CANCEL: '적립 취소', USE_RESTORE: '사용 취소', ADJUST: '약국 조정' };
+      const POINT_ENTRY_LABELS = { EARN: '적립', USE: '사용', EARN_CANCEL: '적립 취소', USE_RESTORE: '사용 취소', ADJUST: '약국 조정', REWARD: '추천 보상' };
+
+      const esc = (value) =>
+        String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
+      const won = (value) => `${Number(value || 0).toLocaleString('ko-KR')}원`;
+      const MARKETING_TYPES = ['MARKETING_SMS', 'MARKETING_KAKAO', 'MARKETING_NIGHT'];
+      const my = { data: null, alerts: [], requests: [], requestStatuses: {} };
+
+      function gradeCard({ membership: m, point_enabled: pointOn, customer }) {
+        const next = m.next_grade;
+        const progress = next ? Math.min(100, Math.round((m.net_12m / next.min) * 100)) : 100;
+        const birthdayNote = !pointOn || m.birthday_multiplier <= 1
+          ? ''
+          : m.birthday_this_month
+            ? `<div class="notice">이번 달은 생일 달이에요. 매장 구매 적립이 ${m.birthday_multiplier}배로 쌓여요.</div>`
+            : customer.birth_month == null
+              ? `<p class="muted" style="margin-top:8px;">아래 내 정보에서 생일을 등록하면 생일 달에 포인트가 ${m.birthday_multiplier}배로 쌓여요.</p>`
+              : '';
+        return `
+          <article class="card">
+            <div class="top"><strong>내 등급</strong><span class="grade-chip" style="background:${esc(m.grade_color)};">${esc(m.grade_label)}</span></div>
+            <p class="muted">최근 12개월 구매 ${won(m.net_12m)}${pointOn && m.grade_bonus > 0 ? ` · 기본 적립에 ${m.grade_bonus}%p 추가` : ''}</p>
+            ${next
+              ? `<div class="progress"><span style="width:${progress}%;"></span></div>
+                 <p class="muted">${esc(next.label)}까지 <b style="color:var(--text);">${won(next.remaining)}</b> 남았어요</p>`
+              : '<p class="muted" style="margin-top:6px;">가장 높은 등급이에요. 감사합니다.</p>'}
+            ${birthdayNote}
+            <details>
+              <summary>등급 기준${pointOn ? '·혜택' : ''} 보기</summary>
+              <table class="grade-table">
+                ${m.grades.map((g) => `
+                  <tr>
+                    <td><b style="color:${esc(g.color)};">${esc(g.label)}</b></td>
+                    <td>${g.min ? `12개월 ${won(g.min)} 이상` : '기본'}</td>
+                    ${pointOn ? `<td>${g.bonus ? `+${g.bonus}%p 추가 적립` : '기본 적립'}</td>` : ''}
+                  </tr>`).join('')}
+              </table>
+              <p class="muted" style="margin-top:6px;">등급은 최근 12개월 구매 금액(반품 제외)으로 매일 다시 계산돼요.</p>
+            </details>
+          </article>`;
+      }
+
+      function refillCard(refills) {
+        if (!refills.length) return '';
+        const when = (r) => (r.days_left > 0 ? `${r.days_left}일 뒤쯤 다 떨어져요` : r.days_left === 0 ? '오늘쯤 다 떨어져요' : `다 떨어진 지 ${-r.days_left}일 지났어요`);
+        return `
+          <article class="card">
+            <div class="top"><strong>곧 떨어질 상품</strong></div>
+            <p class="muted" style="margin-bottom:6px;">마지막 구매 수량과 복용·사용 기간으로 계산한 예상일이에요.</p>
+            ${refills.slice(0, 5).map((r) => `
+              <div class="list-row">
+                <div><b>${esc(r.product_name)}</b><p class="muted">${when(r)} · ${esc(r.runout_date)}</p></div>
+                ${r.due ? `<a class="small-btn primary" href="${withPharmacy('/store.html', pharmacyCode)}">다시 사기</a>` : ''}
+              </div>`).join('')}
+          </article>`;
+      }
+
+      function alertsCard() {
+        if (!my.alerts.length) return '';
+        return `
+          <article class="card">
+            <div class="top"><strong>입고 알림 신청</strong><span class="badge">${my.alerts.length}</span></div>
+            ${my.alerts.map((a) => {
+              const inStock = a.product_status === 'ACTIVE' && a.stock_quantity > 0;
+              return `
+                <div class="list-row">
+                  <div><b>${esc(a.product_name)}</b><p class="muted">${inStock ? '입고됐어요' : '입고를 기다리는 중'} · ${formatDate(a.created_at)} 신청</p></div>
+                  ${inStock
+                    ? `<a class="small-btn primary" href="${withPharmacy('/store.html', pharmacyCode)}">보러 가기</a>`
+                    : `<button class="small-btn" type="button" onclick="cancelAlert(${a.id})">신청 취소</button>`}
+                </div>`;
+            }).join('')}
+          </article>`;
+      }
+
+      function requestsCard() {
+        if (!my.requests.length) return '';
+        return `
+          <article class="card">
+            <div class="top"><strong>상품 요청</strong></div>
+            ${my.requests.slice(0, 10).map((r) => `
+              <div class="list-row" style="display:block;">
+                <div style="display:flex; justify-content:space-between; gap:8px;">
+                  <b>${esc(r.product_name)}</b>
+                  <span class="badge ${r.status === 'REJECTED' ? 'counsel' : r.status === 'STOCKED' ? 'pickup' : ''}">${esc(my.requestStatuses[r.status] || r.status)}</span>
+                </div>
+                <p class="muted">${formatDate(r.created_at)} 요청${r.memo ? ` · ${esc(r.memo)}` : ''}</p>
+                ${r.reply ? `<div class="reply">약국 답변: ${esc(r.reply)}</div>` : ''}
+              </div>`).join('')}
+          </article>`;
+      }
+
+      function referralCard({ customer, membership: m, point_enabled: pointOn }) {
+        const rewardText = pointOn && m.referral_reward > 0
+          ? `친구가 이 코드로 가입하고 매장에서 처음 구매하면 나와 친구 모두 ${m.referral_reward.toLocaleString()}P를 받아요.`
+          : '친구에게 우리 약국 멤버십을 알려 주세요.';
+        return `
+          <article class="card">
+            <div class="top"><strong>친구 추천</strong>${customer.referred_count ? `<span class="badge">${customer.referred_count}명 추천</span>` : ''}</div>
+            <p class="muted">${rewardText}</p>
+            <div class="ref-code">${esc(customer.referral_code)}</div>
+            <button class="small-btn primary" type="button" onclick="shareReferral()">초대 링크 보내기</button>
+          </article>`;
+      }
+
+      function options(from, to, selected, suffix = '') {
+        let html = '<option value="">선택 안 함</option>';
+        for (let i = from; to >= from ? i <= to : i >= to; i += to >= from ? 1 : -1) {
+          html += `<option value="${i}" ${Number(selected) === i ? 'selected' : ''}>${i}${suffix}</option>`;
+        }
+        return html;
+      }
+
+      function settingsCard({ customer, consents }) {
+        const birthdayLocked = customer.birth_month != null;
+        const year = new Date().getFullYear();
+        const required = ['TERMS', 'PRIVACY'];
+        const missingRequired = required.filter((t) => !consents[t].agreed);
+        return `
+          <article class="card">
+            <details id="settingsBox">
+              <summary style="margin:0; font-size:15px; color:var(--text);">내 정보 · 알림 수신 설정</summary>
+              <form id="profileForm" onsubmit="saveProfile(event)">
+                <div class="form-grid">
+                  <label>생일(월)<select name="birth_month" ${birthdayLocked ? 'disabled' : ''}>${options(1, 12, customer.birth_month, '월')}</select></label>
+                  <label>생일(일)<select name="birth_day" ${birthdayLocked ? 'disabled' : ''}>${options(1, 31, customer.birth_day, '일')}</select></label>
+                  <label>출생연도<select name="birth_year">${options(year, 1920, customer.birth_year, '년')}</select></label>
+                  <label>성별<select name="gender">
+                    <option value="">선택 안 함</option>
+                    <option value="F" ${customer.gender === 'F' ? 'selected' : ''}>여성</option>
+                    <option value="M" ${customer.gender === 'M' ? 'selected' : ''}>남성</option>
+                  </select></label>
+                </div>
+                <p class="muted" style="margin-top:8px;">${birthdayLocked ? '등록한 생일은 약국에서만 바꿀 수 있어요.' : '선택 정보예요. 생일 혜택과 맞춤 안내에만 씁니다.'}</p>
+                <button class="small-btn primary" type="submit" style="margin-top:10px;">정보 저장</button>
+              </form>
+              <form id="consentForm" onsubmit="saveConsents(event)" style="margin-top:18px; border-top:1px solid var(--line); padding-top:12px;">
+                <strong style="font-size:14px;">알림 수신 동의</strong>
+                ${missingRequired.map((t) => `
+                  <label class="check-row"><input type="checkbox" name="${t}" /> <span>[필수] ${esc(consents[t].label)}</span></label>`).join('')}
+                ${MARKETING_TYPES.map((t) => `
+                  <label class="check-row"><input type="checkbox" name="${t}" ${consents[t].agreed ? 'checked' : ''} onchange="syncNight()" />
+                    <span>[선택] ${esc(consents[t].label)}${consents[t].updated_at ? `<br /><span class="muted">${consents[t].agreed ? '동의' : '거부'} · ${formatDate(consents[t].updated_at)}</span>` : ''}</span></label>`).join('')}
+                <p class="muted">할인·이벤트·재구매 안내를 받아요. 언제든 끌 수 있고, 꺼도 멤버십 이용에는 영향이 없어요.${missingRequired.length ? '' : ' 이용약관·개인정보 동의는 완료되어 있어요.'}</p>
+                <button class="small-btn primary" type="submit" style="margin-top:10px;">수신 설정 저장</button>
+              </form>
+            </details>
+          </article>`;
+      }
+
+      function renderMyInfo() {
+        const data = my.data;
+        if (!data || !data.membership) return;
+        const open = $('#settingsBox')?.open;
+        $('#myInfo').innerHTML = [
+          gradeCard(data),
+          refillCard(data.membership.refills),
+          alertsCard(),
+          requestsCard(),
+          referralCard(data),
+          settingsCard(data)
+        ].join('');
+        if (open) $('#settingsBox').open = true;
+        syncNight();
+      }
+
+      function syncNight() {
+        const form = $('#consentForm');
+        if (!form) return;
+        const channel = form.MARKETING_SMS.checked || form.MARKETING_KAKAO.checked;
+        form.MARKETING_NIGHT.disabled = !channel;
+        if (!channel) form.MARKETING_NIGHT.checked = false;
+      }
+
+      async function loadMyInfo() {
+        const [data, alerts, requests] = await Promise.all([
+          api.request('/customers/me'),
+          api.request('/demand/me/restock-alerts').catch(() => ({ alerts: [] })),
+          api.request('/demand/me/product-requests').catch(() => ({ requests: [], statuses: {} }))
+        ]);
+        my.data = data;
+        my.alerts = alerts.alerts;
+        my.requests = requests.requests;
+        my.requestStatuses = requests.statuses || {};
+        renderMyInfo();
+      }
+
+      async function saveProfile(event) {
+        event.preventDefault();
+        const form = event.target;
+        const body = { birth_year: form.birth_year.value || null, gender: form.gender.value || null };
+        if (!form.birth_month.disabled) {
+          body.birth_month = form.birth_month.value || null;
+          body.birth_day = form.birth_day.value || null;
+        }
+        try {
+          const { customer } = await api.request('/customers/me/profile', { method: 'PATCH', body });
+          my.data.customer = customer;
+          await loadMyInfo();
+          toast('내 정보를 저장했어요.');
+        } catch (error) {
+          toast(error.message);
+        }
+      }
+
+      async function saveConsents(event) {
+        event.preventDefault();
+        const form = event.target;
+        const consents = {};
+        for (const type of [...MARKETING_TYPES, 'TERMS', 'PRIVACY']) {
+          if (!form[type]) continue;
+          if (['TERMS', 'PRIVACY'].includes(type) && !form[type].checked) continue;
+          consents[type] = form[type].checked;
+        }
+        try {
+          const data = await api.request('/customers/me/consents', { method: 'PATCH', body: { consents } });
+          my.data.consents = data.consents;
+          renderMyInfo();
+          toast('수신 설정을 저장했어요.');
+        } catch (error) {
+          toast(error.message);
+        }
+      }
+
+      async function cancelAlert(id) {
+        try {
+          await api.request(`/demand/me/restock-alerts/${id}`, { method: 'DELETE' });
+          my.alerts = my.alerts.filter((a) => a.id !== id);
+          renderMyInfo();
+          toast('입고 알림 신청을 취소했어요.');
+        } catch (error) {
+          toast(error.message);
+        }
+      }
+
+      async function shareReferral() {
+        const { customer, pharmacy } = my.data;
+        const url = `${location.origin}/join.html?pharmacyCode=${encodeURIComponent(pharmacy.pharmacy_code)}&ref=${encodeURIComponent(customer.referral_code)}`;
+        const text = `${pharmacy.pharmacy_name} 멤버십에 초대해요. 추천 코드 ${customer.referral_code}`;
+        try {
+          if (navigator.share) {
+            await navigator.share({ title: `${pharmacy.pharmacy_name} 멤버십`, text, url });
+            return;
+          }
+          await navigator.clipboard.writeText(`${text}\n${url}`);
+          toast('초대 링크를 복사했어요.');
+        } catch (error) {
+          if (error.name !== 'AbortError') prompt('아래 링크를 복사해 보내 주세요.', url);
+        }
+      }
 
       function formatDate(value) {
         const date = new Date(`${String(value).replace(' ', 'T')}Z`);
@@ -143,7 +415,7 @@
           const data = await api.request('/points/me');
           box.innerHTML = `
             <div class="top"><strong>포인트 내역</strong><span class="badge">${data.balance.toLocaleString()}P</span></div>
-            <p class="muted" style="margin-bottom:10px;">매장 구매 금액의 ${data.policy.earn_rate}% 적립 · ${data.policy.min_use.toLocaleString()}P 이상부터 1P = 1원으로 사용할 수 있어요. 일반의약품은 적립·사용 대상이 아닙니다.</p>
+            <p class="muted" style="margin-bottom:10px;">매장 구매 금액의 ${data.policy.earn_rate}% 기본 적립(등급·생일 달에는 더 쌓여요) · ${data.policy.min_use.toLocaleString()}P 이상부터 1P = 1원으로 사용할 수 있어요. 일반의약품은 적립·사용 대상이 아닙니다.</p>
             ${data.ledger.length
               ? data.ledger.map((l) => `
                   <div class="point-row">
@@ -160,6 +432,7 @@
 
       if (requireCustomerLogin(pharmacyCode)) {
         loadMembership().catch(() => {});
+        loadMyInfo().catch(() => {});
         loadOrders().catch((error) => toast(error.message));
       }
     </script>

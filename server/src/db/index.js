@@ -148,10 +148,16 @@ function migrateCustomerData() {
   `);
 }
 
+function needsPointLedgerRebuild() {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'point_ledger'").get();
+  return row && !row.sql.includes("'REWARD'");
+}
+
 function migratePos(schema) {
   if (needsUsersRebuild()) rebuildTable(schema, 'users');
   if (needsOrdersRebuild()) rebuildTable(schema, 'orders');
   if (needsPaymentsRebuild()) rebuildTable(schema, 'payments');
+  if (needsPointLedgerRebuild()) rebuildTable(schema, 'point_ledger');
 
   addColumnIfMissing('products', 'barcode', 'TEXT');
   addColumnIfMissing('products', 'product_type', "TEXT NOT NULL DEFAULT 'GENERAL'");
@@ -211,6 +217,7 @@ function migratePos(schema) {
   addColumnIfMissing('customers', 'referral_code', 'TEXT');
   addColumnIfMissing('customers', 'referred_by_customer_id', 'INTEGER');
   addColumnIfMissing('customers', 'signup_channel_id', 'INTEGER');
+  addColumnIfMissing('customers', 'referral_rewarded_at', 'TEXT');
   addColumnIfMissing('products', 'brand', 'TEXT');
   addColumnIfMissing('products', 'supply_days', 'INTEGER');
   migrateCustomerData();

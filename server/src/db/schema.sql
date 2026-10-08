@@ -332,7 +332,7 @@ CREATE TABLE IF NOT EXISTS point_ledger (
   pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
   customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
   order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
-  entry_type TEXT NOT NULL CHECK (entry_type IN ('EARN', 'USE', 'EARN_CANCEL', 'USE_RESTORE', 'ADJUST')),
+  entry_type TEXT NOT NULL CHECK (entry_type IN ('EARN', 'USE', 'EARN_CANCEL', 'USE_RESTORE', 'ADJUST', 'REWARD')),
   points INTEGER NOT NULL CHECK (points != 0),
   balance_after INTEGER NOT NULL CHECK (balance_after >= 0),
   reason TEXT,

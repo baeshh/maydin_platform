@@ -1,4 +1,5 @@
 const { getAll, getOne, run } = require('../db');
+const { pointPolicy, changePoints } = require('./points');
 
 const DAY_MS = 86400000;
 
@@ -462,6 +463,122 @@ function memberBehavior(pharmacyId, customerId) {
   };
 }
 
+// 등급은 이번 구매를 빼고 지난 12개월 순구매로 정한다. 구매 도중에 등급이 바뀌어 적립률이 달라지지 않게 한다.
+function earningContext(pharmacyId, customerId, { excludeOrderId = null, now = new Date() } = {}) {
+  const policy = memberPolicy(pharmacyId);
+  const row = getOne(
+    `SELECT c.birth_month,
+       COALESCE((SELECT SUM(o.final_amount) FROM orders o
+                 WHERE o.customer_id = c.id AND o.pharmacy_id = c.pharmacy_id AND o.order_type != 'COUNSEL'
+                   AND o.created_at >= datetime('now', '-12 months') AND o.id != @exclude), 0) AS net_12m
+     FROM customers c WHERE c.id = @id AND c.pharmacy_id = @pharmacy_id`,
+    { id: customerId, pharmacy_id: pharmacyId, exclude: excludeOrderId || 0 }
+  );
+  if (!row) return null;
+  const grade = gradeFor(policy, row.net_12m);
+  const birthday = row.birth_month === now.getMonth() + 1;
+  return {
+    policy,
+    net_12m: row.net_12m,
+    grade,
+    grade_label: GRADES[grade].label,
+    bonus: gradeBonus(policy, grade),
+    birthday_month: birthday,
+    multiplier: birthday ? policy.birthday_multiplier : 1
+  };
+}
+
+// 추천받아 가입한 회원이 매장에서 처음 구매하면 추천한 회원과 새 회원에게 한 번씩만 보상한다.
+function grantReferralReward({ pharmacyId, customerId, orderId, userId }) {
+  const reward = memberPolicy(pharmacyId).referral_reward;
+  if (!pointPolicy(pharmacyId).enabled || reward <= 0) return null;
+  const customer = getOne(
+    `SELECT c.id, c.name, r.id AS referrer_id, r.name AS referrer_name
+     FROM customers c
+     JOIN customers r ON r.id = c.referred_by_customer_id AND r.pharmacy_id = c.pharmacy_id
+     WHERE c.id = @id AND c.pharmacy_id = @pharmacy_id AND c.referral_rewarded_at IS NULL`,
+    { id: customerId, pharmacy_id: pharmacyId }
+  );
+  if (!customer) return null;
+  const earlier = getOne(
+    `SELECT COUNT(*) AS count FROM orders
+     WHERE customer_id = @id AND pharmacy_id = @pharmacy_id AND order_type = 'POS_SALE' AND order_status != 'CANCELED' AND id != @order_id`,
+    { id: customerId, pharmacy_id: pharmacyId, order_id: orderId }
+  ).count;
+  if (earlier > 0) return null;
+  const claimed = run('UPDATE customers SET referral_rewarded_at = CURRENT_TIMESTAMP WHERE id = @id AND referral_rewarded_at IS NULL', {
+    id: customerId
+  });
+  if (claimed.changes === 0) return null;
+  const maskedName = customer.name.length > 1 ? `${customer.name[0]}*${customer.name.slice(2)}` : customer.name;
+  changePoints({
+    pharmacyId,
+    customerId,
+    orderId,
+    entryType: 'REWARD',
+    points: reward,
+    reason: '추천 가입 첫 구매 보상',
+    userId
+  });
+  changePoints({
+    pharmacyId,
+    customerId: customer.referrer_id,
+    orderId,
+    entryType: 'REWARD',
+    points: reward,
+    reason: `친구 추천 보상 (${maskedName}님 첫 구매)`,
+    userId
+  });
+  return { points: reward, referrer_id: customer.referrer_id, referrer_name: customer.referrer_name };
+}
+
+// POS 화면에 보여 줄 회원 배지: 등급·생일 달·이탈 위험·재구매 시기. 정확한 생일과 구매 금액은 보내지 않는다.
+function posBadges(pharmacyId, customerId) {
+  const policy = memberPolicy(pharmacyId);
+  const m = memberMetrics(pharmacyId, customerId, policy);
+  if (!m) return null;
+  return {
+    grade: m.grade,
+    grade_label: GRADES[m.grade].label,
+    grade_color: GRADES[m.grade].color,
+    grade_bonus: m.grade_bonus,
+    status: m.status,
+    status_label: STATUSES[m.status],
+    birthday_this_month: m.birthday_this_month,
+    birthday_multiplier: m.birthday_this_month ? policy.birthday_multiplier : 1,
+    days_since_last: m.days_since_last,
+    refill_due: m.refill_due.map((r) => r.product_name)
+  };
+}
+
+// 고객 앱 '내 등급' 화면
+function customerMembership(pharmacyId, customerId) {
+  const policy = memberPolicy(pharmacyId);
+  const m = memberMetrics(pharmacyId, customerId, policy);
+  if (!m) return null;
+  return {
+    grade: m.grade,
+    grade_label: GRADES[m.grade].label,
+    grade_color: GRADES[m.grade].color,
+    grade_bonus: m.grade_bonus,
+    net_12m: Math.max(0, m.net_12m),
+    next_grade: m.next_grade,
+    birthday_this_month: m.birthday_this_month,
+    birthday_multiplier: policy.birthday_multiplier,
+    referral_reward: policy.referral_reward,
+    grades: GRADE_ORDER.map((key) => ({
+      key,
+      label: GRADES[key].label,
+      color: GRADES[key].color,
+      min: key === 'BASIC' ? 0 : policy[`${key.toLowerCase()}_min`],
+      bonus: gradeBonus(policy, key)
+    })),
+    refills: refillRows(pharmacyId, customerId)
+      .filter((r) => r.days_left >= -REFILL_AFTER_DAYS)
+      .map(({ product_id, product_name, runout_date, days_left, due }) => ({ product_id, product_name, runout_date, days_left, due }))
+  };
+}
+
 function labels() {
   return {
     grades: Object.fromEntries(Object.entries(GRADES).map(([k, v]) => [k, v.label])),
@@ -490,6 +607,10 @@ module.exports = {
   memberSummary,
   memberBehavior,
   refillRows,
+  earningContext,
+  grantReferralReward,
+  posBadges,
+  customerMembership,
   filterMembers,
   sortMembers,
   labels
