@@ -225,6 +225,13 @@
         await submitAuth('/auth/customer/reset-pin', { pharmacyCode, phone: form.phone.value, code: form.code.value, pin: form.pin.value });
       });
 
+      const notice = sessionStorage.getItem('loginNotice');
+      if (notice) {
+        sessionStorage.removeItem('loginNotice');
+        $('#message').className = 'message info';
+        message(notice);
+      }
+
       loadPharmacy();
     </script>
   </body>

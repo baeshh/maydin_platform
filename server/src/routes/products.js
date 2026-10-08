@@ -57,32 +57,57 @@ function publicProduct({ cost_price, supplier_id, safety_stock, pos_sale_enabled
   return product;
 }
 
-router.get('/public', (req, res) => {
-  const { pharmacyCode } = req.query;
-  const pharmacy = getOne("SELECT id FROM pharmacies WHERE pharmacy_code = @pharmacyCode AND status = 'ACTIVE'", {
-    pharmacyCode
+// 폐쇄몰: 그 약국의 승인된 회원만 상품을 본다. 약국 운영자·직원은 자기 약국, 본사 관리자는 모든 약국을 미리 볼 수 있다.
+function mallPharmacy(req, res, next) {
+  const pharmacy = getOne("SELECT id FROM pharmacies WHERE pharmacy_code = @code AND status = 'ACTIVE'", {
+    code: req.query.pharmacyCode
   });
-  if (!pharmacy) return res.status(404).json({ message: '약국을 찾을 수 없습니다.' });
+  const { role, pharmacy_id: userPharmacyId } = req.user;
 
+  if (role === 'CUSTOMER') {
+    const member = getOne('SELECT approval_status FROM customers WHERE user_id = @user_id AND pharmacy_id = @pharmacy_id', {
+      user_id: req.user.id,
+      pharmacy_id: userPharmacyId
+    });
+    if (!member || member.approval_status !== 'APPROVED') {
+      return res.status(403).json({ message: '약국에서 가입을 승인한 회원만 이용할 수 있습니다.' });
+    }
+  }
+  if (role === 'ADMIN') {
+    if (!pharmacy) return res.status(404).json({ message: '약국을 찾을 수 없습니다.' });
+    req.mallPharmacyId = pharmacy.id;
+    return next();
+  }
+  if (!['CUSTOMER', 'PHARMACY_OWNER', 'POS_STAFF'].includes(role)) {
+    return res.status(403).json({ message: '이 약국몰 회원만 이용할 수 있습니다.' });
+  }
+  if (req.query.pharmacyCode && (!pharmacy || pharmacy.id !== userPharmacyId)) {
+    return res.status(403).json({ message: '이 약국몰 회원만 이용할 수 있습니다. 이 약국에서 가입해 주세요.' });
+  }
+  req.mallPharmacyId = userPharmacyId;
+  return next();
+}
+
+router.get('/mall', authenticate, mallPharmacy, (req, res) => {
   const products = getAll(
     `SELECT p.*, c.category_name
      FROM products p
      LEFT JOIN categories c ON c.id = p.category_id
      WHERE p.pharmacy_id = @pharmacy_id AND p.status != 'HIDDEN' AND COALESCE(p.product_type, 'GENERAL') != 'OTC'
      ORDER BY p.id DESC`,
-    { pharmacy_id: pharmacy.id }
+    { pharmacy_id: req.mallPharmacyId }
   );
   res.json({ products: products.map(publicProduct) });
 });
 
-router.get('/public/:id', (req, res) => {
+router.get('/mall/:id', authenticate, mallPharmacy, (req, res) => {
   const product = getOne(
     `SELECT p.*, c.category_name, ph.pharmacy_code, ph.pharmacy_name
      FROM products p
      JOIN pharmacies ph ON ph.id = p.pharmacy_id
      LEFT JOIN categories c ON c.id = p.category_id
-     WHERE p.id = @id AND p.status != 'HIDDEN' AND COALESCE(p.product_type, 'GENERAL') != 'OTC'`,
-    { id: Number(req.params.id) }
+     WHERE p.id = @id AND p.pharmacy_id = @pharmacy_id AND p.status != 'HIDDEN' AND COALESCE(p.product_type, 'GENERAL') != 'OTC'`,
+    { id: Number(req.params.id), pharmacy_id: req.mallPharmacyId }
   );
   if (!product) return res.status(404).json({ message: '상품을 찾을 수 없습니다.' });
   res.json({ product: publicProduct(product) });

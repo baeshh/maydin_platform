@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>약국 쇼핑몰</title>
+    <script>
+      if (!localStorage.getItem('token')) {
+        sessionStorage.setItem('loginNotice', '이 약국몰은 회원 전용이에요. 로그인하거나 영수증 코드로 가입해 주세요.');
+        location.replace('/login.html' + location.search);
+      }
+    </script>
     <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
     <style>
       :root {
@@ -616,8 +622,8 @@
       <div class="header-inner">
         <div class="logo"><span id="pharmacyLogo">약국</span> <span>쇼핑몰</span></div>
         <div class="header-actions">
-          <a class="text-link" id="joinLink" href="#">가입</a>
-          <a class="text-link" id="loginLink" href="#">로그인</a>
+          <a class="text-link" id="meLink" href="#">내 정보</a>
+          <a class="text-link" href="#" onclick="logout(withPharmacy('/login.html', pharmacyCode)); return false;">로그아웃</a>
           <button class="icon-btn" type="button" onclick="focusSearch()" aria-label="상품 검색">
             <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="11" cy="11" r="8"></circle>
@@ -704,9 +710,8 @@
       let products = [];
       let selectedCategory = '전체';
 
-      $('#joinLink').href = `/join.html?pharmacyCode=${encodeURIComponent(pharmacyCode)}`;
-      $('#loginLink').href = `/login.html?pharmacyCode=${encodeURIComponent(pharmacyCode)}`;
-      $('#myLink').href = `/login.html?pharmacyCode=${encodeURIComponent(pharmacyCode)}`;
+      $('#meLink').href = withPharmacy('/order-history.html', pharmacyCode);
+      $('#myLink').href = withPharmacy('/order-history.html', pharmacyCode);
       $('#cartLink').href = withPharmacy('/cart.html', pharmacyCode);
       $('#orderNavLink').href = withPharmacy('/order.html', pharmacyCode);
       $('#historyNavLink').href = withPharmacy('/order-history.html', pharmacyCode);
@@ -922,7 +927,7 @@
           $('#heroTag').textContent = `${pharmacy.pharmacy_name} 단독 혜택`;
           $('#recommendTitle').textContent = `${pharmacy.pharmacy_name} 맞춤 추천`;
 
-          const productData = await api.request(`/products/public?pharmacyCode=${encodeURIComponent(pharmacyCode)}`);
+          const productData = await api.request(`/products/mall?pharmacyCode=${encodeURIComponent(pharmacyCode)}`);
           products = productData.products;
           renderCategories();
           renderBestProducts();
@@ -934,7 +939,7 @@
             $('#cartBadge').textContent = '0';
           }
         } catch (error) {
-          toast(error.message);
+          if (!handleMallAuthError(error, pharmacyCode)) toast(error.message);
         }
       }
 
@@ -945,10 +950,7 @@
 
       async function addCart(productId) {
         if (!isCustomerInThisStore()) {
-          toast('먼저 이 약국몰에 가입하거나 로그인해주세요.');
-          window.setTimeout(() => {
-            location.href = `/login.html?pharmacyCode=${encodeURIComponent(pharmacyCode)}`;
-          }, 700);
+          toast('약국 계정으로 미리 보는 중에는 장바구니에 담을 수 없어요.');
           return;
         }
 
@@ -965,7 +967,7 @@
         $('#productsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
 
-      loadStore();
+      if (requireMallLogin(pharmacyCode)) loadStore();
     </script>
   </body>
 </html>

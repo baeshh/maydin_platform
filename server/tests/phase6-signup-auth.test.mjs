@@ -360,6 +360,50 @@ console.log('[온라인 주문 — 매장 구매 인증한 승인 회원만]');
   check('인증 후 픽업 주문 201', res.status === 201, res.data);
 }
 
+console.log('[폐쇄몰 — 로그인한 회원만 접속]');
+{
+  let res = await api('/products/mall?pharmacyCode=A001');
+  check('비회원 상품 목록 401', res.status === 401, res.data);
+  res = await api(`/products/mall/${productId}?pharmacyCode=A001`);
+  check('비회원 상품 상세 401', res.status === 401, res.data);
+  res = await api('/products/public?pharmacyCode=A001');
+  check('예전 공개 상품 경로로도 못 봄', res.status === 401, res.status);
+  res = await api('/demand/search-miss', { method: 'POST', body: { pharmacyCode: 'A001', query: '비회원검색' } });
+  check('비회원 검색 기록 401', res.status === 401, res.data);
+
+  const member = await signupMember(db);
+  res = await api('/products/mall?pharmacyCode=A001', { token: member.data.token });
+  check('승인 회원은 상품 목록 열람', res.status === 200 && res.data.products.some((p) => p.id === productId), res.status);
+  res = await api(`/products/mall/${productId}?pharmacyCode=A001`, { token: member.data.token });
+  check('승인 회원은 상품 상세 열람', res.status === 200 && !('cost_price' in res.data.product), res.data);
+
+  const admin = await login('admin@maydin.kr', 'admin1234');
+  const code = `M6${String(Date.now()).slice(-5)}`;
+  await api('/admin/pharmacies', {
+    token: admin,
+    method: 'POST',
+    body: { pharmacy_code: code, pharmacy_name: '다른약국', owner_name: '이약사', store_slug: `mall-${code.toLowerCase()}`, owner_email: `${code.toLowerCase()}@mall.kr`, owner_password: 'owner1234' }
+  });
+  res = await api(`/products/mall?pharmacyCode=${code}`, { token: member.data.token });
+  check('다른 약국 회원은 403', res.status === 403, res.data);
+  const otherProduct = db
+    .prepare("INSERT INTO products (pharmacy_id, product_name, price, stock_quantity, status) VALUES ((SELECT id FROM pharmacies WHERE pharmacy_code = ?), '다른약국 상품', 1000, 5, 'ON_SALE')")
+    .run(code).lastInsertRowid;
+  res = await api(`/products/mall/${otherProduct}`, { token: member.data.token });
+  check('다른 약국 상품 상세 404', res.status === 404, res.data);
+
+  res = await api('/products/mall?pharmacyCode=A001', { token: owner });
+  check('약국 운영자는 자기 몰 미리보기', res.status === 200, res.status);
+  res = await api(`/products/mall?pharmacyCode=${code}`, { token: owner });
+  check('다른 약국 몰은 운영자도 403', res.status === 403, res.data);
+  res = await api(`/products/mall?pharmacyCode=${code}`, { token: admin });
+  check('본사 관리자는 모든 몰 미리보기', res.status === 200 && res.data.products.length === 1, res.data);
+
+  const pending = bodyWithCode((await sell()).data.signup_code.code, { name: customerRow(member.phone).name, birth_year: member.body.birth_year, birth_month: member.body.birth_month, birth_day: member.body.birth_day });
+  res = await postSignup(pending);
+  check('승인 대기 가입은 토큰 없음', res.status === 202 && !res.data.token, res.data);
+}
+
 console.log('[코드 대입 제한]');
 {
   const ip = testIp();

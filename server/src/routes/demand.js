@@ -10,11 +10,6 @@ const MAX_OPEN_REQUESTS = 10;
 const SEARCH_THROTTLE_MS = 10 * 60 * 1000;
 const recentSearches = new Map();
 
-function optionalAuth(req, res, next) {
-  if (!req.headers.authorization) return next();
-  return authenticate(req, res, next);
-}
-
 function customerOf(req) {
   if (req.user?.role !== 'CUSTOMER') return null;
   return getOne('SELECT id, pharmacy_id FROM customers WHERE user_id = @user_id', { user_id: req.user.id });
@@ -41,26 +36,25 @@ function throttled(key) {
 /* ---------- 결과 없는 검색어 ---------- */
 
 // 숫자만 있는 검색어(바코드·전화번호일 수 있음)는 기록하지 않는다.
-router.post('/search-miss', optionalAuth, (req, res) => {
+router.post('/search-miss', authenticate, requireRole('CUSTOMER', 'PHARMACY_OWNER', 'POS_STAFF'), (req, res) => {
   const query = cleanText(req.body.query, 40).toLowerCase();
   if (query.length < 2 || !/[^\d\s-]/.test(query)) return res.json({ ok: true, recorded: false });
 
   let pharmacyId;
   let source;
   let customerId = null;
-  if (req.user && ['PHARMACY_OWNER', 'POS_STAFF'].includes(req.user.role)) {
+  if (req.user.role === 'CUSTOMER') {
+    const customer = customerOf(req);
+    if (!customer) return res.status(403).json({ message: '이 약국몰 회원만 이용할 수 있습니다.' });
+    pharmacyId = customer.pharmacy_id;
+    customerId = customer.id;
+    source = 'STORE';
+  } else {
     pharmacyId = req.user.pharmacy_id;
     source = 'POS';
-  } else {
-    const pharmacy = getOne("SELECT id FROM pharmacies WHERE pharmacy_code = @code AND status = 'ACTIVE'", { code: req.body.pharmacyCode });
-    if (!pharmacy) return res.status(404).json({ message: '약국을 찾을 수 없습니다.' });
-    pharmacyId = pharmacy.id;
-    source = 'STORE';
-    const customer = customerOf(req);
-    if (customer && customer.pharmacy_id === pharmacyId) customerId = customer.id;
   }
   if (!pharmacyId) return res.status(403).json({ message: '약국이 지정되지 않은 계정입니다.' });
-  if (throttled(`${pharmacyId}|${source}|${query}|${customerId || req.user?.id || req.ip}`)) return res.json({ ok: true, recorded: false });
+  if (throttled(`${pharmacyId}|${source}|${query}|${customerId || req.user.id}`)) return res.json({ ok: true, recorded: false });
 
   run('INSERT INTO search_misses (pharmacy_id, query, source, customer_id) VALUES (@pharmacy_id, @query, @source, @customer_id)', {
     pharmacy_id: pharmacyId,

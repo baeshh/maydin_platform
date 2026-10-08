@@ -13,7 +13,11 @@ const api = {
       body: options.body ? JSON.stringify(options.body) : undefined
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.message || '요청에 실패했습니다.');
+    if (!res.ok) {
+      const error = new Error(data.message || '요청에 실패했습니다.');
+      error.status = res.status;
+      throw error;
+    }
     return data;
   },
 
@@ -40,10 +44,10 @@ function saveSession(data) {
   localStorage.setItem('user', JSON.stringify(data.user));
 }
 
-function logout() {
+function logout(to = '/') {
   localStorage.removeItem('token');
   localStorage.removeItem('user');
-  location.href = '/';
+  location.href = to;
 }
 
 function currentUser() {
@@ -70,10 +74,38 @@ function withPharmacy(path, pharmacyCode = pharmacyCodeFromUrl()) {
 function requireCustomerLogin(pharmacyCode = pharmacyCodeFromUrl()) {
   const user = currentUser();
   if (!user || user.role !== 'CUSTOMER') {
-    location.href = withPharmacy('/login.html', pharmacyCode);
+    sendToMallLogin(pharmacyCode);
     return false;
   }
   return true;
+}
+
+function sendToMallLogin(pharmacyCode = pharmacyCodeFromUrl(), notice = '이 약국몰은 회원 전용이에요. 로그인하거나 영수증 코드로 가입해 주세요.') {
+  sessionStorage.setItem('loginNotice', notice);
+  location.replace(withPharmacy('/login.html', pharmacyCode));
+}
+
+function requireMallLogin(pharmacyCode = pharmacyCodeFromUrl()) {
+  const user = currentUser();
+  if (!user || !localStorage.getItem('token') || !['CUSTOMER', 'PHARMACY_OWNER', 'POS_STAFF', 'ADMIN'].includes(user.role)) {
+    sendToMallLogin(pharmacyCode);
+    return false;
+  }
+  return true;
+}
+
+function handleMallAuthError(error, pharmacyCode = pharmacyCodeFromUrl()) {
+  if (error.status === 401) {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    sendToMallLogin(pharmacyCode, '로그인이 만료됐어요. 다시 로그인해 주세요.');
+    return true;
+  }
+  if (error.status === 403) {
+    sendToMallLogin(pharmacyCode, error.message);
+    return true;
+  }
+  return false;
 }
 
 async function guardOnlineOrder(noticeParent, controls = []) {

@@ -55,11 +55,12 @@ let probiotic;
   check('복용 기간 비우기', res.data.product.supply_days === null, res.data.product);
   await api(`/products/${probiotic.id}`, { token: owner, method: 'PATCH', body: { supply_days: 15 } });
 
-  res = await api('/products/public?pharmacyCode=A001');
+  const shopper = await signup('몰고객');
+  res = await api('/products/mall?pharmacyCode=A001', { token: shopper.token });
   const pub = res.data.products.find((p) => p.id === vitamin.id);
   check('고객용 상품 목록에 브랜드 노출', pub.brand === '메이딘랩', pub);
   check('고객용 상품 목록에 매입 원가 · 거래처 없음', !('cost_price' in pub) && !('supplier_id' in pub) && !('safety_stock' in pub), Object.keys(pub));
-  res = await api(`/products/public/${vitamin.id}`);
+  res = await api(`/products/mall/${vitamin.id}?pharmacyCode=A001`, { token: shopper.token });
   check('고객용 상품 상세에 매입 원가 없음', res.status === 200 && !('cost_price' in res.data.product), res.data);
 }
 
@@ -112,16 +113,17 @@ console.log('[함께 산 상품]');
 
 console.log('[결과 없는 검색어]');
 {
-  let res = await api('/demand/search-miss', { method: 'POST', body: { pharmacyCode: 'A001', query: '  루테인   지아잔틴 ' } });
+  const searcher = await signup('검색몰고객');
+  let res = await api('/demand/search-miss', { token: searcher.token, method: 'POST', body: { pharmacyCode: 'A001', query: '  루테인   지아잔틴 ' } });
   check('매장몰 검색 기록', res.data.recorded === true, res.data);
-  res = await api('/demand/search-miss', { method: 'POST', body: { pharmacyCode: 'A001', query: '루테인 지아잔틴' } });
+  res = await api('/demand/search-miss', { token: searcher.token, method: 'POST', body: { pharmacyCode: 'A001', query: '루테인 지아잔틴' } });
   check('같은 검색어 10분 내 중복 무시', res.data.recorded === false, res.data);
-  res = await api('/demand/search-miss', { method: 'POST', body: { pharmacyCode: 'A001', query: '01012345678' } });
+  res = await api('/demand/search-miss', { token: searcher.token, method: 'POST', body: { pharmacyCode: 'A001', query: '01012345678' } });
   check('숫자만(전화번호·바코드)은 기록 안 함', res.data.recorded === false, res.data);
-  res = await api('/demand/search-miss', { method: 'POST', body: { pharmacyCode: 'A001', query: '루' } });
+  res = await api('/demand/search-miss', { token: searcher.token, method: 'POST', body: { pharmacyCode: 'A001', query: '루' } });
   check('1글자는 기록 안 함', res.data.recorded === false, res.data);
-  res = await api('/demand/search-miss', { method: 'POST', body: { pharmacyCode: 'NOPE', query: '마그네슘' } });
-  check('없는 약국 404', res.status === 404, res.data);
+  res = await api('/demand/search-miss', { method: 'POST', body: { pharmacyCode: 'A001', query: '마그네슘' } });
+  check('비회원 검색 기록 401', res.status === 401, res.data);
   res = await api('/demand/search-miss', { token: owner, method: 'POST', body: { query: '루테인 지아잔틴' } });
   check('POS 검색 기록', res.data.recorded === true, res.data);
   const customer = await signup('검색고객');
