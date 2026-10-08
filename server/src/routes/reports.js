@@ -2,6 +2,7 @@ const express = require('express');
 const { getAll, getOne } = require('../db');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { TAX_TYPE_LABELS, splitVat } = require('../services/tax');
+const { csvCell } = require('../services/csv');
 
 const router = express.Router();
 
@@ -502,14 +503,6 @@ function salesReport(pharmacyId, query) {
 function changeRate(current, previous) {
   if (!previous) return null;
   return Math.round(((current - previous) / Math.abs(previous)) * 1000) / 10;
-}
-
-function csvCell(value) {
-  if (value === null || value === undefined) return '';
-  const text = String(value);
-  // 엑셀에서 수식으로 해석되지 않도록 =,+,-,@로 시작하는 문자열 앞에 작은따옴표를 붙인다.
-  const safe = typeof value === 'string' && /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
-  return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 
 const CSV_TABLES = {

@@ -510,6 +510,82 @@
         display: none;
       }
 
+      .member-dist {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 14px;
+        margin-bottom: 18px;
+      }
+
+      .member-dist .chart-box h4 {
+        margin: 0 0 10px;
+        font-size: 14px;
+      }
+
+      .grade-badge {
+        display: inline-block;
+        border-radius: 6px;
+        color: #fff;
+        font-size: 12px;
+        font-weight: 800;
+        padding: 2px 8px;
+      }
+
+      .check-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        padding: 8px 10px;
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--text-sub);
+        cursor: pointer;
+      }
+
+      .clickable-row {
+        cursor: pointer;
+      }
+
+      .clickable-row:hover td {
+        background: #f9fafb;
+      }
+
+      .report-metric.clickable {
+        cursor: pointer;
+      }
+
+      .report-metric.clickable:hover {
+        border-color: var(--toss-blue);
+      }
+
+      #memberPolicyForm {
+        border: 1px solid var(--border-color);
+        border-radius: 14px;
+        padding: 16px;
+        margin-bottom: 18px;
+      }
+
+      #memberPolicyForm .policy-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      #memberPolicyForm h4 {
+        margin: 4px 0 8px;
+        font-size: 14px;
+      }
+
+      .insight-box {
+        border: 1px solid var(--border-color);
+        border-radius: 14px;
+        padding: 14px;
+        margin-bottom: 14px;
+      }
+
       .channel-qr {
         display: flex;
         gap: 16px;
@@ -1161,6 +1237,7 @@
           <a href="#orders" class="nav-item">주문 관리 <span id="navPendingBadge" class="badge red">0</span></a>
           <a href="#products" class="nav-item">상품 관리</a>
           <a href="#customers" class="nav-item">고객 관리</a>
+          <a href="#members" class="nav-item">회원 분석</a>
           <a href="#purchasing" class="nav-item">거래처·발주 <span id="navReorderBadge" class="badge orange" hidden>0</span></a>
           <a href="#staff" class="nav-item">POS 직원</a>
           <a href="#qr" class="nav-item">QR 가입</a>
@@ -1296,6 +1373,43 @@
               </select>
             </div>
             <div id="reportBody" class="loading">매출 리포트를 불러오는 중입니다.</div>
+          </section>
+
+          <section class="card full-width" id="members">
+            <div class="card-header">
+              <h2 class="card-title">회원 분석</h2>
+              <div class="inline-actions">
+                <button class="btn btn-outline btn-sm" type="button" onclick="toggleMemberPolicy()">등급·혜택 기준</button>
+                <button class="btn btn-outline btn-sm" type="button" onclick="downloadMembersCsv()">회원 CSV</button>
+              </div>
+            </div>
+            <form id="memberPolicyForm" hidden onsubmit="saveMemberPolicy(event)"></form>
+            <div id="memberSummary" class="loading">회원 분석을 불러오는 중입니다.</div>
+            <div class="report-controls" id="memberFilters">
+              <input class="form-control" name="q" placeholder="이름 · 회원코드 · 전화 뒤 4자리" style="width: 210px;" />
+              <select class="form-control" name="grade"><option value="">전체 등급</option></select>
+              <select class="form-control" name="status"><option value="">전체 상태</option></select>
+              <select class="form-control" name="tier"><option value="">전체 금액대</option></select>
+              <select class="form-control" name="age"><option value="">전체 연령</option></select>
+              <select class="form-control" name="gender">
+                <option value="">전체 성별</option>
+                <option value="F">여성</option>
+                <option value="M">남성</option>
+                <option value="NONE">미입력</option>
+              </select>
+              <label class="check-chip"><input type="checkbox" name="birthday" value="1" /> 이번 달 생일</label>
+              <label class="check-chip"><input type="checkbox" name="marketing" value="1" /> 마케팅 동의</label>
+              <span style="flex: 1;"></span>
+              <select class="form-control" name="sort">
+                <option value="recent">최근 구매순</option>
+                <option value="spend">12개월 구매액순</option>
+                <option value="visits">구매 횟수순</option>
+                <option value="joined">가입일순</option>
+                <option value="name">이름순</option>
+              </select>
+            </div>
+            <div id="memberDetail" class="insight-box" hidden style="border-color: var(--toss-blue);"></div>
+            <div id="memberTable"></div>
           </section>
 
           <section class="card full-width" id="purchasing">
@@ -1554,6 +1668,7 @@
           allProducts = products.products;
           loadPurchasing();
           loadReport();
+          loadMembers();
           renderStaff(staff.staff);
           renderHeader(qr.qr);
           renderSummary(dash.summary);
@@ -1767,7 +1882,7 @@
                 <div class="list-value" style="text-align: right;">
                   누적 ${money(customer.total_purchase_amount)}
                   <div>
-                    <button class="muted-link" type="button" onclick="openCustomerInfo(${customer.id})">회원 정보</button>
+                    <button class="muted-link" type="button" onclick="openCustomerInfo(${customer.id}, '#customerPanel')">회원 정보</button>
                     · <button class="muted-link" type="button" onclick="openCustomerPoints(${customer.id})">포인트 ${Number(customer.point_balance || 0).toLocaleString()}P</button>
                   </div>
                 </div>
@@ -1791,19 +1906,83 @@
         return customer.birth_month ? `${customer.birth_month}월 ${customer.birth_day}일` : '-';
       }
 
-      function renderCustomerPanel(data) {
+      let customerPanelTarget = '#customerPanel';
+
+      function gradeBadge(grade, L) {
+        return `<span class="grade-badge" style="background:${L.grade_colors[grade]}">${h(L.grades[grade])}</span>`;
+      }
+
+      function statusBadge(status, L) {
+        const color = { NEW: 'blue', ACTIVE: 'green', ONE_TIME: 'gray', AT_RISK: 'orange', DORMANT: 'red', NO_PURCHASE: 'gray' }[status];
+        return `<span class="badge ${color}">${h(L.statuses[status])}</span>`;
+      }
+
+      function daysAgoText(days) {
+        if (days == null) return '-';
+        return days === 0 ? '오늘' : `${days.toLocaleString()}일 전`;
+      }
+
+      function memberInsightHtml(insight) {
+        if (!insight) return '';
+        const { metrics: m, behavior: b, labels: L } = insight;
+        const join = (rows, fmt) => (rows && rows.length ? rows.map(fmt).join(', ') : '-');
+        return `
+          <div class="insight-box">
+            <div class="inline-actions" style="margin-bottom: 10px;">
+              ${gradeBadge(m.grade, L)} ${statusBadge(m.status, L)}
+              ${m.birthday_this_month ? '<span class="badge orange">이번 달 생일</span>' : ''}
+              <span class="list-meta">
+                ${m.next_grade ? `${h(m.next_grade.label)}까지 ${money(m.next_grade.remaining)} 남음` : '최고 등급'}
+                ${m.grade_bonus ? ` · 추가 적립 +${m.grade_bonus}%p` : ''}
+              </span>
+            </div>
+            <div class="profile-grid" style="margin-bottom: 0;">
+              <div><span>최근 12개월 순구매</span><strong>${money(m.net_12m)}</strong></div>
+              <div><span>누적 순구매</span><strong>${money(m.net_total)}</strong></div>
+              <div><span>구매 횟수 (12개월)</span><strong>${m.visit_count.toLocaleString()}회 (${m.visits_12m}회)</strong></div>
+              <div><span>1회 평균 결제</span><strong>${m.avg_ticket == null ? '-' : `${money(m.avg_ticket)} · ${h(L.tiers[m.amount_tier])}`}</strong></div>
+              <div><span>월 평균 지출</span><strong>${money(m.monthly_spend)}</strong></div>
+              <div><span>평균 구매 주기</span><strong>${m.avg_interval_days == null ? '-' : `${m.avg_interval_days}일`}</strong></div>
+              <div><span>최근 구매</span><strong>${daysAgoText(m.days_since_last)}</strong></div>
+              <div><span>다음 방문 예상</span><strong>${h(m.expected_next_at || '-')}</strong></div>
+              ${b ? `
+                <div><span>선호 채널</span><strong>${join(b.channels, (c) => `${h(c.label)} ${c.count}`)}</strong></div>
+                <div><span>주 결제수단</span><strong>${join(b.payments.slice(0, 2), (p) => `${h(p.label)} ${p.count}`)}</strong></div>
+                <div><span>자주 오는 때</span><strong>${join(b.weekdays, (w) => `${w.label}요일`)}${b.hour_bands[0] ? ` · ${h(b.hour_bands[0].key)}` : ''}</strong></div>
+                <div><span>할인·포인트 사용</span><strong>${b.discount_rate}%</strong></div>
+                <div style="grid-column: 1 / -1;"><span>선호 카테고리</span><strong>${join(b.top_categories, (c) => `${h(c.name)} (${money(c.amount)})`)}</strong></div>` : ''}
+            </div>
+            ${b && b.recent_orders.length ? `
+              <details style="margin-top: 10px;">
+                <summary class="muted-link" style="cursor: pointer;">최근 구매 ${b.recent_orders.length}건</summary>
+                <div class="table-wrap" style="margin-top: 8px;">
+                  <table class="consent-table">
+                    <thead><tr><th>일시</th><th>상품</th><th>금액</th></tr></thead>
+                    <tbody>${b.recent_orders.map((o) => `<tr>
+                      <td>${h(formatDate(o.created_at))}</td>
+                      <td>${h(o.items || '-')}${o.item_count > 3 ? ` 외 ${o.item_count - 3}건` : ''}</td>
+                      <td style="font-weight: 800; color: ${o.final_amount < 0 ? '#f04452' : 'inherit'};">${money(o.final_amount)}</td>
+                    </tr>`).join('')}</tbody>
+                  </table>
+                </div>
+              </details>` : ''}
+          </div>`;
+      }
+
+      function renderCustomerPanel(data, insight) {
         const { customer, consents, consent_history: history, labels: L } = data;
         customerLabels = L;
-        const panel = $('#customerPanel');
-        $('#pointPanel').hidden = true;
+        const panel = $(customerPanelTarget);
+        if (customerPanelTarget === '#customerPanel') $('#pointPanel').hidden = true;
         panel.hidden = false;
         const withdrawable = Object.entries(consents).filter(([, c]) => !c.required && c.agreed);
         const marketingAgreed = Object.entries(consents).some(([type, c]) => c.agreed && ['MARKETING_SMS', 'MARKETING_KAKAO'].includes(type));
         panel.innerHTML = `
           <div class="card-header" style="margin-bottom: 10px;">
             <h3 class="card-title" style="font-size: 16px;">${h(customer.name)} · ${h(customer.member_code || '')}</h3>
-            <button class="muted-link" type="button" onclick="$('#customerPanel').hidden = true">닫기</button>
+            <button class="muted-link" type="button" onclick="$('${customerPanelTarget}').hidden = true">닫기</button>
           </div>
+          ${memberInsightHtml(insight)}
           <div class="profile-grid">
             <div><span>휴대폰</span><strong>${h(customer.phone || '-')}</strong></div>
             <div><span>가입일</span><strong>${h(formatDate(customer.created_at))}</strong></div>
@@ -1866,10 +2045,12 @@
         `;
       }
 
-      async function openCustomerInfo(id) {
+      async function openCustomerInfo(id, target) {
+        if (target) customerPanelTarget = target;
         try {
-          renderCustomerPanel(await api.request(`/customers/${id}`));
-          $('#customerPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          const [data, insight] = await Promise.all([api.request(`/customers/${id}`), api.request(`/members/${id}`).catch(() => null)]);
+          renderCustomerPanel(data, insight);
+          if (target) $(customerPanelTarget).scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         } catch (error) {
           showToast(error.message);
         }
@@ -1938,7 +2119,7 @@
             <h3 class="card-title" style="font-size: 16px;">마케팅 수신 동의 재확인 대상 ${renewals.length}명</h3>
             <button class="muted-link" type="button" onclick="$('#customerPanel').hidden = true">닫기</button>
           </div>
-          <p class="list-meta" style="margin: 0 0 10px;">동의일(또는 마지막 안내일)로부터 2년이 되기 전에 동의 사실을 안내해야 합니다. 30일 안에 기한이 오는 회원까지 보여줍니다.</p>
+          <p class="list-meta" style="margin: 0 0 10px;">동의일(또는 마지막 안내일)로부터 2년이 되기 전에 동의 사실을 안내해야 합니다. 30일 안에 기한이 오는 회원까지 보여 줍니다.</p>
           <div class="list-stack">
             ${renewals.map((r) => `
               <div class="list-item">
@@ -1946,10 +2127,221 @@
                   <div class="list-title">${h(r.name)}</div>
                   <div class="list-meta">${h(r.phone || '')} · 기한 ${h(formatDate(r.due_at))}</div>
                 </div>
-                <button class="muted-link" type="button" onclick="openCustomerInfo(${r.id})">회원 정보</button>
+                <button class="muted-link" type="button" onclick="openCustomerInfo(${r.id}, '#customerPanel')">회원 정보</button>
               </div>`).join('') || renderEmpty('재확인할 회원이 없습니다.')}
           </div>
         `;
+      }
+
+      /* ---------- 회원 분석 ---------- */
+
+      const memberState = { page: 1, labels: null, filtersReady: false };
+
+      function memberQuery(extra = {}) {
+        const params = new URLSearchParams();
+        $('#memberFilters').querySelectorAll('input, select').forEach((el) => {
+          if (el.type === 'checkbox') {
+            if (el.checked) params.set(el.name, el.value);
+          } else if (el.value) params.set(el.name, el.value);
+        });
+        Object.entries(extra).forEach(([key, value]) => params.set(key, value));
+        return params.toString();
+      }
+
+      function setupMemberFilters(L) {
+        if (memberState.filtersReady) return;
+        memberState.filtersReady = true;
+        const box = $('#memberFilters');
+        const fill = (name, entries) => box.querySelector(`[name=${name}]`).insertAdjacentHTML('beforeend', entries.map(([k, v]) => `<option value="${k}">${h(v)}</option>`).join(''));
+        fill('grade', ['VIP', 'GOLD', 'SILVER', 'BASIC'].map((k) => [k, L.grades[k]]));
+        fill('status', Object.entries(L.statuses));
+        fill('tier', Object.entries(L.tiers));
+        fill('age', L.age_bands.map((a) => [a, a]));
+        let timer;
+        box.addEventListener('input', (event) => {
+          clearTimeout(timer);
+          timer = setTimeout(() => {
+            memberState.page = 1;
+            loadMemberList();
+          }, event.target.name === 'q' ? 300 : 0);
+        });
+      }
+
+      function filterMembersBy(name, value) {
+        const box = $('#memberFilters');
+        box.querySelectorAll('select').forEach((el) => {
+          if (el.name !== 'sort') el.value = '';
+        });
+        box.querySelectorAll('input[type=checkbox]').forEach((el) => (el.checked = false));
+        box.querySelector('[name=q]').value = '';
+        const target = box.querySelector(`[name=${name}]`);
+        if (target.type === 'checkbox') target.checked = true;
+        else target.value = value;
+        memberState.page = 1;
+        loadMemberList();
+        $('#memberFilters').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+
+      function countBars(rows, labelOf, colorOf, filterName) {
+        const total = rows.reduce((sum, r) => sum + r.count, 0);
+        if (!total) return '<p class="list-meta">회원이 없습니다.</p>';
+        return rows.filter((r) => r.count > 0 || r.key !== null).map((r) => {
+          const share = r.count / total;
+          const clickable = filterName && r.key !== null;
+          return `<div class="share-row" ${clickable ? `style="cursor: pointer;" onclick="filterMembersBy('${filterName}', '${h(r.key)}')"` : ''} title="${h(labelOf(r.key))} · ${r.count}명 · 12개월 ${money(r.net_12m)}">
+            <span>${h(labelOf(r.key))}</span>
+            <div class="track"><div class="fill" style="width:${share * 100}%;${colorOf ? `background:${colorOf(r.key)}` : ''}"></div></div>
+            <span>${r.count.toLocaleString()}명 · ${Math.round(share * 1000) / 10}%</span>
+          </div>`;
+        }).join('');
+      }
+
+      function renderMemberSummary(data) {
+        const { totals: t, labels: L } = data;
+        const pct = (v) => (v == null ? '-' : `${v}%`);
+        $('#memberSummary').classList.remove('loading');
+        $('#memberSummary').innerHTML = `
+          <div class="report-metrics">
+            <div class="report-metric"><span>전체 회원</span><strong>${t.members.toLocaleString()}명</strong><small>이번 달 신규 ${t.new_signups_this_month.toLocaleString()}명</small></div>
+            <div class="report-metric"><span>최근 90일 구매 회원</span><strong>${t.active_90d.toLocaleString()}명</strong><small>구매 경험 ${t.purchasers.toLocaleString()}명</small></div>
+            <div class="report-metric"><span>재구매율</span><strong>${pct(t.repeat_rate)}</strong><small>구매 회원 중 2회 이상 구매</small></div>
+            <div class="report-metric"><span>평균 구매 주기</span><strong>${t.median_interval_days == null ? '-' : `${t.median_interval_days}일`}</strong><small>재구매 회원 중앙값</small></div>
+            <div class="report-metric"><span>회원 1회 평균 결제</span><strong>${t.avg_ticket == null ? '-' : money(t.avg_ticket)}</strong><small>반품 차감 기준</small></div>
+            <div class="report-metric"><span>회원 식별률</span><strong>${pct(t.member_sale_rate)}</strong><small>최근 12개월 결제 중 회원 결제 · 매출 비중 ${pct(t.member_sales_share)}</small></div>
+            <div class="report-metric clickable" onclick="filterMembersBy('status', 'AT_RISK')"><span>이탈 위험 · 휴면</span><strong>${t.at_risk.toLocaleString()}명 · ${t.dormant.toLocaleString()}명</strong><small>눌러서 이탈 위험 회원 보기</small></div>
+            <div class="report-metric clickable" onclick="filterMembersBy('birthday', '1')"><span>이번 달 생일 · 마케팅 동의</span><strong>${t.birthdays_this_month.toLocaleString()}명 · ${t.marketing_agreed.toLocaleString()}명</strong><small>눌러서 생일 회원 보기</small></div>
+          </div>
+          <div class="member-dist">
+            <div class="chart-box"><h4>등급 (최근 12개월 순구매)</h4>${countBars(data.grades, (k) => L.grades[k], (k) => L.grade_colors[k], 'grade')}</div>
+            <div class="chart-box"><h4>회원 상태</h4>${countBars(data.statuses, (k) => L.statuses[k], null, 'status')}</div>
+            <div class="chart-box"><h4>1회 평균 결제 금액대</h4>${countBars(data.tiers, (k) => L.tiers[k], null, 'tier')}</div>
+            <div class="chart-box"><h4>연령대 (입력 회원)</h4>${countBars(data.ages, (k) => k || '미입력', null, 'age')}</div>
+            <div class="chart-box"><h4>성별</h4>${countBars(data.genders, (k) => L.genders[k] || '미입력', null, 'gender')}</div>
+            <div class="chart-box"><h4>가입 경로 (구매 회원)</h4>${data.channels.length ? data.channels.map((c) => `<div class="share-row">
+              <span>${h(c.key || '기본 가입 링크')}</span>
+              <div class="track"><div class="fill" style="width:${c.count ? (c.purchasers / c.count) * 100 : 0}%"></div></div>
+              <span>${c.purchasers}/${c.count}명</span>
+            </div>`).join('') : '<p class="list-meta">회원이 없습니다.</p>'}</div>
+          </div>`;
+      }
+
+      function renderMemberTable(data) {
+        const L = data.labels;
+        const pages = Math.max(1, Math.ceil(data.total / data.page_size));
+        $('#memberTable').innerHTML = `
+          <div class="table-wrap"><table>
+            <thead><tr><th>회원</th><th>등급 · 상태</th><th>최근 구매</th><th class="num">구매 횟수</th><th class="num">12개월 순구매</th><th class="num">1회 평균</th><th class="num">평균 주기</th><th class="num">포인트</th><th>수신</th></tr></thead>
+            <tbody>${data.members.map((m) => `<tr class="clickable-row" onclick="openCustomerInfo(${m.id}, '#memberDetail')">
+              <td><strong>${h(m.name)}</strong>${m.birthday_this_month ? ' <span class="badge orange">생일</span>' : ''}<div class="list-meta">${h(m.member_code || '')}</div></td>
+              <td>${gradeBadge(m.grade, L)} ${statusBadge(m.status, L)}</td>
+              <td>${daysAgoText(m.days_since_last)}</td>
+              <td class="num">${m.visit_count.toLocaleString()}</td>
+              <td class="num">${money(m.net_12m)}</td>
+              <td class="num">${m.avg_ticket == null ? '-' : money(m.avg_ticket)}</td>
+              <td class="num">${m.avg_interval_days == null ? '-' : `${m.avg_interval_days}일`}</td>
+              <td class="num">${m.point_balance.toLocaleString()}P</td>
+              <td>${m.marketing_agree ? '<span class="badge green">동의</span>' : '<span class="badge gray">미동의</span>'}</td>
+            </tr>`).join('') || '<tr><td colspan="9">조건에 맞는 회원이 없습니다.</td></tr>'}</tbody>
+          </table></div>
+          <div class="inline-actions" style="justify-content: space-between; margin-top: 10px;">
+            <span class="list-meta">${data.total.toLocaleString()}명 중 ${data.total ? (data.page - 1) * data.page_size + 1 : 0}~${Math.min(data.total, data.page * data.page_size)}</span>
+            <span class="inline-actions">
+              <button class="btn btn-outline btn-sm" type="button" ${data.page <= 1 ? 'disabled' : ''} onclick="memberState.page -= 1; loadMemberList()">이전</button>
+              <span class="list-meta">${data.page} / ${pages}</span>
+              <button class="btn btn-outline btn-sm" type="button" ${data.page >= pages ? 'disabled' : ''} onclick="memberState.page += 1; loadMemberList()">다음</button>
+            </span>
+          </div>`;
+      }
+
+      async function loadMemberList() {
+        try {
+          renderMemberTable(await api.request(`/members?${memberQuery({ page: memberState.page })}`));
+        } catch (error) {
+          $('#memberTable').innerHTML = renderEmpty(error.message);
+        }
+      }
+
+      async function loadMembers() {
+        try {
+          const summary = await api.request('/members/summary');
+          memberState.labels = summary.labels;
+          setupMemberFilters(summary.labels);
+          renderMemberSummary(summary);
+          await loadMemberList();
+        } catch (error) {
+          $('#memberSummary').innerHTML = renderEmpty(error.message);
+        }
+      }
+
+      const POLICY_GROUPS = [
+        ['등급 기준 (최근 12개월 순구매, 원)', ['silver_min', 'gold_min', 'vip_min'], 1000],
+        ['등급별 추가 적립률 (%p, 기본 적립률에 더함)', ['silver_bonus', 'gold_bonus', 'vip_bonus'], 0.1],
+        ['회원 상태 기준', ['new_days', 'churn_multiplier', 'dormant_days'], null],
+        ['혜택', ['birthday_multiplier', 'referral_reward'], null]
+      ];
+      const POLICY_STEPS = { new_days: 1, churn_multiplier: 0.1, dormant_days: 1, birthday_multiplier: 0.1, referral_reward: 100 };
+
+      async function toggleMemberPolicy() {
+        const form = $('#memberPolicyForm');
+        form.hidden = !form.hidden;
+        if (form.hidden) return;
+        try {
+          const { policy, labels: L } = await api.request('/members/policy');
+          form.innerHTML = `
+            ${POLICY_GROUPS.map(([title, keys, step]) => `
+              <h4>${h(title)}</h4>
+              <div class="policy-grid">
+                ${keys.map((key) => `<div class="form-group" style="margin: 0;">
+                  <label class="form-label">${h(L.policy_fields[key])}</label>
+                  <input class="form-control" name="${key}" type="number" step="${step || POLICY_STEPS[key]}" value="${policy[key]}" required />
+                </div>`).join('')}
+              </div>`).join('')}
+            <p class="list-meta" style="margin: 0 0 12px;">
+              신규: 첫 구매 후 정한 기간 이내 · 이탈 위험: 평소 구매 간격의 정한 배수가 지나도록 구매 없음 · 휴면: 정한 일수 이상 구매 없음.
+              생일 달에는 POS 적립 포인트에 배수가 적용되고, 추천 보상은 추천받아 가입한 회원의 첫 구매 후 두 사람에게 지급됩니다. 일반의약품은 적립 대상이 아닙니다.
+            </p>
+            <div class="inline-actions">
+              <button class="btn btn-primary btn-sm" type="submit">저장</button>
+              <button class="btn btn-outline btn-sm" type="button" onclick="$('#memberPolicyForm').hidden = true">닫기</button>
+            </div>`;
+        } catch (error) {
+          showToast(error.message);
+        }
+      }
+
+      async function saveMemberPolicy(event) {
+        event.preventDefault();
+        const body = Object.fromEntries([...new FormData(event.target).entries()].map(([k, v]) => [k, Number(v)]));
+        try {
+          await api.request('/members/policy', { method: 'PATCH', body });
+          showToast('등급·혜택 기준을 저장했습니다.');
+          $('#memberPolicyForm').hidden = true;
+          loadMembers();
+        } catch (error) {
+          showToast(error.message);
+        }
+      }
+
+      async function downloadMembersCsv() {
+        try {
+          const res = await fetch(`/api/members/export.csv?${memberQuery()}`, {
+            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+          });
+          if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || 'CSV를 내려받지 못했습니다.');
+          const match = (res.headers.get('Content-Disposition') || '').match(/filename\*=UTF-8''([^;]+)/);
+          const filename = match ? decodeURIComponent(match[1]) : 'members.csv';
+          const url = URL.createObjectURL(await res.blob());
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+          showToast(`${filename} 파일을 내려받았습니다. 연락처는 마케팅 수신 동의 회원만 포함됩니다.`);
+        } catch (error) {
+          showToast(error.message);
+        }
       }
 
       const POINT_ENTRY_LABELS = { EARN: '적립', USE: '사용', EARN_CANCEL: '적립 취소', USE_RESTORE: '사용 복원', ADJUST: '수동 조정' };
