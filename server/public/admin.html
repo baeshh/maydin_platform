@@ -400,6 +400,45 @@
         gap: 6px;
       }
 
+      .perf-sort {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        font-size: 13px;
+        padding: 6px 10px;
+      }
+
+      .perf-summary {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        margin-bottom: 16px;
+      }
+
+      .perf-summary div {
+        background: var(--bg);
+        border-radius: 14px;
+        display: grid;
+        gap: 4px;
+        padding: 12px 14px;
+      }
+
+      .perf-summary span {
+        color: var(--sub);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .perf-summary strong {
+        font-size: 18px;
+      }
+
+      .perf-summary em {
+        color: var(--muted);
+        font-size: 12px;
+        font-style: normal;
+      }
+
       .toast {
         background: rgba(25, 31, 40, 0.94);
         border-radius: 14px;
@@ -475,6 +514,7 @@
         </div>
         <nav class="nav">
           <a href="#overview" class="active">대시보드</a>
+          <a href="#performance">약국별 성과</a>
           <a href="#inquiries">입점 문의</a>
           <a href="#create">약국 생성</a>
           <a href="#pharmacies">약국 목록</a>
@@ -498,6 +538,23 @@
         </div>
 
         <section class="stats" id="summary"></section>
+
+        <section class="panel" id="performance" style="margin-bottom: 18px;">
+          <div class="panel-head">
+            <h2>약국별 성과</h2>
+            <div class="actions">
+              <select id="performanceSort" class="perf-sort" onchange="renderPerformance()">
+                <option value="net_12m">12개월 매출순</option>
+                <option value="members">회원 수순</option>
+                <option value="repeat_rate">재방문율순</option>
+                <option value="avg_ticket">객단가순</option>
+                <option value="month_growth">이번 달 증감순</option>
+              </select>
+              <button class="btn secondary sm" type="button" onclick="downloadPerformanceCsv()">CSV</button>
+            </div>
+          </div>
+          <div class="panel-body" id="performanceBody"></div>
+        </section>
 
         <section class="panel-grid">
           <article class="panel" id="inquiries">
@@ -618,6 +675,8 @@
             </article>
           `;
 
+          loadPerformance();
+
           const inquiryData = await api.request('/admin/inquiries');
           $('#inquiryCounts').textContent =
             `신규 ${Number(inquiryData.counts.new_count || 0)} · 진행 ${Number(inquiryData.counts.in_progress_count || 0)} · 완료 ${Number(inquiryData.counts.done_count || 0)}`;
@@ -707,6 +766,90 @@
         } catch (error) {
           lockAdmin();
           toast(error.message || '관리자 로그인이 필요합니다.');
+        }
+      }
+
+      let performance = null;
+      const pct = (value) => (value == null ? '-' : `${value}%`);
+      const signedPct = (value) => (value == null ? '-' : `${value > 0 ? '+' : ''}${value}%`);
+
+      async function loadPerformance() {
+        try {
+          performance = await api.request('/admin/performance');
+          renderPerformance();
+        } catch (error) {
+          $('#performanceBody').innerHTML = `<div class="empty">${error.message}</div>`;
+        }
+      }
+
+      function renderPerformance() {
+        if (!performance) return;
+        const key = $('#performanceSort').value;
+        const rows = [...performance.pharmacies].sort((a, b) => (b[key] ?? -Infinity) - (a[key] ?? -Infinity));
+        const t = performance.totals;
+        const growthColor = (value) => (value == null ? '' : value >= 0 ? 'color: var(--green);' : 'color: var(--red);');
+        $('#performanceBody').innerHTML = `
+          <div class="perf-summary">
+            <div><span>전체 회원</span><strong>${t.members.toLocaleString()}</strong><em>이번 달 신규 ${t.new_members_this_month.toLocaleString()}</em></div>
+            <div><span>90일 내 구매 회원</span><strong>${t.active_90d.toLocaleString()}</strong><em>구매 회원 ${t.purchasers.toLocaleString()}</em></div>
+            <div><span>재방문율</span><strong>${pct(t.repeat_rate)}</strong><em>2회 이상 구매한 회원 비율</em></div>
+            <div><span>객단가</span><strong>${t.avg_ticket == null ? '-' : money(t.avg_ticket)}</strong><em>최근 12개월 결제 1건 평균</em></div>
+            <div><span>이번 달 매출</span><strong>${money(t.month_to_date)}</strong><em style="${growthColor(t.month_growth)}">지난달 같은 기간 대비 ${signedPct(t.month_growth)}</em></div>
+            <div><span>미사용 포인트</span><strong>${t.points_outstanding.toLocaleString()}P</strong><em>약국별 부담 예정액</em></div>
+          </div>
+          ${rows.length ? `
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>약국</th>
+                    <th>회원 (신규)</th>
+                    <th>90일 활성</th>
+                    <th>재방문율</th>
+                    <th>객단가</th>
+                    <th>회원 거래 비율</th>
+                    <th>12개월 매출</th>
+                    <th>이번 달 (증감)</th>
+                    <th>미사용 포인트</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${rows.map((p) => `
+                    <tr>
+                      <td><strong>${p.pharmacy_name}</strong><br /><span class="muted">${p.pharmacy_code}${p.status !== 'ACTIVE' ? ' · 중지' : ''}</span></td>
+                      <td>${p.members.toLocaleString()} <span class="muted">(+${p.new_members_this_month})</span></td>
+                      <td>${p.active_90d.toLocaleString()}${p.at_risk ? `<br /><span class="muted">이탈 위험 ${p.at_risk}</span>` : ''}</td>
+                      <td>${pct(p.repeat_rate)}</td>
+                      <td>${p.avg_ticket == null ? '-' : money(p.avg_ticket)}</td>
+                      <td>${pct(p.member_sale_rate)}<br /><span class="muted">매출 비중 ${pct(p.member_sales_share)}</span></td>
+                      <td><strong>${money(p.net_12m)}</strong><br /><span class="muted">온라인 ${pct(p.online_share)}</span></td>
+                      <td>${money(p.month_to_date)}<br /><span class="muted" style="${growthColor(p.month_growth)}">${signedPct(p.month_growth)}</span></td>
+                      <td>${p.points_outstanding.toLocaleString()}P</td>
+                    </tr>`).join('')}
+                </tbody>
+              </table>
+            </div>
+            <p class="muted" style="margin-top: 10px;">회원 개인정보 없이 약국별 집계 숫자만 보여 줍니다. 매출은 반품을 뺀 순매출, 회원 거래 비율은 전체 결제 중 회원을 식별한 결제의 비율입니다.</p>`
+            : '<div class="empty">등록된 약국이 없습니다.</div>'}
+        `;
+      }
+
+      async function downloadPerformanceCsv() {
+        try {
+          const res = await fetch('/api/admin/performance.csv', {
+            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+          });
+          if (!res.ok) throw new Error('CSV를 내려받지 못했습니다.');
+          const url = URL.createObjectURL(await res.blob());
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = '약국별 성과.csv';
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+        } catch (error) {
+          toast(error.message);
         }
       }
 

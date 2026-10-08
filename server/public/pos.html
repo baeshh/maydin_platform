@@ -2137,6 +2137,8 @@
         if (m.refill_due.length) {
           badges.push(`<span class="badge blue" title="${h(m.refill_due.join(', '))}">재구매 시기 ${h(m.refill_due[0])}${m.refill_due.length > 1 ? ` 외 ${m.refill_due.length - 1}` : ''}</span>`);
         }
+        if (m.family_text) badges.push(`<span class="badge gray">가족 ${h(m.family_text)}</span>`);
+        if (m.family_head) badges.push(`<span class="badge gray">${h(m.family_head)} 회원 가족</span>`);
         return `<div class="member-badges">${badges.join('')}</div>`;
       }
 

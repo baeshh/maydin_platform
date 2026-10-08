@@ -1,5 +1,6 @@
 const { getAll, getOne, run } = require('../db');
 const { pointPolicy, changePoints } = require('./points');
+const { CHILD_AGE_LIMIT, familyMap, familySummaryText, linkedTo } = require('./family');
 
 const DAY_MS = 86400000;
 
@@ -224,7 +225,17 @@ function refillMap(pharmacyId, customerId = null) {
   return map;
 }
 
-function enrich(row, policy, now = new Date(), refills = []) {
+function familyFields(family = []) {
+  return {
+    family_count: family.length,
+    family_text: familySummaryText(family),
+    has_child: family.some((f) => f.relation === 'CHILD'),
+    has_young_child: family.some((f) => f.relation === 'CHILD' && f.age != null && f.age <= CHILD_AGE_LIMIT),
+    has_parent: family.some((f) => f.relation === 'PARENT' || f.relation === 'GRANDPARENT')
+  };
+}
+
+function enrich(row, policy, now = new Date(), refills = [], family = []) {
   const nowMs = now.getTime();
   const first = parseUtc(row.first_purchase_at);
   const last = parseUtc(row.last_purchase_at);
@@ -264,19 +275,22 @@ function enrich(row, policy, now = new Date(), refills = []) {
     birthday_this_month: row.birth_month === now.getMonth() + 1,
     age_band: ageBand(row.birth_year, now),
     refill_due: refills.filter((r) => r.due).map(({ product_id, product_name, runout_date, days_left }) => ({ product_id, product_name, runout_date, days_left })),
-    next_refill_date: (refills.find((r) => r.days_left >= -REFILL_AFTER_DAYS) || {}).runout_date || null
+    next_refill_date: (refills.find((r) => r.days_left >= -REFILL_AFTER_DAYS) || {}).runout_date || null,
+    ...familyFields(family)
   };
 }
 
 function memberList(pharmacyId, policy = memberPolicy(pharmacyId)) {
   const now = new Date();
   const refills = refillMap(pharmacyId);
-  return baseRows(pharmacyId).map((row) => enrich(row, policy, now, refills.get(row.id)));
+  const families = familyMap(pharmacyId);
+  return baseRows(pharmacyId).map((row) => enrich(row, policy, now, refills.get(row.id), families.get(row.id)));
 }
 
 function memberMetrics(pharmacyId, customerId, policy = memberPolicy(pharmacyId)) {
   const row = baseRows(pharmacyId, customerId)[0];
-  return row ? enrich(row, policy, new Date(), refillMap(pharmacyId, customerId).get(customerId)) : null;
+  if (!row) return null;
+  return enrich(row, policy, new Date(), refillMap(pharmacyId, customerId).get(customerId), familyMap(pharmacyId).get(customerId));
 }
 
 function filterMembers(members, query) {
@@ -292,6 +306,10 @@ function filterMembers(members, query) {
     if (query.age && m.age_band !== query.age) return false;
     if (query.gender && (m.gender || 'NONE') !== query.gender) return false;
     if (query.refill === '1' && !m.refill_due.length) return false;
+    if (query.family === 'ANY' && !m.family_count) return false;
+    if (query.family === 'CHILD' && !m.has_child) return false;
+    if (query.family === 'YOUNG_CHILD' && !m.has_young_child) return false;
+    if (query.family === 'PARENT' && !m.has_parent) return false;
     if (q) {
       const phone = String(m.phone || '').replace(/\D/g, '');
       const hit = m.name.toLowerCase().includes(q) || String(m.member_code || '').toLowerCase().includes(q) || (digits.length >= 4 && phone.includes(digits));
@@ -360,6 +378,7 @@ function memberSummary(pharmacyId) {
       new_signups_this_month: members.filter((m) => localMonth(m.created_at) === monthKey).length,
       purchasers: purchasers.length,
       active_90d: purchasers.filter((m) => m.days_since_last < 90).length,
+      repeat_buyers: purchasers.filter((m) => m.visit_count >= 2).length,
       repeat_rate: share(purchasers.filter((m) => m.visit_count >= 2).length, purchasers.length),
       median_interval_days: median(purchasers.filter((m) => m.avg_interval_days != null).map((m) => m.avg_interval_days)),
       avg_ticket: purchasers.length ? Math.round(purchasers.reduce((s, m) => s + m.net_total, 0) / purchasers.reduce((s, m) => s + m.visit_count, 0)) : null,
@@ -547,7 +566,9 @@ function posBadges(pharmacyId, customerId) {
     birthday_this_month: m.birthday_this_month,
     birthday_multiplier: m.birthday_this_month ? policy.birthday_multiplier : 1,
     days_since_last: m.days_since_last,
-    refill_due: m.refill_due.map((r) => r.product_name)
+    refill_due: m.refill_due.map((r) => r.product_name),
+    family_text: m.family_text,
+    family_head: (linkedTo(customerId) || {}).head_name || null
   };
 }
 
@@ -579,6 +600,81 @@ function customerMembership(pharmacyId, customerId) {
   };
 }
 
+// 본사용 약국별 성과. 회원 개인정보 없이 집계 숫자만 낸다.
+// 이번 달은 1일부터 오늘까지, 지난달은 같은 기간(지난달 1일 ~ 한 달 전 오늘)과 비교한다.
+function pharmacyPerformance() {
+  const pharmacies = getAll('SELECT id, pharmacy_code, pharmacy_name, status, created_at FROM pharmacies ORDER BY id');
+  const sales = new Map(
+    getAll(
+      `SELECT pharmacy_id,
+         COALESCE(SUM(CASE WHEN created_at >= datetime('now', 'localtime', 'start of month', 'utc') THEN final_amount END), 0) AS month_to_date,
+         COALESCE(SUM(CASE WHEN created_at >= datetime('now', 'localtime', 'start of month', '-1 month', 'utc')
+                            AND created_at < datetime('now', '-1 month') THEN final_amount END), 0) AS last_month_to_date,
+         COALESCE(SUM(CASE WHEN created_at >= datetime('now', '-12 months') THEN final_amount END), 0) AS net_12m,
+         COALESCE(SUM(CASE WHEN created_at >= datetime('now', '-12 months') AND sales_channel = 'ONLINE' THEN final_amount END), 0) AS online_12m,
+         COUNT(CASE WHEN created_at >= datetime('now', '-12 months') AND final_amount > 0 AND order_status != 'CANCELED' THEN 1 END) AS sales_12m
+       FROM orders WHERE order_type != 'COUNSEL'
+       GROUP BY pharmacy_id`
+    ).map((row) => [row.pharmacy_id, row])
+  );
+  const points = new Map(
+    getAll('SELECT pharmacy_id, COALESCE(SUM(point_balance), 0) AS outstanding FROM customers GROUP BY pharmacy_id').map((row) => [
+      row.pharmacy_id,
+      row.outstanding
+    ])
+  );
+  const share = (part, total) => (total ? round1((part / total) * 100) : null);
+  const growth = (now, before) => (before > 0 ? round1(((now - before) / before) * 100) : null);
+
+  const rows = pharmacies.map((p) => {
+    const t = memberSummary(p.id).totals;
+    const s = sales.get(p.id) || { month_to_date: 0, last_month_to_date: 0, net_12m: 0, online_12m: 0, sales_12m: 0 };
+    return {
+      id: p.id,
+      pharmacy_code: p.pharmacy_code,
+      pharmacy_name: p.pharmacy_name,
+      status: p.status,
+      members: t.members,
+      new_members_this_month: t.new_signups_this_month,
+      purchasers: t.purchasers,
+      active_90d: t.active_90d,
+      repeat_buyers: t.repeat_buyers,
+      repeat_rate: t.repeat_rate,
+      at_risk: t.at_risk,
+      dormant: t.dormant,
+      marketing_agreed: t.marketing_agreed,
+      member_sale_rate: t.member_sale_rate,
+      member_sales_share: t.member_sales_share,
+      net_12m: s.net_12m,
+      sales_12m: s.sales_12m,
+      avg_ticket: s.sales_12m ? Math.round(s.net_12m / s.sales_12m) : null,
+      online_share: share(s.online_12m, s.net_12m),
+      month_to_date: s.month_to_date,
+      last_month_to_date: s.last_month_to_date,
+      month_growth: growth(s.month_to_date, s.last_month_to_date),
+      points_outstanding: points.get(p.id) || 0
+    };
+  });
+
+  const sum = (key) => rows.reduce((total, row) => total + (row[key] || 0), 0);
+  const totals = {
+    pharmacies: rows.length,
+    active_pharmacies: rows.filter((r) => r.status === 'ACTIVE').length,
+    members: sum('members'),
+    new_members_this_month: sum('new_members_this_month'),
+    purchasers: sum('purchasers'),
+    active_90d: sum('active_90d'),
+    repeat_rate: share(sum('repeat_buyers'), sum('purchasers')),
+    net_12m: sum('net_12m'),
+    avg_ticket: sum('sales_12m') ? Math.round(sum('net_12m') / sum('sales_12m')) : null,
+    month_to_date: sum('month_to_date'),
+    last_month_to_date: sum('last_month_to_date'),
+    month_growth: growth(sum('month_to_date'), sum('last_month_to_date')),
+    points_outstanding: sum('points_outstanding')
+  };
+  return { totals, pharmacies: rows };
+}
+
 function labels() {
   return {
     grades: Object.fromEntries(Object.entries(GRADES).map(([k, v]) => [k, v.label])),
@@ -587,6 +683,7 @@ function labels() {
     tiers: Object.fromEntries(AMOUNT_TIERS.map((t) => [t.key, t.label])),
     age_bands: AGE_BANDS,
     genders: { F: '여성', M: '남성' },
+    family_filters: { ANY: '가족 등록 회원', CHILD: '자녀 있는 회원', YOUNG_CHILD: `${CHILD_AGE_LIMIT}세 이하 자녀`, PARENT: '부모님 등록 회원' },
     policy_fields: Object.fromEntries(Object.entries(POLICY_FIELDS).map(([k, v]) => [k, v.label]))
   };
 }
@@ -611,6 +708,7 @@ module.exports = {
   grantReferralReward,
   posBadges,
   customerMembership,
+  pharmacyPerformance,
   filterMembers,
   sortMembers,
   labels

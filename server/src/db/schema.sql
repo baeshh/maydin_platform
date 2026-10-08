@@ -470,6 +470,20 @@ CREATE TABLE IF NOT EXISTS product_requests (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 대표 회원 아래 가족. 계정 없는 가족(자녀·부모)은 호칭·출생연도만, 이미 가입한 회원은 linked_customer_id로 연결한다.
+CREATE TABLE IF NOT EXISTS family_members (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  head_customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  linked_customer_id INTEGER REFERENCES customers(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  relation TEXT NOT NULL CHECK (relation IN ('SPOUSE', 'CHILD', 'PARENT', 'GRANDPARENT', 'SIBLING', 'ETC')),
+  birth_year INTEGER,
+  gender TEXT CHECK (gender IN ('F', 'M')),
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS customer_consents (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,

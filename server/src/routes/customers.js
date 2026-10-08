@@ -16,6 +16,7 @@ const {
   validateBirthday
 } = require('../services/customers');
 const { customerMembership } = require('../services/members');
+const { RELATIONS, familyView, addFamily, updateFamily, removeFamily } = require('../services/family');
 const { pointPolicy } = require('../services/points');
 
 const router = express.Router();
@@ -58,7 +59,8 @@ function labels() {
     consent_types: Object.fromEntries(Object.entries(CONSENT_TYPES).map(([key, meta]) => [key, meta.label])),
     consent_sources: CONSENT_SOURCES,
     genders: GENDERS,
-    channel_types: CHANNEL_TYPES
+    channel_types: CHANNEL_TYPES,
+    relations: RELATIONS
   };
 }
 
@@ -126,6 +128,57 @@ router.patch('/me/consents', requireRole('CUSTOMER'), (req, res) => {
   }
 });
 
+// 고객은 계정 없는 가족만 직접 등록한다. 이미 가입한 회원끼리 연결하는 일은 두 사람이 함께 약국에서 한다.
+router.get('/me/family', requireRole('CUSTOMER'), (req, res) => {
+  try {
+    const customer = myCustomer(req);
+    return res.json({ family: familyView(customer.pharmacy_id, customer.id), relations: RELATIONS });
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
+router.post('/me/family', requireRole('CUSTOMER'), (req, res) => {
+  try {
+    const customer = myCustomer(req);
+    addFamily({ pharmacyId: customer.pharmacy_id, headId: customer.id, input: req.body, userId: req.user.id });
+    return res.status(201).json({ family: familyView(customer.pharmacy_id, customer.id) });
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
+router.patch('/me/family/:familyId', requireRole('CUSTOMER'), (req, res) => {
+  try {
+    const customer = myCustomer(req);
+    updateFamily(customer.id, Number(req.params.familyId), req.body);
+    return res.json({ family: familyView(customer.pharmacy_id, customer.id) });
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
+router.delete('/me/family/:familyId', requireRole('CUSTOMER'), (req, res) => {
+  try {
+    const customer = myCustomer(req);
+    removeFamily(customer.id, Number(req.params.familyId));
+    return res.json({ family: familyView(customer.pharmacy_id, customer.id) });
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
+router.post('/me/family/leave', requireRole('CUSTOMER'), (req, res) => {
+  try {
+    const customer = myCustomer(req);
+    const result = run('DELETE FROM family_members WHERE linked_customer_id = @id', { id: customer.id });
+    if (!result.changes) throw new CustomerError('연결된 가족이 없습니다.');
+    return res.json({ family: familyView(customer.pharmacy_id, customer.id) });
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
 /* ---------- 약국 관리자 ---------- */
 
 router.use(requireRole('PHARMACY_OWNER'), (req, res, next) => {
@@ -173,8 +226,61 @@ router.get('/:id', (req, res) => {
       customer,
       consents: currentConsents(customer.id),
       consent_history: consentHistory(customer.id),
+      family: familyView(customer.pharmacy_id, customer.id),
       labels: labels()
     });
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
+// 이미 가입한 회원을 가족으로 연결할 때는 전화번호(숫자만) 또는 회원코드로 찾는다.
+function findLinkTarget(pharmacyId, query) {
+  const raw = String(query || '').trim();
+  if (!raw) return null;
+  const digits = raw.replace(/\D/g, '');
+  const row = getOne(
+    `SELECT id FROM customers
+     WHERE pharmacy_id = @pharmacy_id AND (UPPER(member_code) = UPPER(@raw) OR (LENGTH(@digits) >= 10 AND REPLACE(phone, '-', '') = @digits))`,
+    { pharmacy_id: pharmacyId, raw, digits }
+  );
+  if (!row) throw new CustomerError('연결할 회원을 찾을 수 없습니다. 전화번호 전체 또는 회원코드를 입력해 주세요.', 404);
+  return row.id;
+}
+
+router.post('/:id/family', (req, res) => {
+  try {
+    const customer = pharmacyCustomer(req);
+    transaction(() => {
+      const linkedId = findLinkTarget(customer.pharmacy_id, req.body.link_query);
+      const familyId = addFamily({ pharmacyId: customer.pharmacy_id, headId: customer.id, input: req.body, linkedCustomerId: linkedId, userId: req.user.id });
+      const row = getOne('SELECT name, relation FROM family_members WHERE id = @id', { id: familyId });
+      audit(req, 'FAMILY_ADD', customer.id, `가족 ${linkedId ? '회원 연결' : '등록'} · ${customer.name} → ${RELATIONS[row.relation]} ${row.name}`);
+    })();
+    return res.status(201).json({ family: familyView(customer.pharmacy_id, customer.id) });
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
+router.patch('/:id/family/:familyId', (req, res) => {
+  try {
+    const customer = pharmacyCustomer(req);
+    updateFamily(customer.id, Number(req.params.familyId), req.body);
+    return res.json({ family: familyView(customer.pharmacy_id, customer.id) });
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
+router.delete('/:id/family/:familyId', (req, res) => {
+  try {
+    const customer = pharmacyCustomer(req);
+    transaction(() => {
+      const row = removeFamily(customer.id, Number(req.params.familyId));
+      audit(req, 'FAMILY_REMOVE', customer.id, `가족 해제 · ${customer.name} → ${RELATIONS[row.relation]} ${row.name}`);
+    })();
+    return res.json({ family: familyView(customer.pharmacy_id, customer.id) });
   } catch (error) {
     return fail(res, error);
   }

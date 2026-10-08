@@ -4,6 +4,8 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const { getAll, getOne, run, transaction } = require('../db');
 const { authenticate, requireRole } = require('../middleware/auth');
+const { pharmacyPerformance } = require('../services/members');
+const { sendCsv } = require('../services/csv');
 
 const router = express.Router();
 
@@ -27,6 +29,31 @@ router.get('/summary', (req, res) => {
      LIMIT 5`
   );
   res.json({ totals, topPharmacies });
+});
+
+router.get('/performance', (req, res) => {
+  res.json(pharmacyPerformance());
+});
+
+router.get('/performance.csv', (req, res) => {
+  const { pharmacies } = pharmacyPerformance();
+  const pct = (value) => (value == null ? '' : value);
+  sendCsv(
+    res,
+    [
+      [
+        '약국 코드', '약국명', '상태', '회원 수', '이번 달 신규 가입', '구매 회원', '90일 내 구매 회원', '재방문율(%)',
+        '이탈 위험', '휴면', '마케팅 동의', '회원 거래 비율(%)', '회원 매출 비중(%)', '12개월 순매출', '12개월 결제 건수',
+        '객단가', '온라인 매출 비중(%)', '이번 달 매출(오늘까지)', '지난달 같은 기간', '증감(%)', '미사용 포인트'
+      ],
+      ...pharmacies.map((p) => [
+        p.pharmacy_code, p.pharmacy_name, p.status, p.members, p.new_members_this_month, p.purchasers, p.active_90d, pct(p.repeat_rate),
+        p.at_risk, p.dormant, p.marketing_agreed, pct(p.member_sale_rate), pct(p.member_sales_share), p.net_12m, p.sales_12m,
+        p.avg_ticket ?? '', pct(p.online_share), p.month_to_date, p.last_month_to_date, pct(p.month_growth), p.points_outstanding
+      ])
+    ],
+    { asciiName: 'pharmacy-performance.csv', filename: '약국별 성과.csv' }
+  );
 });
 
 router.get('/pharmacies', (req, res) => {

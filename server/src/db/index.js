@@ -134,6 +134,9 @@ function migrateCustomerData() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_restock_alerts_waiting
       ON restock_alerts(customer_id, product_id) WHERE status = 'WAITING';
     CREATE INDEX IF NOT EXISTS idx_product_requests_pharmacy ON product_requests(pharmacy_id, status, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_family_members_head ON family_members(head_customer_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_family_members_linked
+      ON family_members(linked_customer_id) WHERE linked_customer_id IS NOT NULL;
   `);
 
   for (const row of db.prepare('SELECT id FROM customers WHERE referral_code IS NULL').all()) assignReferralCode(row.id);

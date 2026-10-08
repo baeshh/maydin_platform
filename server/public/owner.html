@@ -1405,6 +1405,7 @@
                 <option value="M">남성</option>
                 <option value="NONE">미입력</option>
               </select>
+              <select class="form-control" name="family"><option value="">가족 전체</option></select>
               <label class="check-chip"><input type="checkbox" name="birthday" value="1" /> 이번 달 생일</label>
               <label class="check-chip"><input type="checkbox" name="marketing" value="1" /> 마케팅 동의</label>
               <label class="check-chip"><input type="checkbox" name="refill" value="1" /> 재구매 예정</label>
@@ -2049,6 +2050,7 @@
               <button class="btn btn-primary btn-sm" type="submit">저장</button>
             </form>
           </details>
+          ${familyHtml(data.family, customer.id, L)}
           <div class="table-wrap">
             <table class="consent-table">
               <thead><tr>${withdrawable.length ? '<th></th>' : ''}<th>동의 항목</th><th>상태</th><th>최근 변경</th></tr></thead>
@@ -2087,6 +2089,83 @@
             </div>
           </details>
         `;
+      }
+
+      function familyHtml(family, customerId, L) {
+        if (!family) return '';
+        const relationOptions = Object.entries(L.relations).map(([key, label]) => `<option value="${key}">${h(label)}</option>`).join('');
+        const year = new Date().getFullYear();
+        let yearOptions = '<option value="">출생연도</option>';
+        for (let y = year; y >= 1920; y -= 1) yearOptions += `<option value="${y}">${y}년</option>`;
+        if (family.linked_to) {
+          return `
+            <div class="insight-box" style="margin-bottom: 14px;">
+              <strong>가족</strong>
+              <p class="list-meta" style="margin: 6px 0 0;">
+                ${h(family.linked_to.head_name)}(${h(family.linked_to.head_member_code || '')}) 회원의 ${h(family.linked_to.relation_label)}(으)로 연결되어 있습니다.
+                <button class="muted-link" type="button" onclick="openCustomerInfo(${family.linked_to.head_id})">대표 회원 보기</button>
+              </p>
+            </div>`;
+        }
+        return `
+          <div class="insight-box" style="margin-bottom: 14px;">
+            <div class="card-header" style="margin-bottom: 6px;">
+              <strong>가족 ${family.members.length}명</strong>
+              ${family.household ? `<span class="list-meta">가족 합산 12개월 구매 ${money(family.household.net_12m)} (연결 회원 포함, 참고용)</span>` : ''}
+            </div>
+            ${family.members.length ? `
+              <div class="table-wrap">
+                <table class="consent-table">
+                  <thead><tr><th>관계</th><th>이름·호칭</th><th>나이</th><th>회원 연결</th><th></th></tr></thead>
+                  <tbody>${family.members.map((f) => `<tr>
+                    <td>${h(f.relation_label)}</td>
+                    <td>${h(f.name)}${f.gender ? ` <span class="list-meta">${h(L.genders[f.gender])}</span>` : ''}</td>
+                    <td>${f.age != null ? `${f.age}세` : '-'}</td>
+                    <td>${f.linked_customer_id ? `<button class="muted-link" type="button" onclick="openCustomerInfo(${f.linked_customer_id})">${h(f.linked_member_code || `M${f.linked_customer_id}`)}</button>` : '<span class="list-meta">계정 없음</span>'}</td>
+                    <td><button class="muted-link" type="button" onclick="removeFamilyMember(${customerId}, ${f.id})">해제</button></td>
+                  </tr>`).join('')}</tbody>
+                </table>
+              </div>` : '<p class="list-meta" style="margin: 0 0 8px;">등록된 가족이 없습니다. 자녀·부모님 정보를 남겨 두면 상담과 맞춤 안내에 도움이 됩니다.</p>'}
+            ${family.members.length < family.max ? `
+              <details style="margin-top: 8px;">
+                <summary class="muted-link" style="cursor: pointer;">가족 추가</summary>
+                <form class="inline-actions" style="margin-top: 8px; flex-wrap: wrap;" onsubmit="addFamilyMember(event, ${customerId})">
+                  <select class="form-control" name="relation" style="width: auto;" required><option value="">관계</option>${relationOptions}</select>
+                  <input class="form-control" name="name" placeholder="이름 또는 호칭 (예: 첫째)" maxlength="20" style="width: 170px;" />
+                  <select class="form-control" name="birth_year" style="width: auto;">${yearOptions}</select>
+                  <select class="form-control" name="gender" style="width: auto;"><option value="">성별</option><option value="F">여성</option><option value="M">남성</option></select>
+                  <input class="form-control" name="link_query" placeholder="가입한 가족이면 전화번호·회원코드" style="width: 220px;" />
+                  <button class="btn btn-primary btn-sm" type="submit">추가</button>
+                </form>
+                <p class="list-meta" style="margin: 6px 0 0;">이미 가입한 회원을 연결할 때는 본인 동의를 받은 뒤 진행해 주세요. 등급과 포인트는 회원마다 따로 쌓입니다.</p>
+              </details>` : ''}
+          </div>`;
+      }
+
+      async function addFamilyMember(event, customerId) {
+        event.preventDefault();
+        const f = event.target;
+        try {
+          await api.request(`/customers/${customerId}/family`, {
+            method: 'POST',
+            body: { relation: f.relation.value, name: f.name.value, birth_year: f.birth_year.value, gender: f.gender.value, link_query: f.link_query.value }
+          });
+          showToast('가족을 등록했습니다.');
+          openCustomerInfo(customerId);
+        } catch (error) {
+          showToast(error.message);
+        }
+      }
+
+      async function removeFamilyMember(customerId, familyId) {
+        if (!confirm('이 가족을 목록에서 해제할까요?')) return;
+        try {
+          await api.request(`/customers/${customerId}/family/${familyId}`, { method: 'DELETE' });
+          showToast('가족 연결을 해제했습니다.');
+          openCustomerInfo(customerId);
+        } catch (error) {
+          showToast(error.message);
+        }
       }
 
       async function openCustomerInfo(id, target) {
@@ -2201,6 +2280,7 @@
         fill('status', Object.entries(L.statuses));
         fill('tier', Object.entries(L.tiers));
         fill('age', L.age_bands.map((a) => [a, a]));
+        fill('family', Object.entries(L.family_filters));
         let timer;
         box.addEventListener('input', (event) => {
           clearTimeout(timer);
@@ -2277,7 +2357,7 @@
           <div class="table-wrap"><table>
             <thead><tr><th>회원</th><th>등급 · 상태</th><th>최근 구매</th><th class="num">구매 횟수</th><th class="num">12개월 순구매</th><th class="num">1회 평균</th><th class="num">평균 주기</th><th class="num">포인트</th><th>수신</th></tr></thead>
             <tbody>${data.members.map((m) => `<tr class="clickable-row" onclick="openCustomerInfo(${m.id}, '#memberDetail')">
-              <td><strong>${h(m.name)}</strong>${m.birthday_this_month ? ' <span class="badge orange">생일</span>' : ''}${m.refill_due.length ? ` <span class="badge blue" title="${h(m.refill_due.map((r) => `${r.product_name} ${r.runout_date}`).join(', '))}">재구매 ${m.refill_due.length}</span>` : ''}<div class="list-meta">${h(m.member_code || '')}</div></td>
+              <td><strong>${h(m.name)}</strong>${m.birthday_this_month ? ' <span class="badge orange">생일</span>' : ''}${m.refill_due.length ? ` <span class="badge blue" title="${h(m.refill_due.map((r) => `${r.product_name} ${r.runout_date}`).join(', '))}">재구매 ${m.refill_due.length}</span>` : ''}<div class="list-meta">${h(m.member_code || '')}${m.family_text ? ` · 가족 ${h(m.family_text)}` : ''}</div></td>
               <td>${gradeBadge(m.grade, L)} ${statusBadge(m.status, L)}</td>
               <td>${daysAgoText(m.days_since_last)}</td>
               <td class="num">${m.visit_count.toLocaleString()}</td>

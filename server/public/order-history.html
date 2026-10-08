@@ -49,7 +49,7 @@
       .ref-code { font-size:22px; font-weight:800; letter-spacing:2px; margin:6px 0 10px; }
       .form-grid { display:grid; gap:10px; grid-template-columns:repeat(2, 1fr); margin-top:10px; }
       .form-grid label { color:var(--sub); display:grid; font-size:12px; font-weight:700; gap:4px; }
-      .form-grid select { border:1px solid var(--line); border-radius:10px; font-size:14px; padding:9px 10px; }
+      .form-grid select, .form-grid input { border:1px solid var(--line); border-radius:10px; font-size:14px; padding:9px 10px; }
       .check-row { align-items:flex-start; display:flex; font-size:14px; gap:8px; padding:8px 0; }
       .check-row input { margin-top:3px; }
       .section-title { color:var(--sub); font-size:14px; font-weight:800; margin:8px 2px 0; }
@@ -157,7 +157,7 @@
         String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
       const won = (value) => `${Number(value || 0).toLocaleString('ko-KR')}원`;
       const MARKETING_TYPES = ['MARKETING_SMS', 'MARKETING_KAKAO', 'MARKETING_NIGHT'];
-      const my = { data: null, alerts: [], requests: [], requestStatuses: {} };
+      const my = { data: null, alerts: [], requests: [], requestStatuses: {}, family: null, relations: {} };
 
       function gradeCard({ membership: m, point_enabled: pointOn, customer }) {
         const next = m.next_grade;
@@ -301,6 +301,85 @@
           </article>`;
       }
 
+      function familyCard() {
+        const family = my.family;
+        if (!family) return '';
+        if (family.linked_to) {
+          return `
+            <article class="card">
+              <div class="top"><strong>가족</strong></div>
+              <p class="muted">${esc(family.linked_to.head_name)}님 가족(${esc(family.linked_to.relation_label)})으로 연결되어 있어요. 등급과 포인트는 각자 쌓여요.</p>
+              <button class="small-btn" type="button" style="margin-top:10px;" onclick="leaveFamily()">가족 연결 끊기</button>
+            </article>`;
+        }
+        const year = new Date().getFullYear();
+        return `
+          <article class="card">
+            <div class="top"><strong>가족</strong>${family.members.length ? `<span class="badge">${family.members.length}명</span>` : ''}</div>
+            <p class="muted">함께 챙기는 가족을 남겨 두면 약사 상담과 맞춤 안내에 도움이 돼요. 선택 사항이에요.</p>
+            ${family.members.map((f) => `
+              <div class="list-row">
+                <div><b>${esc(f.name)}</b><p class="muted">${esc(f.relation_label)}${f.age != null ? ` · ${f.age}세` : ''}${f.linked_customer_id ? ' · 회원' : ''}</p></div>
+                ${f.linked_customer_id ? '' : `<button class="small-btn" type="button" onclick="removeFamily(${f.id})">삭제</button>`}
+              </div>`).join('')}
+            ${family.members.length < family.max ? `
+              <details>
+                <summary>가족 추가</summary>
+                <form onsubmit="addFamily(event)">
+                  <div class="form-grid">
+                    <label>관계<select name="relation" required>
+                      <option value="">선택</option>
+                      ${Object.entries(my.relations).map(([key, label]) => `<option value="${key}">${esc(label)}</option>`).join('')}
+                    </select></label>
+                    <label>이름 또는 호칭<input name="name" maxlength="20" placeholder="예: 첫째, 어머니" required /></label>
+                    <label>출생연도<select name="birth_year">${options(year, 1920, null, '년')}</select></label>
+                    <label>성별<select name="gender"><option value="">선택 안 함</option><option value="F">여성</option><option value="M">남성</option></select></label>
+                  </div>
+                  <button class="small-btn primary" type="submit" style="margin-top:10px;">추가</button>
+                </form>
+              </details>` : ''}
+          </article>`;
+      }
+
+      async function addFamily(event) {
+        event.preventDefault();
+        const f = event.target;
+        try {
+          const data = await api.request('/customers/me/family', {
+            method: 'POST',
+            body: { relation: f.relation.value, name: f.name.value, birth_year: f.birth_year.value || null, gender: f.gender.value || null }
+          });
+          my.family = data.family;
+          renderMyInfo();
+          toast('가족을 추가했어요.');
+        } catch (error) {
+          toast(error.message);
+        }
+      }
+
+      async function removeFamily(id) {
+        if (!confirm('이 가족 정보를 삭제할까요?')) return;
+        try {
+          const data = await api.request(`/customers/me/family/${id}`, { method: 'DELETE' });
+          my.family = data.family;
+          renderMyInfo();
+        } catch (error) {
+          toast(error.message);
+        }
+      }
+
+      async function leaveFamily() {
+        if (!confirm('가족 연결을 끊을까요? 대표 회원의 가족 목록에서 빠집니다.')) return;
+        try {
+          const data = await api.request('/customers/me/family/leave', { method: 'POST' });
+          my.family = data.family;
+          renderMyInfo();
+          toast('가족 연결을 끊었어요.');
+        } catch (error) {
+          toast(error.message);
+        }
+      }
+
       function renderMyInfo() {
         const data = my.data;
         if (!data || !data.membership) return;
@@ -311,6 +390,7 @@
           alertsCard(),
           requestsCard(),
           referralCard(data),
+          familyCard(),
           settingsCard(data)
         ].join('');
         if (open) $('#settingsBox').open = true;
@@ -326,12 +406,15 @@
       }
 
       async function loadMyInfo() {
-        const [data, alerts, requests] = await Promise.all([
+        const [data, alerts, requests, family] = await Promise.all([
           api.request('/customers/me'),
           api.request('/demand/me/restock-alerts').catch(() => ({ alerts: [] })),
-          api.request('/demand/me/product-requests').catch(() => ({ requests: [], statuses: {} }))
+          api.request('/demand/me/product-requests').catch(() => ({ requests: [], statuses: {} })),
+          api.request('/customers/me/family').catch(() => ({ family: null, relations: {} }))
         ]);
         my.data = data;
+        my.family = family.family;
+        my.relations = family.relations;
         my.alerts = alerts.alerts;
         my.requests = requests.requests;
         my.requestStatuses = requests.statuses || {};
