@@ -1,5 +1,6 @@
 const express = require('express');
 const { getOne, run } = require('../db');
+const { findChannel } = require('../services/customers');
 
 const router = express.Router();
 
@@ -25,7 +26,9 @@ router.post('/by-code/:pharmacyCode/scan', (req, res) => {
   run('UPDATE qr_codes SET scan_count = scan_count + 1 WHERE pharmacy_id = @pharmacy_id', {
     pharmacy_id: pharmacy.id
   });
-  res.json({ ok: true });
+  const channel = findChannel(pharmacy.id, req.body && req.body.channel);
+  if (channel) run('UPDATE signup_channels SET scan_count = scan_count + 1 WHERE id = @id', { id: channel.id });
+  res.json({ ok: true, channel: channel ? { name: channel.name } : null });
 });
 
 module.exports = router;

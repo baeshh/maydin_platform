@@ -195,6 +195,70 @@
         white-space: pre-wrap;
       }
 
+      select.form-control {
+        appearance: none;
+        -webkit-appearance: none;
+      }
+
+      .row-2 {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .optional-box,
+      .consent-box {
+        background: rgba(255, 255, 255, 0.82);
+        border: 1px solid rgba(0, 0, 0, 0.05);
+        border-radius: 18px;
+        margin-bottom: 16px;
+        padding: 16px;
+      }
+
+      .optional-box summary {
+        color: var(--text-sub);
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .optional-box[open] summary {
+        margin-bottom: 14px;
+      }
+
+      .consent-box {
+        display: grid;
+        gap: 10px;
+      }
+
+      .consent-box label {
+        align-items: center;
+        color: var(--text-sub);
+        display: flex;
+        font-size: 14px;
+        gap: 8px;
+      }
+
+      .consent-box input[type='checkbox'] {
+        accent-color: var(--toss-blue);
+        height: 18px;
+        width: 18px;
+      }
+
+      .consent-all {
+        border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+        color: var(--text-main) !important;
+        font-weight: 800;
+        padding-bottom: 10px;
+      }
+
+      .consent-note {
+        color: var(--text-muted);
+        font-size: 12px;
+        line-height: 1.5;
+        padding-left: 26px;
+      }
+
       @media (max-width: 360px) {
         body {
           padding: 14px;
@@ -234,6 +298,49 @@
             <label class="form-label">휴대폰 번호</label>
             <input name="phone" type="tel" class="form-control" placeholder="010-0000-0000" autocomplete="tel" required />
           </div>
+
+          <details class="optional-box">
+            <summary>추가 정보 (선택) · 생일 혜택을 받을 수 있어요</summary>
+            <div class="form-group">
+              <label class="form-label">생일</label>
+              <div class="row-2">
+                <select name="birth_month" class="form-control"><option value="">월</option></select>
+                <select name="birth_day" class="form-control"><option value="">일</option></select>
+              </div>
+            </div>
+            <div class="row-2">
+              <div class="form-group">
+                <label class="form-label">출생연도</label>
+                <select name="birth_year" class="form-control"><option value="">선택 안 함</option></select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">성별</label>
+                <select name="gender" class="form-control">
+                  <option value="">선택 안 함</option>
+                  <option value="F">여성</option>
+                  <option value="M">남성</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label class="form-label">추천인 코드</label>
+              <input name="referral_code" class="form-control" placeholder="친구에게 받은 코드 6자리" maxlength="6" autocapitalize="characters" />
+            </div>
+          </details>
+
+          <div class="consent-box">
+            <label class="consent-all"><input type="checkbox" id="consentAll" /> 전체 동의</label>
+            <label><input type="checkbox" name="TERMS" data-consent required /> <b>[필수]</b> 이용약관 동의</label>
+            <label><input type="checkbox" name="PRIVACY" data-consent required /> <b>[필수]</b> 개인정보 수집·이용 동의</label>
+            <p class="consent-note">
+              수집 항목: 이름, 휴대폰 번호, 구매 내역, (선택) 생일·출생연도·성별 · 이용 목적: 회원 식별, 주문·포인트 관리, 구매 통계 ·
+              보유 기간: 회원 탈퇴 시까지 (법령상 보관 의무가 있는 거래 기록은 해당 기간까지)
+            </p>
+            <label><input type="checkbox" name="MARKETING_SMS" data-consent data-marketing /> [선택] 혜택·이벤트 문자 수신</label>
+            <label><input type="checkbox" name="MARKETING_KAKAO" data-consent data-marketing /> [선택] 혜택·이벤트 알림톡 수신</label>
+            <label><input type="checkbox" name="MARKETING_NIGHT" data-consent /> [선택] 야간(21시~08시) 혜택 알림 수신</label>
+            <p class="consent-note">선택 항목은 동의하지 않아도 가입할 수 있고, 언제든 내 정보에서 바꿀 수 있습니다.</p>
+          </div>
           <button class="btn-submit" type="submit">가입하고 시작하기</button>
         </form>
         <p id="message" class="message"></p>
@@ -247,10 +354,41 @@
     <script>
       const params = new URLSearchParams(location.search);
       const pharmacyCode = params.get('pharmacyCode') || 'A001';
+      const channelCode = params.get('ch') || '';
+      const form = $('#signupForm');
+
+      const fillOptions = (select, values, label) => {
+        select.insertAdjacentHTML('beforeend', values.map((v) => `<option value="${v}">${label(v)}</option>`).join(''));
+      };
+      const thisYear = new Date().getFullYear();
+      fillOptions(form.birth_month, Array.from({ length: 12 }, (_, i) => i + 1), (v) => `${v}월`);
+      fillOptions(form.birth_day, Array.from({ length: 31 }, (_, i) => i + 1), (v) => `${v}일`);
+      fillOptions(form.birth_year, Array.from({ length: thisYear - 1919 }, (_, i) => thisYear - i), (v) => `${v}년`);
+      if (params.get('ref')) {
+        form.referral_code.value = params.get('ref').toUpperCase().slice(0, 6);
+        form.querySelector('.optional-box').open = true;
+      }
+
+      const consentBoxes = [...form.querySelectorAll('[data-consent]')];
+      const syncNight = () => {
+        const anyMarketing = [...form.querySelectorAll('[data-marketing]')].some((box) => box.checked);
+        form.MARKETING_NIGHT.disabled = !anyMarketing;
+        if (!anyMarketing) form.MARKETING_NIGHT.checked = false;
+        $('#consentAll').checked = consentBoxes.every((box) => box.checked);
+      };
+      $('#consentAll').addEventListener('change', (event) => {
+        consentBoxes.forEach((box) => {
+          box.disabled = false;
+          box.checked = event.target.checked;
+        });
+        syncNight();
+      });
+      consentBoxes.forEach((box) => box.addEventListener('change', syncNight));
+      syncNight();
 
       async function loadPharmacy() {
         try {
-          await api.request(`/pharmacies/by-code/${encodeURIComponent(pharmacyCode)}/scan`, { method: 'POST' });
+          await api.request(`/pharmacies/by-code/${encodeURIComponent(pharmacyCode)}/scan`, { method: 'POST', body: { channel: channelCode } });
           const data = await api.request(`/pharmacies/by-code/${encodeURIComponent(pharmacyCode)}`);
           document.title = `${data.pharmacy.pharmacy_name} - 환영합니다`;
           $('#pharmacyName').textContent = data.pharmacy.pharmacy_name;
@@ -264,8 +402,9 @@
       $('#signupForm').addEventListener('submit', async (event) => {
         event.preventDefault();
         try {
-          const body = serializeForm(event.target);
-          body.pharmacyCode = pharmacyCode;
+          const { name, phone, birth_year, birth_month, birth_day, gender, referral_code } = serializeForm(event.target);
+          const body = { name, phone, birth_year, birth_month, birth_day, gender, referral_code, pharmacyCode, channel: channelCode };
+          body.consents = Object.fromEntries(consentBoxes.map((box) => [box.name, box.checked]));
           const data = await api.request('/auth/customer/signup', { method: 'POST', body });
           saveSession(data);
           location.href = `/store.html?pharmacyCode=${encodeURIComponent(pharmacyCode)}`;

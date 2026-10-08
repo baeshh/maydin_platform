@@ -104,6 +104,45 @@ function assignMemberCode(customerId) {
   throw new Error('회원 코드를 만들지 못했습니다.');
 }
 
+const REFERRAL_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+// 친구에게 알려 주는 추천 코드. 헷갈리기 쉬운 문자(0/O, 1/I)는 뺀다.
+function assignReferralCode(customerId) {
+  const existing = db.prepare('SELECT referral_code FROM customers WHERE id = ?').get(customerId);
+  if (!existing) return null;
+  if (existing.referral_code) return existing.referral_code;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const code = Array.from({ length: 6 }, () => REFERRAL_ALPHABET[crypto.randomInt(0, REFERRAL_ALPHABET.length)]).join('');
+    const taken = db.prepare('SELECT 1 FROM customers WHERE referral_code = ?').get(code);
+    if (taken) continue;
+    db.prepare('UPDATE customers SET referral_code = ? WHERE id = ? AND referral_code IS NULL').run(code, customerId);
+    return db.prepare('SELECT referral_code FROM customers WHERE id = ?').get(customerId).referral_code;
+  }
+  throw new Error('추천 코드를 만들지 못했습니다.');
+}
+
+function migrateCustomerData() {
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_referral_code
+      ON customers(referral_code) WHERE referral_code IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_customers_referred_by ON customers(referred_by_customer_id);
+    CREATE INDEX IF NOT EXISTS idx_customers_signup_channel ON customers(signup_channel_id);
+    CREATE INDEX IF NOT EXISTS idx_signup_channels_pharmacy ON signup_channels(pharmacy_id, status);
+    CREATE INDEX IF NOT EXISTS idx_customer_consents_customer ON customer_consents(customer_id, consent_type, id DESC);
+  `);
+
+  for (const row of db.prepare('SELECT id FROM customers WHERE referral_code IS NULL').all()) assignReferralCode(row.id);
+
+  // 동의 이력이 생기기 전에 가입한 회원은 마케팅 동의 값만 남아 있다. 약관 동의는 증명할 수 없어서 기록하지 않는다.
+  db.exec(`
+    INSERT INTO customer_consents (pharmacy_id, customer_id, consent_type, agreed, version, source, created_at)
+    SELECT c.pharmacy_id, c.id, 'MARKETING_SMS', 1, 'legacy', 'MIGRATION', c.created_at
+    FROM customers c
+    WHERE c.marketing_agree = 1
+      AND NOT EXISTS (SELECT 1 FROM customer_consents cc WHERE cc.customer_id = c.id)
+  `);
+}
+
 function migratePos(schema) {
   if (needsUsersRebuild()) rebuildTable(schema, 'users');
   if (needsOrdersRebuild()) rebuildTable(schema, 'orders');
@@ -159,6 +198,15 @@ function migratePos(schema) {
   addColumnIfMissing('products', 'supplier_id', 'INTEGER');
   addColumnIfMissing('products', 'tax_type', "TEXT NOT NULL DEFAULT 'TAXABLE'");
   addColumnIfMissing('order_items', 'tax_type', 'TEXT');
+
+  addColumnIfMissing('customers', 'birth_year', 'INTEGER');
+  addColumnIfMissing('customers', 'birth_month', 'INTEGER');
+  addColumnIfMissing('customers', 'birth_day', 'INTEGER');
+  addColumnIfMissing('customers', 'gender', 'TEXT');
+  addColumnIfMissing('customers', 'referral_code', 'TEXT');
+  addColumnIfMissing('customers', 'referred_by_customer_id', 'INTEGER');
+  addColumnIfMissing('customers', 'signup_channel_id', 'INTEGER');
+  migrateCustomerData();
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_suppliers_pharmacy ON suppliers(pharmacy_id, status);
@@ -257,6 +305,7 @@ module.exports = {
   db,
   migrate,
   assignMemberCode,
+  assignReferralCode,
   getOne,
   getAll,
   run,

@@ -405,6 +405,34 @@ CREATE TABLE IF NOT EXISTS purchase_order_items (
   UNIQUE (purchase_order_id, product_id)
 );
 
+CREATE TABLE IF NOT EXISTS signup_channels (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  channel_type TEXT NOT NULL DEFAULT 'ETC' CHECK (channel_type IN ('COUNTER', 'FLYER', 'PARTNER', 'ONLINE', 'ETC')),
+  memo TEXT,
+  scan_count INTEGER NOT NULL DEFAULT 0,
+  signup_count INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'INACTIVE')),
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS customer_consents (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  consent_type TEXT NOT NULL
+    CHECK (consent_type IN ('TERMS', 'PRIVACY', 'MARKETING_SMS', 'MARKETING_KAKAO', 'MARKETING_NIGHT', 'THIRD_PARTY')),
+  agreed INTEGER NOT NULL CHECK (agreed IN (0, 1)),
+  version TEXT NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('SIGNUP', 'APP', 'POS', 'PARTNER', 'NOTICE', 'MIGRATION')),
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_users_role_pharmacy ON users(role, pharmacy_id);
 CREATE INDEX IF NOT EXISTS idx_products_pharmacy ON products(pharmacy_id);
 CREATE INDEX IF NOT EXISTS idx_orders_pharmacy ON orders(pharmacy_id);

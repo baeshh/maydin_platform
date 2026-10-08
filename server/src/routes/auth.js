@@ -1,8 +1,16 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
-const { getOne, run, transaction, assignMemberCode } = require('../db');
+const { getOne, run, transaction, assignMemberCode, assignReferralCode } = require('../db');
 const { authenticate, signToken } = require('../middleware/auth');
+const {
+  CustomerError,
+  normalizeConsentChanges,
+  recordConsents,
+  normalizeProfile,
+  validateBirthday,
+  findChannel
+} = require('../services/customers');
 
 const router = express.Router();
 
@@ -48,7 +56,43 @@ router.post('/customer/signup', (req, res) => {
   );
   if (!pharmacy) return res.status(404).json({ message: '약국을 찾을 수 없습니다.' });
 
+  let consents;
+  let profile;
+  try {
+    consents = {
+      TERMS: false,
+      PRIVACY: false,
+      MARKETING_SMS: Boolean(marketing_agree),
+      MARKETING_KAKAO: false,
+      MARKETING_NIGHT: false,
+      ...normalizeConsentChanges(req.body.consents)
+    };
+    delete consents.THIRD_PARTY;
+    if (!consents.TERMS || !consents.PRIVACY) throw new CustomerError('필수 약관(이용약관, 개인정보 수집·이용)에 동의해 주세요.');
+    if (consents.MARKETING_NIGHT && !consents.MARKETING_SMS && !consents.MARKETING_KAKAO) {
+      throw new CustomerError('야간 광고 수신은 문자 또는 알림톡 수신에 동의한 경우에만 선택할 수 있습니다.');
+    }
+    profile = normalizeProfile(req.body, new Date().getFullYear());
+    validateBirthday(profile.birth_month ?? null, profile.birth_day ?? null);
+  } catch (error) {
+    if (error instanceof CustomerError) return res.status(error.status).json({ message: error.message });
+    throw error;
+  }
+
+  if (!String(name || '').trim()) return res.status(400).json({ message: '이름을 입력해 주세요.' });
   const normalizedPhone = String(phone || '').replace(/\D/g, '');
+  if (!/^01\d{8,9}$/.test(normalizedPhone)) return res.status(400).json({ message: '휴대폰 번호를 확인해 주세요.' });
+
+  const referralCode = String(req.body.referral_code || '').trim().toUpperCase();
+  const referrer = referralCode
+    ? getOne('SELECT id FROM customers WHERE pharmacy_id = @pharmacy_id AND referral_code = @code', {
+        pharmacy_id: pharmacy.id,
+        code: referralCode
+      })
+    : null;
+  if (referralCode && !referrer) return res.status(400).json({ message: '추천인 코드를 찾을 수 없습니다. 코드를 확인하거나 비워 두세요.' });
+  const channel = findChannel(pharmacy.id, req.body.channel);
+
   const customerEmail = email || `${pharmacy.pharmacy_code.toLowerCase()}-${normalizedPhone}@customer.local`;
   const customerPassword = password || crypto.randomBytes(18).toString('hex');
 
@@ -77,19 +121,35 @@ router.post('/customer/signup', (req, res) => {
     );
 
     const customerResult = run(
-      `INSERT INTO customers (user_id, pharmacy_id, name, phone, email, marketing_agree)
-       VALUES (@user_id, @pharmacy_id, @name, @phone, @email, @marketing_agree)`,
+      `INSERT INTO customers (
+         user_id, pharmacy_id, name, phone, email, marketing_agree,
+         birth_year, birth_month, birth_day, gender, referred_by_customer_id, signup_channel_id
+       ) VALUES (
+         @user_id, @pharmacy_id, @name, @phone, @email, 0,
+         @birth_year, @birth_month, @birth_day, @gender, @referred_by, @signup_channel_id
+       )`,
       {
         user_id: userResult.lastInsertRowid,
         pharmacy_id: pharmacy.id,
         name,
         phone,
         email: customerEmail,
-        marketing_agree: marketing_agree ? 1 : 0
+        birth_year: profile.birth_year ?? null,
+        birth_month: profile.birth_month ?? null,
+        birth_day: profile.birth_day ?? null,
+        gender: profile.gender ?? null,
+        referred_by: referrer ? referrer.id : null,
+        signup_channel_id: channel ? channel.id : null
       }
     );
+    const customerId = customerResult.lastInsertRowid;
 
-    assignMemberCode(customerResult.lastInsertRowid);
+    assignMemberCode(customerId);
+    assignReferralCode(customerId);
+    recordConsents({ pharmacyId: pharmacy.id, customerId, changes: consents, source: 'SIGNUP', userId: userResult.lastInsertRowid });
+    if (channel) {
+      run('UPDATE signup_channels SET signup_count = signup_count + 1 WHERE id = @id', { id: channel.id });
+    }
 
     let addressId = null;
     if (address) {

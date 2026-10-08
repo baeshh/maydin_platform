@@ -506,6 +506,63 @@
         display: none;
       }
 
+      .btn[hidden] {
+        display: none;
+      }
+
+      .channel-qr {
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        border: 1px dashed #d1d6db;
+        border-radius: 14px;
+        background: #f9fafb;
+        padding: 12px;
+        margin: 4px 0 10px;
+      }
+
+      .channel-qr[hidden] {
+        display: none;
+      }
+
+      .channel-qr .qr-svg {
+        width: 120px;
+        height: 120px;
+        flex-shrink: 0;
+        background: #fff;
+        border-radius: 10px;
+      }
+
+      .channel-qr .qr-svg svg {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+
+      .consent-table td,
+      .consent-table th {
+        padding: 8px 10px;
+        font-size: 13px;
+      }
+
+      .profile-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 10px 16px;
+        margin-bottom: 14px;
+      }
+
+      .profile-grid span {
+        display: block;
+        color: var(--text-muted);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .profile-grid strong {
+        font-size: 14px;
+      }
+
       .report-controls {
         display: flex;
         flex-wrap: wrap;
@@ -1162,7 +1219,10 @@
           <section class="card" id="customers">
             <div class="card-header">
               <h2 class="card-title">고객 목록 <span id="customerListCount" class="list-meta">0명</span></h2>
-              <button class="btn btn-outline btn-sm" type="button" onclick="togglePointPolicy()">포인트 정책</button>
+              <div class="inline-actions">
+                <button id="renewalBtn" class="btn btn-outline btn-sm" type="button" onclick="openConsentRenewals()" hidden>동의 재확인 <span id="renewalCount">0</span></button>
+                <button class="btn btn-outline btn-sm" type="button" onclick="togglePointPolicy()">포인트 정책</button>
+              </div>
             </div>
             <form id="pointPolicyForm" class="form-grid" hidden style="margin-bottom: 16px;">
               <div class="form-group full">
@@ -1188,6 +1248,7 @@
             </form>
             <div id="customerList" class="loading">고객 정보를 불러오는 중입니다.</div>
             <div id="pointPanel" hidden style="margin-top: 16px;"></div>
+            <div id="customerPanel" hidden style="margin-top: 16px;"></div>
           </section>
 
           <section class="card full-width" id="orders">
@@ -1446,7 +1507,8 @@
 
       function formatDate(value) {
         if (!value) return '-';
-        const date = new Date(String(value).replace(' ', 'T'));
+        const text = String(value);
+        const date = new Date(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/.test(text) ? `${text.replace(' ', 'T')}Z` : text);
         if (Number.isNaN(date.getTime())) return value;
         return date.toLocaleString('ko-KR', {
           month: '2-digit',
@@ -1545,7 +1607,146 @@
               </div>
             </div>
           </div>
+          <div id="channelBox" class="loading" style="margin-top: 18px;">가입 경로를 불러오는 중입니다.</div>
         `;
+        loadChannels();
+      }
+
+      /* ---------- 가입 경로별 QR ---------- */
+
+      const channelState = { channels: [], types: {}, showForm: false };
+
+      function channelLink(channel) {
+        const url = new URL(latestQrUrl || '/join.html', location.origin);
+        if (channel.code) url.searchParams.set('ch', channel.code);
+        return url.href;
+      }
+
+      async function loadChannels() {
+        try {
+          const data = await api.request('/qrcodes/channels');
+          channelState.channels = data.channels;
+          channelState.types = data.types;
+          renderChannels();
+        } catch (error) {
+          $('#channelBox').innerHTML = renderEmpty(error.message);
+        }
+      }
+
+      function renderChannels() {
+        const box = $('#channelBox');
+        box.classList.remove('loading');
+        const types = channelState.types;
+        box.innerHTML = `
+          <div class="card-header" style="margin-bottom: 6px;">
+            <h3 class="card-title" style="font-size: 15px;">가입 경로별 QR</h3>
+            <button class="btn btn-outline btn-sm" type="button" onclick="channelState.showForm = !channelState.showForm; renderChannels()">${channelState.showForm ? '닫기' : '+ QR 추가'}</button>
+          </div>
+          <p class="list-meta" style="margin: 0 0 8px;">카운터·전단·제휴처마다 다른 QR을 쓰면 어디서 회원이 들어오고 실제로 구매하는지 비교할 수 있습니다.</p>
+          ${channelState.showForm ? `
+            <form class="inline-actions" style="margin-bottom: 10px;" onsubmit="createChannel(event)">
+              <input class="form-control" name="name" placeholder="예: 1층 카운터, 10월 전단" maxlength="40" style="flex: 1; min-width: 140px;" required />
+              <select class="form-control" name="channel_type" style="width: auto;">
+                ${Object.entries(types).map(([key, label]) => `<option value="${key}">${h(label)}</option>`).join('')}
+              </select>
+              <input class="form-control" name="memo" placeholder="메모 (선택)" maxlength="200" style="flex: 1; min-width: 120px;" />
+              <button class="btn btn-primary btn-sm" type="submit">만들기</button>
+            </form>` : ''}
+          <div class="list-stack">
+            ${channelState.channels.map((ch) => `
+              <div class="list-item" style="${ch.status === 'INACTIVE' ? 'opacity: 0.55;' : ''}">
+                <div>
+                  <div class="list-title">${h(ch.name)} <span class="badge gray">${h(ch.channel_type === 'BASIC' ? '기본' : types[ch.channel_type] || ch.channel_type)}</span>${ch.status === 'INACTIVE' ? ' <span class="badge red">사용 중지</span>' : ''}</div>
+                  <div class="list-meta">
+                    스캔 ${ch.scan_count.toLocaleString()} · 가입 ${ch.member_count.toLocaleString()}명${ch.signup_rate == null ? '' : ` (${ch.signup_rate}%)`}
+                    · 구매 ${ch.purchaser_count.toLocaleString()}명${ch.purchase_rate == null ? '' : ` (${ch.purchase_rate}%)`} · 매출 ${money(ch.net_sales)}
+                    ${ch.memo ? `<br />${h(ch.memo)}` : ''}
+                  </div>
+                </div>
+                <div class="inline-actions" style="flex-shrink: 0;">
+                  ${ch.code ? `
+                    <button class="muted-link" type="button" onclick="showChannelQr(${ch.id})">QR</button>
+                    <button class="muted-link" type="button" onclick="copyChannelLink(${ch.id})">링크</button>
+                    <button class="muted-link" type="button" onclick="setChannelStatus(${ch.id}, '${ch.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE'}')">${ch.status === 'ACTIVE' ? '중지' : '다시 사용'}</button>` : ''}
+                </div>
+              </div>
+              ${ch.code ? `<div id="channelQr-${ch.id}" class="channel-qr" hidden></div>` : ''}
+            `).join('')}
+          </div>
+        `;
+      }
+
+      async function createChannel(event) {
+        event.preventDefault();
+        const form = event.target;
+        try {
+          const data = await api.request('/qrcodes/channels', {
+            method: 'POST',
+            body: { name: form.name.value, channel_type: form.channel_type.value, memo: form.memo.value }
+          });
+          channelState.channels = data.channels;
+          channelState.showForm = false;
+          renderChannels();
+          showToast(`'${data.channel.name}' QR을 만들었습니다.`);
+          showChannelQr(data.channel.id);
+        } catch (error) {
+          showToast(error.message);
+        }
+      }
+
+      async function setChannelStatus(id, status) {
+        const ch = channelState.channels.find((c) => c.id === id);
+        if (status === 'INACTIVE' && !confirm(`'${ch.name}' QR을 사용 중지할까요?\n이 QR로 들어온 사람도 가입은 되지만 기본 링크 가입으로 집계됩니다.`)) return;
+        try {
+          const data = await api.request(`/qrcodes/channels/${id}`, { method: 'PATCH', body: { status } });
+          channelState.channels = data.channels;
+          renderChannels();
+        } catch (error) {
+          showToast(error.message);
+        }
+      }
+
+      async function copyChannelLink(id) {
+        const link = channelLink(channelState.channels.find((c) => c.id === id));
+        try {
+          await navigator.clipboard.writeText(link);
+          showToast('가입 링크를 복사했습니다.');
+        } catch (error) {
+          showToast(link);
+        }
+      }
+
+      async function showChannelQr(id) {
+        const target = $(`#channelQr-${id}`);
+        if (!target) return;
+        target.hidden = !target.hidden;
+        if (target.hidden) return;
+        const ch = channelState.channels.find((c) => c.id === id);
+        const link = channelLink(ch);
+        target.innerHTML = `
+          <div class="qr-svg" id="channelQrSvg-${id}"></div>
+          <div>
+            <div class="list-title">${h(ch.name)}</div>
+            <p class="list-meta" style="word-break: break-all;">${h(link)}</p>
+            <button class="btn btn-outline btn-sm" type="button" onclick="printChannelQr(${id})">인쇄</button>
+          </div>`;
+        await ScanKit.renderQr($(`#channelQrSvg-${id}`), link, { cellSize: 5 });
+      }
+
+      function printChannelQr(id) {
+        const ch = channelState.channels.find((c) => c.id === id);
+        const svg = $(`#channelQrSvg-${id}`).innerHTML;
+        const pharmacy = $('#pagePharmacyName').textContent;
+        const win = window.open('', '_blank', 'width=480,height=640');
+        if (!win) return showToast('팝업이 차단되었습니다. 팝업을 허용해 주세요.');
+        win.document.write(`<!doctype html><html lang="ko"><head><meta charset="utf-8" /><title>${h(ch.name)} QR</title>
+          <style>body{font-family:Pretendard,-apple-system,sans-serif;text-align:center;padding:40px 24px;color:#191f28}
+          .qr{width:280px;height:280px;margin:24px auto}.qr svg{width:100%;height:100%}h1{font-size:26px;margin:0}p{color:#4e5968;line-height:1.6}</style>
+          </head><body><h1>${h(pharmacy)} 회원 가입</h1><p>휴대폰 카메라로 QR을 찍으면<br />바로 가입하고 포인트를 받을 수 있어요.</p>
+          <div class="qr">${svg}</div><p style="font-size:12px;color:#8b95a1;">${h(ch.name)}</p></body></html>`);
+        win.document.close();
+        win.focus();
+        setTimeout(() => win.print(), 300);
       }
 
       function renderCustomers(customers) {
@@ -1561,14 +1762,192 @@
               <div class="list-item">
                 <div>
                   <div class="list-title">${h(customer.name)}</div>
-                  <div class="list-meta">${h(customer.email)}<br />주문 ${Number(customer.order_count || 0).toLocaleString()}건 · 최근 ${h(formatDate(customer.last_order_at))}</div>
+                  <div class="list-meta">${h(customer.phone || customer.email)}<br />주문 ${Number(customer.order_count || 0).toLocaleString()}건 · 최근 ${h(formatDate(customer.last_order_at))}</div>
                 </div>
                 <div class="list-value" style="text-align: right;">
                   누적 ${money(customer.total_purchase_amount)}
-                  <div><button class="muted-link" type="button" onclick="openCustomerPoints(${customer.id})">포인트 ${Number(customer.point_balance || 0).toLocaleString()}P</button></div>
+                  <div>
+                    <button class="muted-link" type="button" onclick="openCustomerInfo(${customer.id})">회원 정보</button>
+                    · <button class="muted-link" type="button" onclick="openCustomerPoints(${customer.id})">포인트 ${Number(customer.point_balance || 0).toLocaleString()}P</button>
+                  </div>
                 </div>
               </div>
             `).join('')}
+          </div>
+        `;
+        loadConsentRenewals();
+      }
+
+      /* ---------- 회원 정보 · 동의 ---------- */
+
+      let customerLabels = null;
+
+      function consentStatus(c) {
+        if (!c.recorded) return '<span class="badge gray">기록 없음</span>';
+        return c.agreed ? '<span class="badge green">동의</span>' : '<span class="badge red">미동의</span>';
+      }
+
+      function birthdayText(customer) {
+        return customer.birth_month ? `${customer.birth_month}월 ${customer.birth_day}일` : '-';
+      }
+
+      function renderCustomerPanel(data) {
+        const { customer, consents, consent_history: history, labels: L } = data;
+        customerLabels = L;
+        const panel = $('#customerPanel');
+        $('#pointPanel').hidden = true;
+        panel.hidden = false;
+        const withdrawable = Object.entries(consents).filter(([, c]) => !c.required && c.agreed);
+        const marketingAgreed = Object.entries(consents).some(([type, c]) => c.agreed && ['MARKETING_SMS', 'MARKETING_KAKAO'].includes(type));
+        panel.innerHTML = `
+          <div class="card-header" style="margin-bottom: 10px;">
+            <h3 class="card-title" style="font-size: 16px;">${h(customer.name)} · ${h(customer.member_code || '')}</h3>
+            <button class="muted-link" type="button" onclick="$('#customerPanel').hidden = true">닫기</button>
+          </div>
+          <div class="profile-grid">
+            <div><span>휴대폰</span><strong>${h(customer.phone || '-')}</strong></div>
+            <div><span>가입일</span><strong>${h(formatDate(customer.created_at))}</strong></div>
+            <div><span>생일</span><strong>${h(birthdayText(customer))}</strong></div>
+            <div><span>출생연도 · 성별</span><strong>${customer.birth_year ? `${customer.birth_year}년` : '-'} · ${h(L.genders[customer.gender] || '-')}</strong></div>
+            <div><span>가입 경로</span><strong>${h(customer.signup_channel_name || '기본 가입 링크')}</strong></div>
+            <div><span>추천인</span><strong>${h(customer.referrer_name || '-')}</strong></div>
+            <div><span>추천 코드 · 추천한 회원</span><strong>${h(customer.referral_code || '-')} · ${Number(customer.referred_count || 0)}명</strong></div>
+          </div>
+          <details style="margin-bottom: 14px;">
+            <summary class="muted-link" style="cursor: pointer;">선택 정보 수정 (고객이 요청한 경우)</summary>
+            <form class="inline-actions" style="margin-top: 10px;" onsubmit="saveCustomerProfile(event, ${customer.id})">
+              <input class="form-control" name="birth_month" type="number" min="1" max="12" placeholder="월" value="${customer.birth_month || ''}" style="width: 70px;" />
+              <input class="form-control" name="birth_day" type="number" min="1" max="31" placeholder="일" value="${customer.birth_day || ''}" style="width: 70px;" />
+              <input class="form-control" name="birth_year" type="number" min="1900" max="${new Date().getFullYear()}" placeholder="출생연도" value="${customer.birth_year || ''}" style="width: 100px;" />
+              <select class="form-control" name="gender" style="width: auto;">
+                <option value="">성별 선택 안 함</option>
+                ${Object.entries(L.genders).map(([key, label]) => `<option value="${key}" ${customer.gender === key ? 'selected' : ''}>${h(label)}</option>`).join('')}
+              </select>
+              <button class="btn btn-primary btn-sm" type="submit">저장</button>
+            </form>
+          </details>
+          <div class="table-wrap">
+            <table class="consent-table">
+              <thead><tr>${withdrawable.length ? '<th></th>' : ''}<th>동의 항목</th><th>상태</th><th>최근 변경</th></tr></thead>
+              <tbody>
+                ${Object.entries(consents).map(([type, c]) => `<tr>
+                  ${withdrawable.length ? `<td>${!c.required && c.agreed ? `<input type="checkbox" data-withdraw="${type}" />` : ''}</td>` : ''}
+                  <td>${c.required ? '<b>[필수]</b> ' : ''}${h(c.label)}</td>
+                  <td>${consentStatus(c)}</td>
+                  <td>${c.recorded ? `${h(formatDate(c.updated_at))}<div class="list-meta">${h(L.consent_sources[c.source] || c.source)} · ${h(c.version)}</div>` : '-'}</td>
+                </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+          <div class="inline-actions" style="margin: 10px 0 14px;">
+            ${withdrawable.length ? `<button class="btn btn-outline btn-sm" type="button" onclick="withdrawConsents(${customer.id})">선택 항목 철회 (고객 요청)</button>` : ''}
+            ${marketingAgreed ? `<button class="btn btn-outline btn-sm" type="button" onclick="noticeConsents(${customer.id})">수신 동의 재확인 안내 완료</button>` : ''}
+          </div>
+          <p class="list-meta" style="margin: 0 0 12px;">
+            약국에서는 고객이 요청한 철회만 대신 처리할 수 있습니다. 동의는 고객이 앱의 내 정보에서 직접 해야 합니다.
+            마케팅 수신 동의는 2년마다 고객에게 동의 사실을 안내해야 하며, 안내 후 '재확인 안내 완료'를 눌러 기록해 주세요.
+          </p>
+          <details>
+            <summary class="muted-link" style="cursor: pointer;">동의 변경 이력 ${history.length}건</summary>
+            <div class="table-wrap" style="margin-top: 8px;">
+              <table class="consent-table">
+                <thead><tr><th>일시</th><th>항목</th><th>내용</th><th>경로</th></tr></thead>
+                <tbody>
+                  ${history.map((row) => `<tr>
+                    <td>${h(formatDate(row.created_at))}</td>
+                    <td>${h(L.consent_types[row.consent_type] || row.consent_type)}</td>
+                    <td>${row.source === 'NOTICE' ? '재확인 안내' : row.agreed ? '동의' : row.source === 'SIGNUP' ? '미동의' : '철회'}</td>
+                    <td>${h(L.consent_sources[row.source] || row.source)}${row.created_by_name ? ` · ${h(row.created_by_name)}` : ''}</td>
+                  </tr>`).join('') || '<tr><td colspan="4">기록이 없습니다.</td></tr>'}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        `;
+      }
+
+      async function openCustomerInfo(id) {
+        try {
+          renderCustomerPanel(await api.request(`/customers/${id}`));
+          $('#customerPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } catch (error) {
+          showToast(error.message);
+        }
+      }
+
+      async function saveCustomerProfile(event, id) {
+        event.preventDefault();
+        const f = event.target;
+        try {
+          await api.request(`/customers/${id}/profile`, {
+            method: 'PATCH',
+            body: { birth_month: f.birth_month.value, birth_day: f.birth_day.value, birth_year: f.birth_year.value, gender: f.gender.value }
+          });
+          showToast('선택 정보를 저장했습니다.');
+          openCustomerInfo(id);
+        } catch (error) {
+          showToast(error.message);
+        }
+      }
+
+      async function withdrawConsents(id) {
+        const types = [...document.querySelectorAll('[data-withdraw]:checked')].map((box) => box.dataset.withdraw);
+        if (!types.length) return showToast('철회할 항목을 선택해 주세요.');
+        const names = types.map((type) => customerLabels.consent_types[type]).join(', ');
+        if (!confirm(`고객이 요청한 철회가 맞나요?\n${names}`)) return;
+        try {
+          await api.request(`/customers/${id}/consents/withdraw`, { method: 'POST', body: { types } });
+          showToast('동의 철회를 기록했습니다.');
+          openCustomerInfo(id);
+          loadConsentRenewals();
+        } catch (error) {
+          showToast(error.message);
+        }
+      }
+
+      async function noticeConsents(id) {
+        if (!confirm('고객에게 마케팅 수신 동의 사실을 안내했나요?\n안내 일시가 기록되고 2년 주기가 다시 시작됩니다.')) return;
+        try {
+          await api.request(`/customers/${id}/consents/notice`, { method: 'POST' });
+          showToast('재확인 안내를 기록했습니다.');
+          openCustomerInfo(id);
+          loadConsentRenewals();
+        } catch (error) {
+          showToast(error.message);
+        }
+      }
+
+      async function loadConsentRenewals() {
+        try {
+          const { renewals } = await api.request('/customers/consent-renewals');
+          $('#renewalBtn').hidden = renewals.length === 0;
+          $('#renewalCount').textContent = renewals.length;
+          return renewals;
+        } catch (error) {
+          return [];
+        }
+      }
+
+      async function openConsentRenewals() {
+        const renewals = await loadConsentRenewals();
+        const panel = $('#customerPanel');
+        $('#pointPanel').hidden = true;
+        panel.hidden = false;
+        panel.innerHTML = `
+          <div class="card-header" style="margin-bottom: 10px;">
+            <h3 class="card-title" style="font-size: 16px;">마케팅 수신 동의 재확인 대상 ${renewals.length}명</h3>
+            <button class="muted-link" type="button" onclick="$('#customerPanel').hidden = true">닫기</button>
+          </div>
+          <p class="list-meta" style="margin: 0 0 10px;">동의일(또는 마지막 안내일)로부터 2년이 되기 전에 동의 사실을 안내해야 합니다. 30일 안에 기한이 오는 회원까지 보여줍니다.</p>
+          <div class="list-stack">
+            ${renewals.map((r) => `
+              <div class="list-item">
+                <div>
+                  <div class="list-title">${h(r.name)}</div>
+                  <div class="list-meta">${h(r.phone || '')} · 기한 ${h(formatDate(r.due_at))}</div>
+                </div>
+                <button class="muted-link" type="button" onclick="openCustomerInfo(${r.id})">회원 정보</button>
+              </div>`).join('') || renderEmpty('재확인할 회원이 없습니다.')}
           </div>
         `;
       }
@@ -1646,6 +2025,7 @@
       async function openCustomerPoints(id) {
         try {
           renderPointPanel(await api.request(`/points/customers/${id}`));
+          $('#customerPanel').hidden = true;
           $('#pointPanel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         } catch (error) {
           showToast(error.message);
