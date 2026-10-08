@@ -332,6 +332,33 @@ function signupRequests(pharmacyId) {
   );
 }
 
+function hasStorePurchase(customerId) {
+  return Boolean(
+    getOne(
+      `SELECT 1 FROM orders
+       WHERE customer_id = @customer_id AND order_type = 'POS_SALE'
+         AND order_status IN ('COMPLETED', 'PARTIALLY_REFUNDED') AND final_amount > 0
+       LIMIT 1`,
+      { customer_id: customerId }
+    )
+  );
+}
+
+function onlineOrderStatus(customer) {
+  if (!customer) return { allowed: false, reason: 'NO_MEMBER', message: '회원 정보를 찾을 수 없습니다.' };
+  if (customer.approval_status !== 'APPROVED') {
+    return { allowed: false, reason: 'NOT_APPROVED', message: '약국에서 가입을 승인한 뒤에 온라인 주문을 할 수 있어요.' };
+  }
+  if (!hasStorePurchase(customer.id)) {
+    return {
+      allowed: false,
+      reason: 'NO_STORE_PURCHASE',
+      message: '온라인 주문은 매장 구매 인증을 마친 회원만 할 수 있어요. 약국에서 결제할 때 회원 QR을 보여 주시면 바로 인증돼요.'
+    };
+  }
+  return { allowed: true, reason: null, message: null };
+}
+
 module.exports = {
   CODE_LENGTH,
   SIGNUP_CODE_DAYS,
@@ -358,5 +385,7 @@ module.exports = {
   signupFlags,
   approveCustomer,
   rejectCustomer,
-  signupRequests
+  signupRequests,
+  hasStorePurchase,
+  onlineOrderStatus
 };

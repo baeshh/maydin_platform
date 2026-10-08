@@ -8,6 +8,7 @@ import {
   login,
   postSignup,
   signupBody,
+  signupMember,
   testIp
 } from './lib.mjs';
 
@@ -312,6 +313,51 @@ console.log('[추천 보상 — 인증 구매는 첫 구매로 안 침]');
   check('추천 코드로 가입 · 인증 구매 적립만', res.status === 201 && friend.point_balance === 200 && !friend.referral_rewarded_at, friend);
   res = await sell({ customer_id: friend.id });
   check('가입 후 첫 구매에 추천 보상', res.data.points.reward === 1000, res.data.points);
+}
+
+console.log('[온라인 주문 — 매장 구매 인증한 승인 회원만]');
+{
+  const order = (token, type = 'PICKUP') =>
+    api('/orders', {
+      token,
+      method: 'POST',
+      body: { order_type: type, payment_method: 'MOCK_CARD', contact_name: '테스트', contact_phone: '01000000000', preferred_at: '2026-12-01T10:00', memo: '상담' }
+    });
+  const addCart = (token) => api('/cart', { token, method: 'POST', body: { product_id: productId, quantity: 1 } });
+
+  const sale = await sell();
+  let res = await postSignup(bodyWithCode(sale.data.signup_code.code));
+  const verified = res.data.token;
+  res = await api('/orders/eligibility', { token: verified });
+  check('영수증으로 가입한 회원은 온라인 주문 가능', res.data.allowed === true, res.data);
+  await addCart(verified);
+  res = await order(verified);
+  check('인증 회원 픽업 주문 201', res.status === 201, res.data);
+
+  const legacy = await signupMember(db);
+  const legacyRow = customerRow(legacy.phone);
+  res = await api('/orders/eligibility', { token: legacy.data.token });
+  check('매장 구매 이력 없는 회원은 온라인 주문 불가', res.data.allowed === false && res.data.reason === 'NO_STORE_PURCHASE', res.data);
+  await addCart(legacy.data.token);
+  res = await order(legacy.data.token);
+  check('배송·픽업 주문 403', res.status === 403 && res.data.reason === 'NO_STORE_PURCHASE', res.data);
+  res = await order(legacy.data.token, 'DELIVERY');
+  check('배송 주문도 403', res.status === 403, res.data);
+  res = await order(legacy.data.token, 'COUNSEL');
+  check('결제 없는 복약상담 예약은 가능', res.status === 201, res.data);
+  res = await api(`/customers/${legacyRow.id}`, { token: owner });
+  check('약국 회원 화면에 온라인 주문 불가 표시', res.data.online_order?.allowed === false, res.data.online_order);
+
+  const refunded = await sell({ customer_id: legacyRow.id });
+  await api(`/pos/sales/${refunded.data.order.id}/cancel`, { token: owner, method: 'POST', body: { reason: '테스트 취소' } });
+  res = await api('/orders/eligibility', { token: legacy.data.token });
+  check('취소된 매장 구매는 인증으로 안 침', res.data.allowed === false, res.data);
+
+  await sell({ customer_id: legacyRow.id });
+  res = await api('/orders/eligibility', { token: legacy.data.token });
+  check('매장에서 회원으로 결제하면 온라인 주문 가능', res.data.allowed === true, res.data);
+  res = await order(legacy.data.token);
+  check('인증 후 픽업 주문 201', res.status === 201, res.data);
 }
 
 console.log('[코드 대입 제한]');

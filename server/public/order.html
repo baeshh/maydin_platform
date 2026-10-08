@@ -100,6 +100,8 @@
 
       if (!requireCustomerLogin(pharmacyCode)) {
         message('로그인이 필요합니다.');
+      } else {
+        guardOnlineOrder($('main'), [$('#deliveryLink'), $('#pickupLink')]);
       }
     </script>
   </body>

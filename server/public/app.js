@@ -76,6 +76,32 @@ function requireCustomerLogin(pharmacyCode = pharmacyCodeFromUrl()) {
   return true;
 }
 
+async function guardOnlineOrder(noticeParent, controls = []) {
+  let status;
+  try {
+    status = await api.request('/orders/eligibility');
+  } catch (error) {
+    return true;
+  }
+  if (status.allowed) return true;
+
+  const notice = document.createElement('div');
+  notice.setAttribute('role', 'alert');
+  notice.style.cssText =
+    'background:#fff4e5;border:1px solid #ffd8a8;border-radius:16px;color:#8a4b00;font-size:14px;font-weight:700;line-height:1.55;padding:14px 16px;';
+  notice.textContent = status.message;
+  noticeParent.prepend(notice);
+
+  for (const control of controls.filter(Boolean)) {
+    if ('disabled' in control) control.disabled = true;
+    control.removeAttribute('href');
+    control.setAttribute('aria-disabled', 'true');
+    control.style.opacity = '0.45';
+    control.style.pointerEvents = 'none';
+  }
+  return false;
+}
+
 function orderTypeLabel(type) {
   return (
     {

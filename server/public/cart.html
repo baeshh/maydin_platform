@@ -103,6 +103,7 @@
 
       if (requireCustomerLogin(pharmacyCode)) {
         loadCart().catch((error) => toast(error.message));
+        guardOnlineOrder($('main'), [$('#deliveryLink'), $('#pickupLink')]);
       }
     </script>
   </body>

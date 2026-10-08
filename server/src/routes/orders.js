@@ -2,6 +2,7 @@ const express = require('express');
 const { getAll, getOne, run, transaction } = require('../db');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { requirePharmacyScope } = require('../middleware/scope');
+const { onlineOrderStatus } = require('../services/member-auth');
 
 const router = express.Router();
 
@@ -112,6 +113,17 @@ router.get('/', requireRole('CUSTOMER', 'PHARMACY_OWNER', 'ADMIN'), requirePharm
   res.json({ orders });
 });
 
+function findMyCustomer(req) {
+  return getOne('SELECT * FROM customers WHERE user_id = @user_id AND pharmacy_id = @pharmacy_id', {
+    user_id: req.user.id,
+    pharmacy_id: req.pharmacyId
+  });
+}
+
+router.get('/eligibility', requireRole('CUSTOMER'), requirePharmacyScope, (req, res) => {
+  res.json(onlineOrderStatus(findMyCustomer(req)));
+});
+
 router.get('/:id', requireRole('CUSTOMER', 'PHARMACY_OWNER', 'ADMIN'), requirePharmacyScope, (req, res) => {
   const order = getOne('SELECT * FROM orders WHERE id = @id AND pharmacy_id = @pharmacy_id', {
     id: Number(req.params.id),
@@ -136,16 +148,17 @@ router.get('/:id', requireRole('CUSTOMER', 'PHARMACY_OWNER', 'ADMIN'), requirePh
 });
 
 router.post('/', requireRole('CUSTOMER'), requirePharmacyScope, (req, res) => {
-  const customer = getOne('SELECT * FROM customers WHERE user_id = @user_id AND pharmacy_id = @pharmacy_id', {
-    user_id: req.user.id,
-    pharmacy_id: req.pharmacyId
-  });
+  const customer = findMyCustomer(req);
   if (!customer) return res.status(400).json({ message: '고객 정보를 찾을 수 없습니다.' });
 
   const orderType = String(req.body.order_type || 'DELIVERY').toUpperCase();
   if (!ORDER_TYPES.has(orderType)) {
     return res.status(400).json({ message: '지원하지 않는 주문 유형입니다.' });
   }
+
+  const eligibility = onlineOrderStatus(customer);
+  const blocked = orderType === 'COUNSEL' ? eligibility.reason === 'NOT_APPROVED' : !eligibility.allowed;
+  if (blocked) return res.status(403).json({ message: eligibility.message, reason: eligibility.reason });
 
   const createOrder = transaction(() => {
     if (orderType === 'COUNSEL') {

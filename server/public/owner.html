@@ -2199,6 +2199,7 @@
             <div><span>추천 코드 · 추천한 회원</span><strong>${h(customer.referral_code || '-')} · ${Number(customer.referred_count || 0)}명</strong></div>
             <div><span>가입 상태</span><strong>${approvalText(customer)}</strong></div>
             <div><span>로그인 PIN</span><strong>${pinStatusText(customer)}</strong></div>
+            <div><span>온라인 주문</span><strong>${data.online_order?.allowed ? '<span class="badge green">가능</span>' : '<span class="badge gray">매장 구매 인증 전</span>'}</strong></div>
           </div>
           <div class="inline-actions" style="margin-bottom: 14px;">
             ${customer.approval_status === 'APPROVED' ? `<button class="btn btn-outline btn-sm" type="button" onclick="issuePinCode(${customer.id}, ${customer.pin_set ? 1 : 0})">${customer.pin_set ? 'PIN 재설정 코드 발급' : 'PIN 설정 코드 발급'}</button>` : ''}

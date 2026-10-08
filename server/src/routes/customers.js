@@ -97,6 +97,7 @@ router.get('/me', requireRole('CUSTOMER'), (req, res) => {
     return res.json({
       customer,
       health: auth.readHealth(customer.id),
+      online_order: auth.onlineOrderStatus(customer),
       consents: currentConsents(customer.id),
       membership: customerMembership(customer.pharmacy_id, customer.id),
       point_enabled: pointPolicy(customer.pharmacy_id).enabled,
@@ -354,6 +355,7 @@ router.get('/:id', (req, res) => {
     const customer = pharmacyCustomer(req);
     return res.json({
       customer,
+      online_order: auth.onlineOrderStatus(customer),
       consents: currentConsents(customer.id),
       consent_history: consentHistory(customer.id),
       family: familyView(customer.pharmacy_id, customer.id),

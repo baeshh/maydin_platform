@@ -126,6 +126,7 @@
         $('[name=receiver_name]').value = user.name || '';
         $('[name=receiver_phone]').value = user.phone || '';
         loadCart().catch((error) => toast(error.message));
+        guardOnlineOrder($('main'), [$('#orderForm button[type=submit]')]);
       }
     </script>
   </body>

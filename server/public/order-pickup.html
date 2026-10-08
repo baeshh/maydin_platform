@@ -120,6 +120,7 @@
         $('[name=contact_name]').value = user.name || '';
         $('[name=contact_phone]').value = user.phone || '';
         loadCart().catch((error) => toast(error.message));
+        guardOnlineOrder($('main'), [$('#pickupForm button[type=submit]')]);
       }
     </script>
   </body>
