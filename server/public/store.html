@@ -389,6 +389,67 @@
         padding: 11px 12px;
       }
 
+      .add-btn.alert-btn {
+        background: var(--toss-blue-light);
+        color: var(--toss-blue);
+      }
+
+      .add-btn.alert-btn.on {
+        background: var(--bg-sub);
+        color: var(--text-sub);
+      }
+
+      .search-section {
+        padding: 0 20px 16px;
+      }
+
+      .search-box {
+        align-items: center;
+        background: var(--bg-sub);
+        border-radius: 16px;
+        display: flex;
+        gap: 10px;
+        padding: 0 16px;
+      }
+
+      .search-box svg {
+        flex-shrink: 0;
+        height: 18px;
+        stroke: var(--text-muted);
+        width: 18px;
+      }
+
+      .search-box input {
+        background: transparent;
+        border: none;
+        flex: 1;
+        font-size: 15px;
+        outline: none;
+        padding: 14px 0;
+      }
+
+      .request-box {
+        background: var(--bg-sub);
+        border-radius: 18px;
+        grid-column: 1 / -1;
+        padding: 20px;
+      }
+
+      .request-box h4 {
+        font-size: 16px;
+        margin-bottom: 6px;
+      }
+
+      .request-box input {
+        background: #fff;
+        border: 1px solid #e5e8eb;
+        border-radius: 12px;
+        font-size: 14px;
+        margin-top: 8px;
+        padding: 12px;
+        width: 100%;
+      }
+
       .customer-panel {
         background: #fff;
         border-top: 10px solid var(--bg-sub);
@@ -557,7 +618,7 @@
         <div class="header-actions">
           <a class="text-link" id="joinLink" href="#">가입</a>
           <a class="text-link" id="loginLink" href="#">로그인</a>
-          <button class="icon-btn" type="button" onclick="scrollToProducts()" aria-label="상품 검색">
+          <button class="icon-btn" type="button" onclick="focusSearch()" aria-label="상품 검색">
             <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="11" cy="11" r="8"></circle>
               <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
@@ -582,6 +643,16 @@
           <h2>환절기 면역력,<br />하루 한 알로 챙기세요</h2>
           <p>약국 운영자가 직접 등록한 건강기능식품과 의약외품을 만나보세요.</p>
         </div>
+      </section>
+
+      <section class="search-section">
+        <label class="search-box">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input id="storeSearch" type="search" placeholder="찾는 상품을 검색해 보세요" autocomplete="off" />
+        </label>
       </section>
 
       <section class="category-scroll">
@@ -696,10 +767,112 @@
           : '<p class="muted" style="padding: 0 20px;">등록된 상품이 없습니다. 약국 운영자 화면에서 상품을 등록해주세요.</p>';
       }
 
+      const esc = (value) =>
+        String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+      let alertedProducts = new Map();
+      const loggedMisses = new Set();
+      let missTimer;
+
+      function searchQuery() {
+        return $('#storeSearch').value.trim();
+      }
+
+      function focusSearch() {
+        $('#storeSearch').focus();
+        $('#storeSearch').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+
+      function matchesSearch(product, query) {
+        const text = `${product.product_name} ${product.brand || ''} ${product.category_name || ''} ${product.description || ''}`.toLowerCase();
+        return query.toLowerCase().split(/\s+/).every((word) => text.includes(word));
+      }
+
+      function logSearchMiss(query) {
+        clearTimeout(missTimer);
+        missTimer = setTimeout(() => {
+          if (query !== searchQuery() || loggedMisses.has(query)) return;
+          loggedMisses.add(query);
+          api.request('/demand/search-miss', { method: 'POST', body: { pharmacyCode, query } }).catch(() => {});
+        }, 1200);
+      }
+
+      function requestBox(query) {
+        return `
+          <div class="request-box">
+            <h4>'${esc(query)}' 상품이 아직 없어요</h4>
+            <p class="muted">찾는 상품을 약국에 요청하면 입고를 검토하고 답변해 드려요.</p>
+            <input id="requestName" maxlength="80" value="${esc(query)}" placeholder="찾는 상품 이름" />
+            <input id="requestMemo" maxlength="200" placeholder="용량·브랜드 등 메모 (선택)" />
+            <button class="add-btn" style="width: 100%;" onclick="requestProduct()">약국에 요청하기</button>
+          </div>`;
+      }
+
+      async function requestProduct() {
+        if (!isCustomerInThisStore()) {
+          toast('상품 요청은 이 약국몰 회원만 할 수 있어요. 먼저 로그인해 주세요.');
+          return;
+        }
+        try {
+          await api.request('/demand/me/product-requests', {
+            method: 'POST',
+            body: { product_name: $('#requestName').value, memo: $('#requestMemo').value }
+          });
+          toast('요청했어요. 약국 답변은 내역 > 내 정보에서 볼 수 있어요.');
+          $('#storeSearch').value = '';
+          renderProductGrid();
+        } catch (error) {
+          toast(error.message);
+        }
+      }
+
+      async function loadAlerts() {
+        if (!isCustomerInThisStore()) return;
+        try {
+          const { alerts } = await api.request('/demand/me/restock-alerts');
+          alertedProducts = new Map(alerts.filter((a) => a.status === 'WAITING').map((a) => [a.product_id, a.id]));
+          renderProductGrid();
+        } catch (error) {
+          alertedProducts = new Map();
+        }
+      }
+
+      async function toggleRestockAlert(productId) {
+        if (!isCustomerInThisStore()) {
+          toast('입고 알림은 이 약국몰 회원만 신청할 수 있어요. 먼저 로그인해 주세요.');
+          return;
+        }
+        try {
+          if (alertedProducts.has(productId)) {
+            await api.request(`/demand/me/restock-alerts/${alertedProducts.get(productId)}`, { method: 'DELETE' });
+            toast('입고 알림을 취소했어요.');
+          } else {
+            await api.request('/demand/me/restock-alerts', { method: 'POST', body: { product_id: productId } });
+            toast('입고되면 알려 드릴게요.');
+          }
+          await loadAlerts();
+        } catch (error) {
+          toast(error.message);
+        }
+      }
+
+      function cardButton(product, soldOut) {
+        if (!soldOut) return `<button class="add-btn" onclick="addCart(${product.id})">장바구니 담기</button>`;
+        const on = alertedProducts.has(product.id);
+        return `<button class="add-btn alert-btn ${on ? 'on' : ''}" onclick="toggleRestockAlert(${product.id})">${on ? '입고 알림 신청됨' : '입고 알림 받기'}</button>`;
+      }
+
       function renderProductGrid() {
-        const visible = selectedCategory === '전체'
+        const query = searchQuery();
+        const inCategory = selectedCategory === '전체'
           ? products
           : products.filter((product) => safeCategory(product) === selectedCategory);
+        const visible = query ? inCategory.filter((product) => matchesSearch(product, query)) : inCategory;
+
+        if (query && !visible.length && !products.some((product) => matchesSearch(product, query))) {
+          logSearchMiss(query);
+          $('#productGrid').innerHTML = requestBox(query);
+          return;
+        }
 
         $('#productGrid').innerHTML = visible.length
           ? visible.map((product, index) => {
@@ -714,18 +887,26 @@
                       ${soldOut ? '<span class="tag red">품절</span>' : ''}
                     </div>
                   `)}
-                  <div class="brand">${safeCategory(product)}</div>
-                  <h4>${product.product_name}</h4>
+                  <div class="brand">${esc(product.brand || safeCategory(product))}</div>
+                  <h4>${esc(product.product_name)}</h4>
                   <div class="price-wrap">
                     ${rate ? `<span class="discount">${rate}%</span>` : ''}
                     <span class="price">${money(salePrice(product))}</span>
                   </div>
-                  <button class="add-btn" onclick="addCart(${product.id})" ${soldOut ? 'disabled' : ''}>${soldOut ? '품절' : '장바구니 담기'}</button>
+                  ${cardButton(product, soldOut)}
                 </article>
               `;
             }).join('')
-          : '<p class="muted">선택한 카테고리에 상품이 없습니다.</p>';
+          : `<p class="muted">${query ? `'${esc(query)}' 검색 결과가 이 카테고리에는 없습니다.` : '선택한 카테고리에 상품이 없습니다.'}</p>`;
       }
+
+      $('#storeSearch').addEventListener('input', () => {
+        if (searchQuery() && selectedCategory !== '전체') {
+          selectedCategory = '전체';
+          renderCategories();
+        }
+        renderProductGrid();
+      });
 
       function isCustomerInThisStore() {
         const user = currentUser();
@@ -748,7 +929,7 @@
           renderProductGrid();
 
           if (isCustomerInThisStore()) {
-            await refreshCartBadge();
+            await Promise.all([refreshCartBadge(), loadAlerts()]);
           } else {
             $('#cartBadge').textContent = '0';
           }

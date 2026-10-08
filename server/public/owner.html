@@ -510,6 +510,13 @@
         display: none;
       }
 
+      .demand-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+        gap: 16px;
+        margin-bottom: 16px;
+      }
+
       .member-dist {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -1238,6 +1245,7 @@
           <a href="#products" class="nav-item">상품 관리</a>
           <a href="#customers" class="nav-item">고객 관리</a>
           <a href="#members" class="nav-item">회원 분석</a>
+          <a href="#demand" class="nav-item">수요 · 연관 상품 <span id="navDemandBadge" class="badge orange" hidden>0</span></a>
           <a href="#purchasing" class="nav-item">거래처·발주 <span id="navReorderBadge" class="badge orange" hidden>0</span></a>
           <a href="#staff" class="nav-item">POS 직원</a>
           <a href="#qr" class="nav-item">QR 가입</a>
@@ -1399,6 +1407,7 @@
               </select>
               <label class="check-chip"><input type="checkbox" name="birthday" value="1" /> 이번 달 생일</label>
               <label class="check-chip"><input type="checkbox" name="marketing" value="1" /> 마케팅 동의</label>
+              <label class="check-chip"><input type="checkbox" name="refill" value="1" /> 재구매 예정</label>
               <span style="flex: 1;"></span>
               <select class="form-control" name="sort">
                 <option value="recent">최근 구매순</option>
@@ -1410,6 +1419,22 @@
             </div>
             <div id="memberDetail" class="insight-box" hidden style="border-color: var(--toss-blue);"></div>
             <div id="memberTable"></div>
+          </section>
+
+          <section class="card full-width" id="demand">
+            <div class="card-header">
+              <h2 class="card-title">수요 · 함께 산 상품</h2>
+              <div class="inline-actions">
+                <select id="demandDays" class="form-control" style="width: auto;" onchange="loadDemand()">
+                  <option value="30">최근 30일</option>
+                  <option value="90" selected>최근 90일</option>
+                  <option value="180">최근 180일</option>
+                  <option value="365">최근 1년</option>
+                </select>
+                <button class="btn btn-outline btn-sm" type="button" onclick="loadDemand()">새로고침</button>
+              </div>
+            </div>
+            <div id="demandBody" class="loading">수요 신호를 불러오는 중입니다.</div>
           </section>
 
           <section class="card full-width" id="purchasing">
@@ -1520,6 +1545,14 @@
                   <input id="productBarcode" class="form-control" name="barcode" inputmode="numeric" placeholder="스캐너로 찍거나 직접 입력" />
                   <button class="btn btn-outline btn-sm" type="button" onclick="scanBarcodeInto('productBarcode')">카메라</button>
                 </div>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="productBrand">브랜드</label>
+                <input id="productBrand" class="form-control" name="brand" maxlength="40" placeholder="선택 · 선호 브랜드 분석에 사용" />
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="supplyDays">1개 복용·사용 기간 (일)</label>
+                <input id="supplyDays" class="form-control" name="supply_days" type="number" min="1" max="365" placeholder="예: 30 · 다음 구매 예상일 계산" />
               </div>
               <div class="form-group">
                 <label class="form-label" for="thumbnailUrl">대표 이미지 URL</label>
@@ -1669,6 +1702,7 @@
           loadPurchasing();
           loadReport();
           loadMembers();
+          loadDemand();
           renderStaff(staff.staff);
           renderHeader(qr.qr);
           renderSummary(dash.summary);
@@ -1950,8 +1984,18 @@
                 <div><span>주 결제수단</span><strong>${join(b.payments.slice(0, 2), (p) => `${h(p.label)} ${p.count}`)}</strong></div>
                 <div><span>자주 오는 때</span><strong>${join(b.weekdays, (w) => `${w.label}요일`)}${b.hour_bands[0] ? ` · ${h(b.hour_bands[0].key)}` : ''}</strong></div>
                 <div><span>할인·포인트 사용</span><strong>${b.discount_rate}%</strong></div>
-                <div style="grid-column: 1 / -1;"><span>선호 카테고리</span><strong>${join(b.top_categories, (c) => `${h(c.name)} (${money(c.amount)})`)}</strong></div>` : ''}
+                <div style="grid-column: span 2;"><span>선호 카테고리</span><strong>${join(b.top_categories, (c) => `${h(c.name)} (${money(c.amount)})`)}</strong></div>
+                <div style="grid-column: span 2;"><span>선호 브랜드</span><strong>${join(b.top_brands, (c) => h(c.name))}</strong></div>` : ''}
             </div>
+            ${b && b.refills.length ? `
+              <div style="margin-top: 12px;">
+                <span class="list-meta" style="font-weight: 800;">다음 구매 예상 (복용·사용 기간 기준)</span>
+                <div class="inline-actions" style="margin-top: 6px;">
+                  ${b.refills.map((r) => `<span class="badge ${r.due ? 'orange' : 'gray'}" title="마지막 구매 ${h(formatDate(r.last_purchase_at))} · ${r.qty}개 × ${r.supply_days}일">
+                    ${h(r.product_name)} · ${h(r.runout_date)} (${r.days_left >= 0 ? `${r.days_left}일 남음` : `${-r.days_left}일 지남`})
+                  </span>`).join('')}
+                </div>
+              </div>` : ''}
             ${b && b.recent_orders.length ? `
               <details style="margin-top: 10px;">
                 <summary class="muted-link" style="cursor: pointer;">최근 구매 ${b.recent_orders.length}건</summary>
@@ -2210,6 +2254,7 @@
             <div class="report-metric"><span>회원 식별률</span><strong>${pct(t.member_sale_rate)}</strong><small>최근 12개월 결제 중 회원 결제 · 매출 비중 ${pct(t.member_sales_share)}</small></div>
             <div class="report-metric clickable" onclick="filterMembersBy('status', 'AT_RISK')"><span>이탈 위험 · 휴면</span><strong>${t.at_risk.toLocaleString()}명 · ${t.dormant.toLocaleString()}명</strong><small>눌러서 이탈 위험 회원 보기</small></div>
             <div class="report-metric clickable" onclick="filterMembersBy('birthday', '1')"><span>이번 달 생일 · 마케팅 동의</span><strong>${t.birthdays_this_month.toLocaleString()}명 · ${t.marketing_agreed.toLocaleString()}명</strong><small>눌러서 생일 회원 보기</small></div>
+            <div class="report-metric clickable" onclick="filterMembersBy('refill', '1')"><span>재구매 예정</span><strong>${t.refill_due.toLocaleString()}명</strong><small>복용 기간상 곧 떨어지는 상품이 있는 회원</small></div>
           </div>
           <div class="member-dist">
             <div class="chart-box"><h4>등급 (최근 12개월 순구매)</h4>${countBars(data.grades, (k) => L.grades[k], (k) => L.grade_colors[k], 'grade')}</div>
@@ -2232,7 +2277,7 @@
           <div class="table-wrap"><table>
             <thead><tr><th>회원</th><th>등급 · 상태</th><th>최근 구매</th><th class="num">구매 횟수</th><th class="num">12개월 순구매</th><th class="num">1회 평균</th><th class="num">평균 주기</th><th class="num">포인트</th><th>수신</th></tr></thead>
             <tbody>${data.members.map((m) => `<tr class="clickable-row" onclick="openCustomerInfo(${m.id}, '#memberDetail')">
-              <td><strong>${h(m.name)}</strong>${m.birthday_this_month ? ' <span class="badge orange">생일</span>' : ''}<div class="list-meta">${h(m.member_code || '')}</div></td>
+              <td><strong>${h(m.name)}</strong>${m.birthday_this_month ? ' <span class="badge orange">생일</span>' : ''}${m.refill_due.length ? ` <span class="badge blue" title="${h(m.refill_due.map((r) => `${r.product_name} ${r.runout_date}`).join(', '))}">재구매 ${m.refill_due.length}</span>` : ''}<div class="list-meta">${h(m.member_code || '')}</div></td>
               <td>${gradeBadge(m.grade, L)} ${statusBadge(m.status, L)}</td>
               <td>${daysAgoText(m.days_since_last)}</td>
               <td class="num">${m.visit_count.toLocaleString()}</td>
@@ -2317,6 +2362,146 @@
           showToast('등급·혜택 기준을 저장했습니다.');
           $('#memberPolicyForm').hidden = true;
           loadMembers();
+        } catch (error) {
+          showToast(error.message);
+        }
+      }
+
+      /* ---------- 수요 · 함께 산 상품 ---------- */
+
+      const demandState = { statuses: {} };
+
+      function demandTable(head, rows, empty) {
+        return `<div class="table-wrap"><table class="consent-table">
+          <thead><tr>${head.map(([label, num]) => `<th class="${num ? 'num' : ''}">${label}</th>`).join('')}</tr></thead>
+          <tbody>${rows.length ? rows.join('') : `<tr><td colspan="${head.length}">${empty}</td></tr>`}</tbody>
+        </table></div>`;
+      }
+
+      function renderDemand(basket, demand) {
+        demandState.statuses = demand.request_statuses;
+        const openRequests = demand.requests.filter((r) => r.status === 'OPEN').length;
+        const readyRestock = demand.restock.filter((r) => r.available && r.waiting > 0).length;
+        $('#navDemandBadge').hidden = openRequests + readyRestock === 0;
+        $('#navDemandBadge').textContent = openRequests + readyRestock;
+        $('#demandBody').classList.remove('loading');
+        $('#demandBody').innerHTML = `
+          <div class="chart-grid" style="grid-template-columns: 1fr 1fr;">
+            <div class="chart-box">
+              <h4 style="margin: 0 0 4px;">함께 산 상품</h4>
+              <p class="list-meta" style="margin: 0 0 10px;">같은 결제에 함께 담긴 조합 · 2개 이상 담은 결제 ${basket.multi_orders.toLocaleString()}건 / 전체 ${basket.orders.toLocaleString()}건. 진열·묶음 할인·POS 추천에 활용하세요.</p>
+              ${demandTable(
+                [['상품 조합'], ['함께 산 결제', true], ['A 산 사람 중', true], ['B 산 사람 중', true], ['향상도', true]],
+                basket.pairs.map((p) => `<tr>
+                  <td><strong>${h(p.a_name)}</strong> + <strong>${h(p.b_name)}</strong></td>
+                  <td class="num">${p.together.toLocaleString()}건</td>
+                  <td class="num">${p.confidence_ab}%</td>
+                  <td class="num">${p.confidence_ba}%</td>
+                  <td class="num" title="1보다 크면 우연보다 자주 함께 팔림">${p.lift}배</td>
+                </tr>`),
+                '2회 이상 함께 팔린 조합이 아직 없습니다.'
+              )}
+            </div>
+            <div class="chart-box">
+              <h4 style="margin: 0 0 4px;">찾았지만 없던 상품 (결과 없는 검색어)</h4>
+              <p class="list-meta" style="margin: 0 0 10px;">고객 몰 검색과 POS 상품 검색에서 결과가 없던 검색어입니다. 입점 검토 후보로 보세요.</p>
+              ${demandTable(
+                [['검색어'], ['횟수', true], ['고객 몰 · POS', true], ['최근']],
+                demand.searches.map((s) => `<tr>
+                  <td><strong>${h(s.query)}</strong></td>
+                  <td class="num">${s.count.toLocaleString()}</td>
+                  <td class="num">${s.store_count} · ${s.pos_count}</td>
+                  <td>${h(formatDate(s.last_at))}</td>
+                </tr>`),
+                '결과 없는 검색어가 없습니다.'
+              )}
+            </div>
+          </div>
+          <div class="chart-grid" style="grid-template-columns: 1fr 1fr;">
+            <div class="chart-box">
+              <h4 style="margin: 0 0 4px;">입고 알림 신청</h4>
+              <p class="list-meta" style="margin: 0 0 10px;">품절 상품에 고객이 신청한 입고 알림입니다. 입고 후 고객에게 연락하고 '안내 완료'를 눌러 주세요. (문자 자동 발송은 문자 서비스 계약 후 연결)</p>
+              ${demandTable(
+                [['상품'], ['대기', true], ['상태'], ['']],
+                demand.restock.map((r) => `<tr>
+                  <td><strong>${h(r.product_name)}</strong><div class="list-meta">재고 ${Number(r.stock_quantity).toLocaleString()}개${r.notified ? ` · 안내 완료 ${r.notified}명` : ''}</div></td>
+                  <td class="num">${r.waiting.toLocaleString()}명</td>
+                  <td>${r.available ? '<span class="badge green">입고됨</span>' : '<span class="badge red">품절</span>'}</td>
+                  <td>
+                    <button class="muted-link" type="button" onclick="showRestockCustomers(${r.product_id})">신청 고객</button>
+                    ${r.available && r.waiting ? ` · <button class="muted-link" type="button" onclick="markRestockNotified(${r.product_id})">안내 완료</button>` : ''}
+                    <div id="restockCustomers-${r.product_id}" class="list-meta"></div>
+                  </td>
+                </tr>`),
+                '입고 알림 신청이 없습니다.'
+              )}
+            </div>
+            <div class="chart-box">
+              <h4 style="margin: 0 0 4px;">고객 상품 요청 ${openRequests ? `<span class="badge orange">대기 ${openRequests}</span>` : ''}</h4>
+              <p class="list-meta" style="margin: 0 0 10px;">고객이 앱에서 요청한 상품입니다. 처리 상태와 답변은 고객 앱에 그대로 보입니다.</p>
+              ${demandTable(
+                [['요청'], ['처리']],
+                demand.requests.map((r) => `<tr>
+                  <td><strong>${h(r.product_name)}</strong><div class="list-meta">${h(r.customer_name || '탈퇴 회원')} · ${h(formatDate(r.created_at))}${r.memo ? `<br />${h(r.memo)}` : ''}</div></td>
+                  <td>
+                    <div class="inline-actions">
+                      <select id="reqStatus-${r.id}" class="form-control" style="width: auto; padding: 6px 8px;">
+                        ${Object.entries(demand.request_statuses).map(([k, v]) => `<option value="${k}" ${k === r.status ? 'selected' : ''}>${h(v)}</option>`).join('')}
+                      </select>
+                      <input id="reqReply-${r.id}" class="form-control" style="flex: 1; min-width: 120px; padding: 6px 8px;" maxlength="200" placeholder="고객에게 보일 답변 (선택)" value="${h(r.reply || '')}" />
+                      <button class="btn btn-outline btn-sm" type="button" onclick="saveProductRequest(${r.id})">저장</button>
+                    </div>
+                  </td>
+                </tr>`),
+                '고객 상품 요청이 없습니다.'
+              )}
+            </div>
+          </div>`;
+      }
+
+      async function loadDemand() {
+        const days = $('#demandDays').value;
+        try {
+          const [basket, demand] = await Promise.all([api.request(`/reports/basket?days=${days}`), api.request(`/demand/summary?days=${days}`)]);
+          renderDemand(basket, demand);
+        } catch (error) {
+          $('#demandBody').innerHTML = renderEmpty(error.message);
+        }
+      }
+
+      async function showRestockCustomers(productId) {
+        const box = $(`#restockCustomers-${productId}`);
+        if (box.innerHTML) {
+          box.innerHTML = '';
+          return;
+        }
+        try {
+          const { customers } = await api.request(`/demand/restock-alerts/${productId}/customers`);
+          box.innerHTML = customers.map((c) => `${h(c.name)} ${h(c.phone || '')}${c.status === 'NOTIFIED' ? ' (안내 완료)' : ''}`).join('<br />') || '신청 고객이 없습니다.';
+        } catch (error) {
+          showToast(error.message);
+        }
+      }
+
+      async function markRestockNotified(productId) {
+        if (!confirm('입고 알림을 신청한 고객에게 연락했나요?\n대기 중인 신청이 모두 안내 완료로 바뀝니다.')) return;
+        try {
+          const { notified } = await api.request(`/demand/restock-alerts/${productId}/notified`, { method: 'POST' });
+          showToast(`${notified}명을 안내 완료로 표시했습니다.`);
+          loadDemand();
+        } catch (error) {
+          showToast(error.message);
+        }
+      }
+
+      async function saveProductRequest(id) {
+        try {
+          await api.request(`/demand/product-requests/${id}`, {
+            method: 'PATCH',
+            body: { status: $(`#reqStatus-${id}`).value, reply: $(`#reqReply-${id}`).value }
+          });
+          showToast('요청 처리 상태를 저장했습니다.');
+          loadDemand();
         } catch (error) {
           showToast(error.message);
         }
@@ -2579,6 +2764,10 @@
                           <option value="EXEMPT" ${product.tax_type === 'EXEMPT' ? 'selected' : ''}>면세</option>
                         </select>
                       </div>
+                      <div class="inline-actions" style="margin-top: 6px;">
+                        <input id="brand-${product.id}" class="form-control" style="width: 150px; padding: 7px 8px;" maxlength="40" placeholder="브랜드 (선택)" value="${h(product.brand || '')}" />
+                        <input id="supply-${product.id}" class="form-control" style="width: 118px; padding: 7px 8px;" type="number" min="1" max="365" placeholder="복용 기간(일)" title="1개를 다 먹거나 쓰는 데 걸리는 일수" value="${product.supply_days ?? ''}" />
+                      </div>
                     </td>
                     <td>
                       <div class="inline-actions">
@@ -2625,7 +2814,9 @@
               barcode: $(`#barcode-${id}`).value,
               product_type: $(`#type-${id}`).value,
               tax_type: $(`#tax-${id}`).value,
-              cost_price: $(`#cost-${id}`).value
+              cost_price: $(`#cost-${id}`).value,
+              brand: $(`#brand-${id}`).value,
+              supply_days: $(`#supply-${id}`).value
             }
           });
           showToast('상품 정보가 저장되었습니다.');
@@ -3867,6 +4058,7 @@
           const body = serializeForm(event.target);
           if (!body.discount_price) delete body.discount_price;
           if (!body.thumbnail_url) delete body.thumbnail_url;
+          if (!body.supply_days) delete body.supply_days;
           await api.request('/products', { method: 'POST', body });
           event.target.reset();
           event.target.category_name.value = '건강기능식품';

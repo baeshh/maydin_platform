@@ -22,6 +22,7 @@ const purchasingRoutes = require('./routes/purchasing');
 const reportRoutes = require('./routes/reports');
 const customerRoutes = require('./routes/customers');
 const memberRoutes = require('./routes/members');
+const demandRoutes = require('./routes/demand');
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -53,6 +54,7 @@ app.use('/api/purchasing', purchasingRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/members', memberRoutes);
+app.use('/api/demand', demandRoutes);
 
 const nodeModules = path.join(__dirname, '../node_modules');
 const vendorFiles = {

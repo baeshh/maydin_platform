@@ -664,4 +664,55 @@ router.get('/sales.csv', (req, res) => {
   }
 });
 
+// 같은 결제에서 함께 팔린 상품 조합. 신뢰도 A→B = 함께 산 결제 / A가 있는 결제, 향상도 = 우연히 함께 살 확률 대비 배수.
+function basketPairs(pharmacyId, days, minCount) {
+  const params = { pharmacy_id: pharmacyId, window: `-${days} days`, min_count: minCount };
+  const baskets = `
+    SELECT DISTINCT o.id AS order_id, i.product_id
+    FROM orders o JOIN order_items i ON i.order_id = o.id
+    WHERE o.pharmacy_id = @pharmacy_id AND o.final_amount > 0 AND o.order_status != 'CANCELED'
+      AND o.order_type != 'COUNSEL' AND o.created_at >= datetime('now', @window)`;
+  const totals = getOne(
+    `WITH b AS (${baskets})
+     SELECT COUNT(DISTINCT order_id) AS orders,
+            (SELECT COUNT(*) FROM (SELECT order_id FROM b GROUP BY order_id HAVING COUNT(*) >= 2)) AS multi_orders
+     FROM b`,
+    params
+  );
+  const productCounts = new Map(
+    getAll(`WITH b AS (${baskets}) SELECT product_id, COUNT(*) AS orders FROM b GROUP BY product_id`, params).map((r) => [r.product_id, r.orders])
+  );
+  const pairs = getAll(
+    `WITH b AS (${baskets})
+     SELECT x.product_id AS a_id, y.product_id AS b_id, pa.product_name AS a_name, pb.product_name AS b_name, COUNT(*) AS together
+     FROM b x
+     JOIN b y ON y.order_id = x.order_id AND x.product_id < y.product_id
+     JOIN products pa ON pa.id = x.product_id
+     JOIN products pb ON pb.id = y.product_id
+     GROUP BY x.product_id, y.product_id
+     HAVING together >= @min_count
+     ORDER BY together DESC
+     LIMIT 30`,
+    params
+  ).map((row) => {
+    const aCount = productCounts.get(row.a_id);
+    const bCount = productCounts.get(row.b_id);
+    return {
+      ...row,
+      a_orders: aCount,
+      b_orders: bCount,
+      confidence_ab: Math.round((row.together / aCount) * 1000) / 10,
+      confidence_ba: Math.round((row.together / bCount) * 1000) / 10,
+      lift: Math.round(((row.together * totals.orders) / (aCount * bCount)) * 100) / 100
+    };
+  });
+  return { days, orders: totals.orders, multi_orders: totals.multi_orders, pairs };
+}
+
+router.get('/basket', (req, res) => {
+  const days = Math.min(365, Math.max(7, Number.parseInt(req.query.days, 10) || 90));
+  const minCount = Math.min(50, Math.max(1, Number.parseInt(req.query.min, 10) || 2));
+  res.json(basketPairs(req.user.pharmacy_id, days, minCount));
+});
+
 module.exports = router;

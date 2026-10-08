@@ -1739,8 +1739,9 @@
             loadProducts();
             openUnknownBarcode(query);
           } else {
-            toast(`"${query}"에 해당하는 상품이 없습니다.`, 'error');
+            toast(`"${query}"에 해당하는 상품이 없습니다. 찾는 상품 기록에 남겼어요.`, 'error');
             input.select();
+            api.request('/demand/search-miss', { method: 'POST', body: { query } }).catch(() => {});
           }
         } else {
           toast(`${data.products.length}개 상품이 검색되었습니다. 담을 상품을 눌러 주세요.`);

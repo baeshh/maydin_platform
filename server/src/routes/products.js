@@ -30,6 +30,20 @@ function optionalInt(value) {
   return Number.isFinite(number) ? Math.round(number) : null;
 }
 
+function normalizeBrand(value) {
+  const brand = String(value ?? '').trim();
+  if (brand.length > 40) throw new Error('브랜드는 40자 이내로 입력해 주세요.');
+  return brand || null;
+}
+
+// 1회 구매 수량 1개를 다 먹거나 쓰는 데 걸리는 일수. 다음 구매 예상일 계산에 쓴다.
+function normalizeSupplyDays(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const days = Number(value);
+  if (!Number.isInteger(days) || days < 1 || days > 365) throw new Error('복용·사용 기간은 1~365일로 입력해 주세요.');
+  return days;
+}
+
 function assertBarcodeAvailable(pharmacyId, barcode, exceptId = 0) {
   if (!barcode) return;
   const duplicate = getOne(
@@ -37,6 +51,10 @@ function assertBarcodeAvailable(pharmacyId, barcode, exceptId = 0) {
     { pharmacy_id: pharmacyId, barcode, id: exceptId }
   );
   if (duplicate) throw new Error(`이미 "${duplicate.product_name}" 상품에 등록된 바코드입니다.`);
+}
+
+function publicProduct({ cost_price, supplier_id, safety_stock, pos_sale_enabled, ...product }) {
+  return product;
 }
 
 router.get('/public', (req, res) => {
@@ -54,7 +72,7 @@ router.get('/public', (req, res) => {
      ORDER BY p.id DESC`,
     { pharmacy_id: pharmacy.id }
   );
-  res.json({ products });
+  res.json({ products: products.map(publicProduct) });
 });
 
 router.get('/public/:id', (req, res) => {
@@ -67,7 +85,7 @@ router.get('/public/:id', (req, res) => {
     { id: Number(req.params.id) }
   );
   if (!product) return res.status(404).json({ message: '상품을 찾을 수 없습니다.' });
-  res.json({ product });
+  res.json({ product: publicProduct(product) });
 });
 
 router.use(authenticate, requireRole('PHARMACY_OWNER', 'ADMIN'), requirePharmacyScope);
@@ -99,10 +117,14 @@ router.post('/', (req, res) => {
   let barcode;
   let productType;
   let taxType;
+  let brand;
+  let supplyDays;
   try {
     barcode = normalizeBarcode(req.body.barcode);
     productType = normalizeProductType(req.body.product_type);
     taxType = normalizeTaxType(req.body.tax_type);
+    brand = normalizeBrand(req.body.brand);
+    supplyDays = normalizeSupplyDays(req.body.supply_days);
     assertBarcodeAvailable(req.pharmacyId, barcode);
   } catch (error) {
     return res.status(400).json({ message: error.message });
@@ -125,13 +147,17 @@ router.post('/', (req, res) => {
   const result = run(
     `INSERT INTO products (
       pharmacy_id, category_id, product_name, description, price, discount_price,
-      stock_quantity, status, thumbnail_url, barcode, product_type, tax_type, safety_stock, cost_price, pos_sale_enabled
+      stock_quantity, status, thumbnail_url, barcode, product_type, tax_type, safety_stock, cost_price, pos_sale_enabled,
+      brand, supply_days
     ) VALUES (
       @pharmacy_id, @category_id, @product_name, @description, @price, @discount_price,
-      @stock_quantity, @status, @thumbnail_url, @barcode, @product_type, @tax_type, @safety_stock, @cost_price, @pos_sale_enabled
+      @stock_quantity, @status, @thumbnail_url, @barcode, @product_type, @tax_type, @safety_stock, @cost_price, @pos_sale_enabled,
+      @brand, @supply_days
     )`,
     {
       pharmacy_id: req.pharmacyId,
+      brand,
+      supply_days: supplyDays,
       category_id: categoryId,
       product_name,
       description,
@@ -163,10 +189,14 @@ router.patch('/:id', (req, res) => {
   let barcode;
   let productType;
   let taxType;
+  let brand;
+  let supplyDays;
   try {
     barcode = normalizeBarcode(next.barcode);
     productType = normalizeProductType(next.product_type);
     taxType = normalizeTaxType(next.tax_type);
+    brand = normalizeBrand(next.brand);
+    supplyDays = normalizeSupplyDays(next.supply_days);
     assertBarcodeAvailable(req.pharmacyId, barcode, product.id);
   } catch (error) {
     return res.status(400).json({ message: error.message });
@@ -192,11 +222,15 @@ router.patch('/:id', (req, res) => {
          safety_stock = @safety_stock,
          cost_price = @cost_price,
          pos_sale_enabled = @pos_sale_enabled,
+         brand = @brand,
+         supply_days = @supply_days,
          updated_at = CURRENT_TIMESTAMP
      WHERE id = @id AND pharmacy_id = @pharmacy_id`,
     {
       id: product.id,
       pharmacy_id: req.pharmacyId,
+      brand,
+      supply_days: supplyDays,
       product_name: next.product_name,
       description: next.description,
       price: Number(next.price),

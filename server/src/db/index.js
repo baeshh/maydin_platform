@@ -129,6 +129,11 @@ function migrateCustomerData() {
     CREATE INDEX IF NOT EXISTS idx_customers_signup_channel ON customers(signup_channel_id);
     CREATE INDEX IF NOT EXISTS idx_signup_channels_pharmacy ON signup_channels(pharmacy_id, status);
     CREATE INDEX IF NOT EXISTS idx_customer_consents_customer ON customer_consents(customer_id, consent_type, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_search_misses_pharmacy ON search_misses(pharmacy_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_restock_alerts_product ON restock_alerts(product_id, status);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_restock_alerts_waiting
+      ON restock_alerts(customer_id, product_id) WHERE status = 'WAITING';
+    CREATE INDEX IF NOT EXISTS idx_product_requests_pharmacy ON product_requests(pharmacy_id, status, id DESC);
   `);
 
   for (const row of db.prepare('SELECT id FROM customers WHERE referral_code IS NULL').all()) assignReferralCode(row.id);
@@ -206,6 +211,8 @@ function migratePos(schema) {
   addColumnIfMissing('customers', 'referral_code', 'TEXT');
   addColumnIfMissing('customers', 'referred_by_customer_id', 'INTEGER');
   addColumnIfMissing('customers', 'signup_channel_id', 'INTEGER');
+  addColumnIfMissing('products', 'brand', 'TEXT');
+  addColumnIfMissing('products', 'supply_days', 'INTEGER');
   migrateCustomerData();
 
   db.exec(`

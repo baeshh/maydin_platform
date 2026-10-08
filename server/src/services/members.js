@@ -185,7 +185,45 @@ function baseRows(pharmacyId, customerId = null) {
   );
 }
 
-function enrich(row, policy, now = new Date()) {
+// 복용·사용 기간이 있는 상품의 마지막 구매 수량으로 다 떨어지는 날을 계산한다.
+// 예정일 7일 전부터 지난 뒤 30일까지를 재구매 시기로 본다.
+const REFILL_BEFORE_DAYS = 7;
+const REFILL_AFTER_DAYS = 30;
+
+function refillRows(pharmacyId, customerId = null) {
+  const rows = getAll(
+    `WITH lines AS (
+       SELECT o.customer_id, i.product_id, o.created_at,
+              i.quantity - COALESCE(i.refunded_quantity, 0) AS qty,
+              ROW_NUMBER() OVER (PARTITION BY o.customer_id, i.product_id ORDER BY o.created_at DESC, o.id DESC) AS rn
+       FROM order_items i
+       JOIN orders o ON o.id = i.order_id
+       WHERE o.pharmacy_id = @pharmacy_id AND o.customer_id IS NOT NULL ${customerId ? 'AND o.customer_id = @customer_id' : ''}
+         AND o.final_amount > 0 AND o.order_status != 'CANCELED' AND o.order_type != 'COUNSEL'
+         AND o.created_at >= datetime('now', '-365 days')
+     )
+     SELECT l.customer_id, l.product_id, p.product_name, p.supply_days, l.qty, l.created_at AS last_purchase_at,
+            date(l.created_at, 'localtime', '+' || (p.supply_days * l.qty) || ' days') AS runout_date,
+            CAST(julianday(date(l.created_at, 'localtime', '+' || (p.supply_days * l.qty) || ' days')) - julianday(date('now', 'localtime')) AS INTEGER) AS days_left
+     FROM lines l
+     JOIN products p ON p.id = l.product_id
+     WHERE l.rn = 1 AND l.qty > 0 AND p.supply_days > 0
+     ORDER BY runout_date`,
+    { pharmacy_id: pharmacyId, customer_id: customerId }
+  );
+  return rows.map((row) => ({ ...row, due: row.days_left <= REFILL_BEFORE_DAYS && row.days_left >= -REFILL_AFTER_DAYS }));
+}
+
+function refillMap(pharmacyId, customerId = null) {
+  const map = new Map();
+  for (const row of refillRows(pharmacyId, customerId)) {
+    if (!map.has(row.customer_id)) map.set(row.customer_id, []);
+    map.get(row.customer_id).push(row);
+  }
+  return map;
+}
+
+function enrich(row, policy, now = new Date(), refills = []) {
   const nowMs = now.getTime();
   const first = parseUtc(row.first_purchase_at);
   const last = parseUtc(row.last_purchase_at);
@@ -223,18 +261,21 @@ function enrich(row, policy, now = new Date()) {
     days_since_last: daysSinceLast,
     expected_next_at: avgInterval && last ? new Date(last + avgInterval * DAY_MS).toISOString().slice(0, 10) : null,
     birthday_this_month: row.birth_month === now.getMonth() + 1,
-    age_band: ageBand(row.birth_year, now)
+    age_band: ageBand(row.birth_year, now),
+    refill_due: refills.filter((r) => r.due).map(({ product_id, product_name, runout_date, days_left }) => ({ product_id, product_name, runout_date, days_left })),
+    next_refill_date: (refills.find((r) => r.days_left >= -REFILL_AFTER_DAYS) || {}).runout_date || null
   };
 }
 
 function memberList(pharmacyId, policy = memberPolicy(pharmacyId)) {
   const now = new Date();
-  return baseRows(pharmacyId).map((row) => enrich(row, policy, now));
+  const refills = refillMap(pharmacyId);
+  return baseRows(pharmacyId).map((row) => enrich(row, policy, now, refills.get(row.id)));
 }
 
 function memberMetrics(pharmacyId, customerId, policy = memberPolicy(pharmacyId)) {
   const row = baseRows(pharmacyId, customerId)[0];
-  return row ? enrich(row, policy) : null;
+  return row ? enrich(row, policy, new Date(), refillMap(pharmacyId, customerId).get(customerId)) : null;
 }
 
 function filterMembers(members, query) {
@@ -249,6 +290,7 @@ function filterMembers(members, query) {
     if (query.marketing === '1' && !m.marketing_agree) return false;
     if (query.age && m.age_band !== query.age) return false;
     if (query.gender && (m.gender || 'NONE') !== query.gender) return false;
+    if (query.refill === '1' && !m.refill_due.length) return false;
     if (q) {
       const phone = String(m.phone || '').replace(/\D/g, '');
       const hit = m.name.toLowerCase().includes(q) || String(m.member_code || '').toLowerCase().includes(q) || (digits.length >= 4 && phone.includes(digits));
@@ -323,6 +365,7 @@ function memberSummary(pharmacyId) {
       at_risk: members.filter((m) => m.status === 'AT_RISK').length,
       dormant: members.filter((m) => m.status === 'DORMANT').length,
       birthdays_this_month: members.filter((m) => m.birthday_this_month).length,
+      refill_due: members.filter((m) => m.refill_due.length).length,
       marketing_agreed: members.filter((m) => m.marketing_agree).length,
       member_sale_rate: share(store.member_sale_count, store.sale_count),
       member_sales_share: share(store.member_net_amount, store.net_amount),
@@ -386,6 +429,15 @@ function memberBehavior(pharmacyId, customerId) {
      GROUP BY name ORDER BY amount DESC LIMIT 3`,
     params
   );
+  const brands = getAll(
+    `SELECT p.brand AS name, SUM(i.total_price - COALESCE(i.discount_amount, 0) - COALESCE(i.refunded_amount, 0)) AS amount
+     FROM order_items i
+     JOIN orders o ON o.id = i.order_id
+     JOIN products p ON p.id = i.product_id
+     WHERE ${saleWhere} AND p.brand IS NOT NULL
+     GROUP BY p.brand ORDER BY amount DESC LIMIT 3`,
+    params
+  );
   const recent = getAll(
     `SELECT o.id, o.order_number, o.order_type, o.sales_channel, o.final_amount, o.created_at,
             (SELECT GROUP_CONCAT(product_name, ', ') FROM (SELECT product_name FROM order_items WHERE order_id = o.id LIMIT 3)) AS items,
@@ -404,6 +456,8 @@ function memberBehavior(pharmacyId, customerId) {
     payments: payments.map((p) => ({ key: p.payment_method, label: PAYMENT_LABELS[p.payment_method] || p.payment_method, count: p.count })),
     discount_rate: round1((discounted / orders.length) * 100),
     top_categories: categories,
+    top_brands: brands,
+    refills: refillRows(pharmacyId, customerId).filter((r) => r.days_left >= -REFILL_AFTER_DAYS),
     recent_orders: recent
   };
 }
@@ -435,6 +489,7 @@ module.exports = {
   memberMetrics,
   memberSummary,
   memberBehavior,
+  refillRows,
   filterMembers,
   sortMembers,
   labels
