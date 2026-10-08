@@ -6,6 +6,8 @@ const CONSENT_VERSION = '2026-10-08';
 const CONSENT_TYPES = {
   TERMS: { label: '이용약관 동의', required: true },
   PRIVACY: { label: '개인정보 수집·이용 동의', required: true },
+  // 가입할 때는 꼭 받지만 철회는 막지 않는다. 철회하면 건강 정보를 바로 지운다.
+  HEALTH_INFO: { label: '민감정보(알레르기·복용 약) 수집·이용 동의', sensitive: true },
   MARKETING_SMS: { label: '마케팅 문자 수신', marketing: true },
   MARKETING_KAKAO: { label: '마케팅 알림톡 수신', marketing: true },
   MARKETING_NIGHT: { label: '야간(21시~08시) 광고 수신', marketing: true },

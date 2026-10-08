@@ -50,6 +50,10 @@
       .form-grid { display:grid; gap:10px; grid-template-columns:repeat(2, 1fr); margin-top:10px; }
       .form-grid label { color:var(--sub); display:grid; font-size:12px; font-weight:700; gap:4px; }
       .form-grid select, .form-grid input { border:1px solid var(--line); border-radius:10px; font-size:14px; padding:9px 10px; }
+      .health-field { color:var(--sub); display:grid; font-size:12px; font-weight:700; gap:2px; margin-bottom:10px; }
+      .health-field textarea { border:1px solid var(--line); border-radius:10px; font:inherit; font-size:14px; font-weight:400; padding:9px 10px; resize:vertical; width:100%; }
+      .health-field textarea:disabled { background:#f2f4f6; opacity:.6; }
+      .health-field .check-row { font-size:13px; padding:2px 0; }
       .check-row { align-items:flex-start; display:flex; font-size:14px; gap:8px; padding:8px 0; }
       .check-row input { margin-top:3px; }
       .section-title { color:var(--sub); font-size:14px; font-weight:800; margin:8px 2px 0; }
@@ -264,8 +268,91 @@
         return html;
       }
 
-      function settingsCard({ customer, consents }) {
+      function healthForm(health, agreed) {
+        const field = (name, label, value, placeholder) => `
+          <div class="health-field">
+            ${label}
+            <label class="check-row"><input type="checkbox" name="${name}_none" ${health && !value ? 'checked' : ''} onchange="this.form.${name}.disabled = this.checked" /> <span>없음</span></label>
+            <textarea name="${name}" maxlength="300" rows="2" placeholder="${placeholder}" ${health && !value ? 'disabled' : ''}>${esc(value || '')}</textarea>
+          </div>`;
+        return `
+          <form id="healthForm" onsubmit="saveHealth(event)" style="margin-top:18px; border-top:1px solid var(--line); padding-top:12px;">
+            <strong style="font-size:14px;">건강 정보 (약사 상담용)</strong>
+            <p class="muted" style="margin:4px 0 8px;">약사가 함께 먹으면 안 되는 약을 확인할 때만 써요. 암호화해 보관하고 약사만 볼 수 있어요.</p>
+            ${field('allergy', '알레르기', health?.allergy, '예: 페니실린, 조개류')}
+            ${field('medications', '지금 복용 중인 약', health?.medications, '예: 혈압약')}
+            ${agreed ? '' : `<label class="check-row"><input type="checkbox" name="consent" required /> <span>[필수] 민감정보(알레르기·복용 약) 수집·이용에 동의합니다. 동의 철회 시 즉시 삭제됩니다.</span></label>`}
+            <div style="display:flex; gap:8px; margin-top:10px;">
+              <button class="small-btn primary" type="submit">건강 정보 저장</button>
+              ${agreed ? '<button class="small-btn" type="button" onclick="withdrawHealth()">동의 철회 · 삭제</button>' : ''}
+            </div>
+          </form>`;
+      }
+
+      function pinForm() {
+        return `
+          <form id="pinForm" onsubmit="changePin(event)" style="margin-top:18px; border-top:1px solid var(--line); padding-top:12px;">
+            <strong style="font-size:14px;">로그인 PIN 변경</strong>
+            <div class="form-grid" style="margin-top:8px;">
+              <label>지금 PIN<input name="current_pin" type="password" inputmode="numeric" maxlength="6" autocomplete="current-password" required /></label>
+              <label>새 PIN<input name="pin" type="password" inputmode="numeric" maxlength="6" autocomplete="new-password" required /></label>
+            </div>
+            <p class="muted" style="margin-top:6px;">같은 숫자·연속 숫자·생년월일·휴대폰 번호는 쓸 수 없어요.</p>
+            <button class="small-btn primary" type="submit" style="margin-top:10px;">PIN 변경</button>
+          </form>`;
+      }
+
+      async function saveHealth(event) {
+        event.preventDefault();
+        const f = event.target;
+        try {
+          const data = await api.request('/customers/me/health', {
+            method: 'PUT',
+            body: {
+              allergy: f.allergy.value,
+              allergy_none: f.allergy_none.checked,
+              medications: f.medications.value,
+              medications_none: f.medications_none.checked,
+              consent: f.consent ? f.consent.checked : undefined
+            }
+          });
+          my.data.health = data.health;
+          my.data.consents = data.consents;
+          renderMyInfo();
+          toast('건강 정보를 저장했어요.');
+        } catch (error) {
+          toast(error.message);
+        }
+      }
+
+      async function withdrawHealth() {
+        if (!confirm('민감정보 수집 동의를 철회할까요? 저장된 알레르기·복용 약 정보가 바로 삭제됩니다.')) return;
+        try {
+          const data = await api.request('/customers/me/health', { method: 'DELETE' });
+          my.data.health = null;
+          my.data.consents = data.consents;
+          renderMyInfo();
+          toast('동의를 철회하고 건강 정보를 삭제했어요.');
+        } catch (error) {
+          toast(error.message);
+        }
+      }
+
+      async function changePin(event) {
+        event.preventDefault();
+        const f = event.target;
+        try {
+          await api.request('/customers/me/pin', { method: 'POST', body: { current_pin: f.current_pin.value, pin: f.pin.value } });
+          f.reset();
+          toast('PIN을 바꿨어요. 다음 로그인부터 새 PIN을 써 주세요.');
+        } catch (error) {
+          toast(error.message);
+        }
+      }
+
+      function settingsCard({ customer, consents, health }) {
         const birthdayLocked = customer.birth_month != null;
+        const yearLocked = customer.birth_year != null;
         const year = new Date().getFullYear();
         const required = ['TERMS', 'PRIVACY'];
         const missingRequired = required.filter((t) => !consents[t].agreed);
@@ -277,14 +364,14 @@
                 <div class="form-grid">
                   <label>생일(월)<select name="birth_month" ${birthdayLocked ? 'disabled' : ''}>${options(1, 12, customer.birth_month, '월')}</select></label>
                   <label>생일(일)<select name="birth_day" ${birthdayLocked ? 'disabled' : ''}>${options(1, 31, customer.birth_day, '일')}</select></label>
-                  <label>출생연도<select name="birth_year">${options(year, 1920, customer.birth_year, '년')}</select></label>
+                  <label>출생연도<select name="birth_year" ${yearLocked ? 'disabled' : ''}>${options(year, 1920, customer.birth_year, '년')}</select></label>
                   <label>성별<select name="gender">
-                    <option value="">선택 안 함</option>
+                    ${customer.gender ? '' : '<option value="">선택 안 함</option>'}
                     <option value="F" ${customer.gender === 'F' ? 'selected' : ''}>여성</option>
                     <option value="M" ${customer.gender === 'M' ? 'selected' : ''}>남성</option>
                   </select></label>
                 </div>
-                <p class="muted" style="margin-top:8px;">${birthdayLocked ? '등록한 생일은 약국에서만 바꿀 수 있어요.' : '선택 정보예요. 생일 혜택과 맞춤 안내에만 씁니다.'}</p>
+                <p class="muted" style="margin-top:8px;">${birthdayLocked || yearLocked ? '등록한 생년월일은 약국에서만 바꿀 수 있어요.' : '생일 혜택과 맞춤 안내에만 씁니다.'}</p>
                 <button class="small-btn primary" type="submit" style="margin-top:10px;">정보 저장</button>
               </form>
               <form id="consentForm" onsubmit="saveConsents(event)" style="margin-top:18px; border-top:1px solid var(--line); padding-top:12px;">
@@ -297,6 +384,8 @@
                 <p class="muted">할인·이벤트·재구매 안내를 받아요. 언제든 끌 수 있고, 꺼도 멤버십 이용에는 영향이 없어요.${missingRequired.length ? '' : ' 이용약관·개인정보 동의는 완료되어 있어요.'}</p>
                 <button class="small-btn primary" type="submit" style="margin-top:10px;">수신 설정 저장</button>
               </form>
+              ${healthForm(health, consents.HEALTH_INFO?.agreed)}
+              ${pinForm()}
             </details>
           </article>`;
       }
@@ -424,7 +513,8 @@
       async function saveProfile(event) {
         event.preventDefault();
         const form = event.target;
-        const body = { birth_year: form.birth_year.value || null, gender: form.gender.value || null };
+        const body = { gender: form.gender.value || null };
+        if (!form.birth_year.disabled) body.birth_year = form.birth_year.value || null;
         if (!form.birth_month.disabled) {
           body.birth_month = form.birth_month.value || null;
           body.birth_day = form.birth_day.value || null;

@@ -62,13 +62,13 @@ router.get('/pharmacy', (req, res) => {
 
 router.get('/customers', (req, res) => {
   const customers = getAll(
-    `SELECT c.*,
+    `SELECT c.id, c.name, c.phone, c.email, c.member_code, c.point_balance, c.created_at,
       COALESCE(SUM(o.final_amount), 0) AS total_purchase_amount,
       MAX(o.created_at) AS last_order_at,
       COUNT(CASE WHEN o.order_type != 'POS_REFUND' THEN o.id END) AS order_count
      FROM customers c
      LEFT JOIN orders o ON o.customer_id = c.id
-     WHERE c.pharmacy_id = @pharmacy_id
+     WHERE c.pharmacy_id = @pharmacy_id AND c.approval_status = 'APPROVED'
      GROUP BY c.id
      ORDER BY c.id DESC`,
     { pharmacy_id: req.pharmacyId }

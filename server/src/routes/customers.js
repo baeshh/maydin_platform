@@ -18,6 +18,8 @@ const {
 const { customerMembership } = require('../services/members');
 const { RELATIONS, familyView, addFamily, updateFamily, removeFamily } = require('../services/family');
 const { pointPolicy } = require('../services/points');
+const auth = require('../services/member-auth');
+const bcrypt = require('bcryptjs');
 
 const router = express.Router();
 router.use(authenticate);
@@ -40,6 +42,9 @@ function profileOf(customerId) {
   const customer = getOne(
     `SELECT c.id, c.pharmacy_id, c.name, c.phone, c.member_code, c.referral_code, c.point_balance, c.created_at,
             c.birth_year, c.birth_month, c.birth_day, c.gender, c.referred_by_customer_id,
+            c.approval_status, c.approval_note, c.approved_at, c.signup_order_id,
+            c.pin_hash IS NOT NULL AS pin_set, c.pin_failed_count, c.pin_locked_until,
+            c.health_info IS NOT NULL AS has_health, c.health_updated_at,
             ch.name AS signup_channel_name, ch.channel_type AS signup_channel_type,
             r.name AS referrer_name,
             (SELECT COUNT(*) FROM customers x WHERE x.referred_by_customer_id = c.id) AS referred_count
@@ -78,7 +83,11 @@ function updateProfile(customer, body) {
 function myCustomer(req) {
   const row = getOne('SELECT id FROM customers WHERE user_id = @user_id', { user_id: req.user.id });
   if (!row) throw new CustomerError('고객 정보를 찾을 수 없습니다.', 404);
-  return profileOf(row.id);
+  const customer = profileOf(row.id);
+  delete customer.approval_note;
+  delete customer.pin_failed_count;
+  delete customer.pin_locked_until;
+  return customer;
 }
 
 router.get('/me', requireRole('CUSTOMER'), (req, res) => {
@@ -87,6 +96,7 @@ router.get('/me', requireRole('CUSTOMER'), (req, res) => {
     const pharmacy = getOne('SELECT pharmacy_code, pharmacy_name FROM pharmacies WHERE id = @id', { id: customer.pharmacy_id });
     return res.json({
       customer,
+      health: auth.readHealth(customer.id),
       consents: currentConsents(customer.id),
       membership: customerMembership(customer.pharmacy_id, customer.id),
       point_enabled: pointPolicy(customer.pharmacy_id).enabled,
@@ -98,14 +108,15 @@ router.get('/me', requireRole('CUSTOMER'), (req, res) => {
   }
 });
 
-// 생일 달 적립 배수가 있어서, 한 번 등록한 생일은 고객이 직접 바꾸지 못하게 한다.
+// 생일 달 적립 배수와 만 14세 확인 때문에, 한 번 등록한 생년월일은 고객이 직접 바꾸지 못하게 한다.
 router.patch('/me/profile', requireRole('CUSTOMER'), (req, res) => {
   try {
     const customer = myCustomer(req);
-    const changesBirthday = ['birth_month', 'birth_day'].some(
+    const changesBirthday = ['birth_year', 'birth_month', 'birth_day'].some(
       (key) => key in req.body && customer[key] != null && Number(req.body[key]) !== customer[key]
     );
-    if (changesBirthday) throw new CustomerError('생일은 한 번 등록하면 앱에서 바꿀 수 없어요. 약국에 문의해 주세요.');
+    if (changesBirthday) throw new CustomerError('생년월일은 한 번 등록하면 앱에서 바꿀 수 없어요. 약국에 문의해 주세요.');
+    if ('gender' in req.body && !req.body.gender && customer.gender) throw new CustomerError('성별은 비워 둘 수 없어요.');
     updateProfile(customer, req.body);
     return res.json({ customer: profileOf(customer.id) });
   } catch (error) {
@@ -121,8 +132,66 @@ router.patch('/me/consents', requireRole('CUSTOMER'), (req, res) => {
     if (Object.entries(changes).some(([type, agreed]) => CONSENT_TYPES[type].required && !agreed)) {
       throw new CustomerError('필수 동의를 철회하려면 회원 탈퇴가 필요합니다. 약국에 문의해 주세요.');
     }
-    transaction(() => recordConsents({ pharmacyId: customer.pharmacy_id, customerId: customer.id, changes, source: 'APP', userId: req.user.id }))();
+    transaction(() => {
+      recordConsents({ pharmacyId: customer.pharmacy_id, customerId: customer.id, changes, source: 'APP', userId: req.user.id });
+      if (changes.HEALTH_INFO === false) auth.clearHealth(customer.id);
+    })();
     return res.json({ consents: currentConsents(customer.id) });
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
+// 알레르기·복용 약은 민감정보라 동의가 있어야 저장한다. 이 기능 전에 가입한 회원은 여기서 처음 동의할 수 있다.
+router.put('/me/health', requireRole('CUSTOMER'), (req, res) => {
+  try {
+    const customer = myCustomer(req);
+    const agreed = currentConsents(customer.id).HEALTH_INFO.agreed;
+    if (!agreed && req.body.consent !== true) throw new CustomerError('민감정보(알레르기·복용 약) 수집·이용에 동의해 주세요.');
+    const health = auth.normalizeHealth(req.body);
+    transaction(() => {
+      if (!agreed) {
+        recordConsents({ pharmacyId: customer.pharmacy_id, customerId: customer.id, changes: { HEALTH_INFO: true }, source: 'APP', userId: req.user.id });
+      }
+      auth.saveHealth(customer.id, health);
+    })();
+    return res.json({ health: auth.readHealth(customer.id), consents: currentConsents(customer.id) });
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
+router.delete('/me/health', requireRole('CUSTOMER'), (req, res) => {
+  try {
+    const customer = myCustomer(req);
+    transaction(() => {
+      recordConsents({ pharmacyId: customer.pharmacy_id, customerId: customer.id, changes: { HEALTH_INFO: false }, source: 'APP', userId: req.user.id });
+      auth.clearHealth(customer.id);
+    })();
+    return res.json({ health: null, consents: currentConsents(customer.id) });
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
+router.post('/me/pin', requireRole('CUSTOMER'), (req, res) => {
+  try {
+    const row = getOne('SELECT * FROM customers WHERE user_id = @user_id', { user_id: req.user.id });
+    if (!row) throw new CustomerError('고객 정보를 찾을 수 없습니다.', 404);
+    const lock = auth.pinLock(row);
+    if (lock) throw new CustomerError(lock.message, 423);
+    if (!row.pin_hash || !bcrypt.compareSync(String(req.body.current_pin || ''), row.pin_hash)) {
+      const after = auth.recordPinFailure(row.id);
+      const nextLock = auth.pinLock(after);
+      throw new CustomerError(nextLock ? nextLock.message : '지금 쓰는 PIN이 맞지 않습니다.', nextLock ? 423 : 400);
+    }
+    const pin = auth.validatePin(req.body.pin, {
+      birth: { year: row.birth_year, month: row.birth_month, day: row.birth_day },
+      phone: row.phone
+    });
+    if (bcrypt.compareSync(pin, row.pin_hash)) throw new CustomerError('지금과 다른 PIN으로 정해 주세요.');
+    auth.setPin(row.id, pin);
+    return res.json({ ok: true });
   } catch (error) {
     return fail(res, error);
   }
@@ -219,6 +288,67 @@ router.get('/consent-renewals', (req, res) => {
   res.json({ renewals: [...byCustomer.values()], labels: labels() });
 });
 
+router.get('/signup-requests', (req, res) => {
+  res.json({ requests: auth.signupRequests(req.user.pharmacy_id), labels: labels() });
+});
+
+router.post('/:id/approve', (req, res) => {
+  try {
+    const customer = pharmacyCustomer(req);
+    const result = transaction(() => {
+      const approval = auth.approveCustomer({ customerId: customer.id, userId: req.user.id });
+      audit(req, 'SIGNUP_APPROVE', customer.id, `가입 승인 · ${customer.name}${approval.points ? ` · 인증 구매 적립 ${approval.points}P` : ''}`);
+      return approval;
+    })();
+    return res.json({ ...result, requests: auth.signupRequests(req.user.pharmacy_id) });
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
+router.post('/:id/reject', (req, res) => {
+  try {
+    const customer = pharmacyCustomer(req);
+    const reason = String(req.body.reason || '').trim().slice(0, 200);
+    if (!reason) throw new CustomerError('거절 사유를 적어 주세요.');
+    transaction(() => {
+      auth.rejectCustomer({ customerId: customer.id, userId: req.user.id, reason });
+      audit(req, 'SIGNUP_REJECT', customer.id, `가입 거절 · ${customer.name} · 사유: ${reason}`);
+    })();
+    return res.json({ requests: auth.signupRequests(req.user.pharmacy_id) });
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
+// 본인 확인(방문·전화)을 한 뒤에만 발급한다. 코드는 24시간 동안 한 번 쓸 수 있다.
+router.post('/:id/pin-reset-code', (req, res) => {
+  try {
+    const customer = pharmacyCustomer(req);
+    if (customer.approval_status !== 'APPROVED') throw new CustomerError('승인된 회원에게만 PIN 코드를 발급할 수 있습니다.');
+    const issued = transaction(() => {
+      const code = auth.issueCode({ pharmacyId: customer.pharmacy_id, purpose: 'PIN_RESET', customerId: customer.id, userId: req.user.id });
+      audit(req, 'PIN_RESET_CODE', customer.id, `PIN ${customer.pin_set ? '재설정' : '설정'} 코드 발급 · ${customer.name}`);
+      return code;
+    })();
+    return res.status(201).json(issued);
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
+// 민감정보라 누가 언제 봤는지 남긴다.
+router.get('/:id/health', (req, res) => {
+  try {
+    const customer = pharmacyCustomer(req);
+    const health = auth.readHealth(customer.id);
+    audit(req, 'HEALTH_VIEW', customer.id, `건강 정보 열람 · ${customer.name}`);
+    return res.json({ health });
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
 router.get('/:id', (req, res) => {
   try {
     const customer = pharmacyCustomer(req);
@@ -313,6 +443,7 @@ router.post('/:id/consents/withdraw', (req, res) => {
     }
     const written = transaction(() => {
       const result = recordConsents({ pharmacyId: customer.pharmacy_id, customerId: customer.id, changes, source: 'PARTNER', userId: req.user.id });
+      if (changes.HEALTH_INFO === false) auth.clearHealth(customer.id);
       if (result.length) {
         audit(req, 'CONSENT_WITHDRAW', customer.id, `동의 철회 대행 · ${customer.name} · ${result.map((type) => CONSENT_TYPES[type].label).join(', ')}`);
       }

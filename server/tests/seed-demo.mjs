@@ -1,6 +1,6 @@
 // 화면 확인용 임시 DB에 회원·구매 샘플을 넣는다. 사용: DB_PATH=/tmp/x.db BASE=http://127.0.0.1:3011 node tests/seed-demo.mjs
 import { createRequire } from 'node:module';
-import { api } from './lib.mjs';
+import { api, signupMember } from './lib.mjs';
 
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
@@ -27,15 +27,15 @@ function order(customerId, daysAgo) {
 }
 
 for (const [i, name] of names.entries()) {
-  const res = await api('/auth/customer/signup', {
-    method: 'POST',
-    body: {
-      pharmacyCode: 'A001',
-      name,
-      phone: `0109${String(1000000 + i * 7919).slice(-7)}`,
-      consents: { TERMS: true, PRIVACY: true, MARKETING_SMS: i % 3 !== 0 },
-      ...(i % 2 ? { birth_month: (i % 12) + 1, birth_day: 10, birth_year: 1950 + i * 3, gender: i % 4 === 1 ? 'F' : 'M' } : {})
-    }
+  const res = await signupMember(db, {
+    name,
+    phone: `0109${String(1000000 + i * 7919).slice(-7)}`,
+    consents: { TERMS: true, PRIVACY: true, HEALTH_INFO: true, MARKETING_SMS: i % 3 !== 0 },
+    birth_month: (i % 12) + 1,
+    birth_day: 10,
+    birth_year: 1950 + i * 3,
+    gender: i % 4 === 1 ? 'F' : 'M',
+    ...(i % 4 === 0 ? { allergy_none: false, allergy: '페니실린', medications_none: false, medications: '혈압약(암로디핀)' } : {})
   });
   const { customer } = (await api('/customers/me', { token: res.data.token })).data;
   const visits = i % 5 === 4 ? 0 : 1 + (i % 7);

@@ -181,7 +181,7 @@ function baseRows(pharmacyId, customerId = null) {
      LEFT JOIN sales ON sales.customer_id = c.id
      LEFT JOIN consents ON consents.customer_id = c.id
      LEFT JOIN signup_channels ch ON ch.id = c.signup_channel_id
-     WHERE c.pharmacy_id = @pharmacy_id ${customerId ? 'AND c.id = @customer_id' : ''}
+     WHERE c.pharmacy_id = @pharmacy_id AND c.approval_status = 'APPROVED' ${customerId ? 'AND c.id = @customer_id' : ''}
      ORDER BY c.id`,
     { pharmacy_id: pharmacyId, customer_id: customerId }
   );
@@ -508,6 +508,7 @@ function earningContext(pharmacyId, customerId, { excludeOrderId = null, now = n
 }
 
 // 추천받아 가입한 회원이 매장에서 처음 구매하면 추천한 회원과 새 회원에게 한 번씩만 보상한다.
+// 가입 인증에 쓴 구매(비회원일 때 산 것)는 첫 구매로 치지 않는다. 소액 구매로 코드만 받아 보상을 노리는 가입을 막기 위해서다.
 function grantReferralReward({ pharmacyId, customerId, orderId, userId }) {
   const reward = memberPolicy(pharmacyId).referral_reward;
   if (!pointPolicy(pharmacyId).enabled || reward <= 0) return null;
@@ -521,7 +522,8 @@ function grantReferralReward({ pharmacyId, customerId, orderId, userId }) {
   if (!customer) return null;
   const earlier = getOne(
     `SELECT COUNT(*) AS count FROM orders
-     WHERE customer_id = @id AND pharmacy_id = @pharmacy_id AND order_type = 'POS_SALE' AND order_status != 'CANCELED' AND id != @order_id`,
+     WHERE customer_id = @id AND pharmacy_id = @pharmacy_id AND order_type = 'POS_SALE' AND order_status != 'CANCELED' AND id != @order_id
+       AND id != COALESCE((SELECT signup_order_id FROM customers WHERE id = @id), 0)`,
     { id: customerId, pharmacy_id: pharmacyId, order_id: orderId }
   ).count;
   if (earlier > 0) return null;

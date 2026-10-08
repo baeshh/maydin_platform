@@ -259,6 +259,116 @@
         padding-left: 26px;
       }
 
+      textarea.form-control {
+        height: 84px;
+        line-height: 1.5;
+        padding: 14px 18px;
+        resize: vertical;
+      }
+
+      textarea.form-control:disabled {
+        background-color: rgba(0, 0, 0, 0.03);
+        opacity: 0.5;
+      }
+
+      .section-title {
+        color: var(--text-main);
+        font-size: 15px;
+        font-weight: 800;
+        margin: 28px 0 12px;
+        padding-left: 4px;
+      }
+
+      .section-title:first-child {
+        margin-top: 0;
+      }
+
+      .field-hint {
+        color: var(--text-muted);
+        font-size: 12px;
+        line-height: 1.5;
+        margin-top: 6px;
+        padding-left: 4px;
+      }
+
+      .code-row {
+        display: grid;
+        gap: 8px;
+        grid-template-columns: 1fr auto;
+      }
+
+      .code-row .form-control {
+        font-weight: 800;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+      }
+
+      .btn-inline {
+        background: #e8f0ff;
+        border: none;
+        border-radius: 16px;
+        color: var(--toss-blue);
+        cursor: pointer;
+        font-size: 15px;
+        font-weight: 800;
+        padding: 0 18px;
+      }
+
+      .code-status {
+        font-size: 13px;
+        font-weight: 700;
+        margin-top: 8px;
+        min-height: 18px;
+        padding-left: 4px;
+      }
+
+      .code-status.ok {
+        color: #0a8f4c;
+      }
+
+      .code-status.error {
+        color: #d92d20;
+      }
+
+      .none-check {
+        align-items: center;
+        color: var(--text-sub);
+        display: inline-flex;
+        font-size: 13px;
+        font-weight: 700;
+        gap: 6px;
+        margin-bottom: 8px;
+        padding-left: 4px;
+      }
+
+      .none-check input {
+        accent-color: var(--toss-blue);
+        height: 16px;
+        width: 16px;
+      }
+
+      .sensitive {
+        border-top: 1px solid rgba(0, 0, 0, 0.06);
+        padding-top: 10px;
+      }
+
+      .pending-box {
+        text-align: center;
+      }
+
+      .pending-box h2 {
+        font-size: 22px;
+        margin-bottom: 12px;
+      }
+
+      .pending-box p {
+        color: var(--text-sub);
+        font-size: 15px;
+        line-height: 1.6;
+        margin-bottom: 20px;
+        word-break: keep-all;
+      }
+
       @media (max-width: 360px) {
         body {
           padding: 14px;
@@ -290,40 +400,78 @@
 
       <main>
         <form id="signupForm">
+          <h2 class="section-title">구매 인증</h2>
+          <div class="form-group">
+            <label class="form-label" for="signupCode">영수증 가입 코드</label>
+            <div class="code-row">
+              <input id="signupCode" name="code" class="form-control" placeholder="XXXX-XXXX" maxlength="9" autocomplete="off" autocapitalize="characters" required />
+              <button class="btn-inline" type="button" onclick="verifyCode()">확인</button>
+            </div>
+            <div id="codeStatus" class="code-status"></div>
+            <p class="field-hint">이 약국에서 구매한 영수증 아래쪽에 있는 8자리 코드예요. 구매 후 7일 동안 한 번만 쓸 수 있고, 영수증을 잃어버렸다면 약국에 다시 발급을 요청해 주세요.</p>
+          </div>
+
+          <h2 class="section-title">기본 정보</h2>
           <div class="form-group">
             <label class="form-label">이름</label>
-            <input name="name" type="text" class="form-control" placeholder="홍길동" autocomplete="name" required />
+            <input name="name" type="text" class="form-control" placeholder="홍길동" autocomplete="name" maxlength="30" required />
           </div>
           <div class="form-group">
             <label class="form-label">휴대폰 번호</label>
             <input name="phone" type="tel" class="form-control" placeholder="010-0000-0000" autocomplete="tel" required />
           </div>
+          <div class="form-group">
+            <label class="form-label">생년월일</label>
+            <div class="row-2" style="grid-template-columns: 1.3fr 1fr 1fr;">
+              <select name="birth_year" class="form-control" required><option value="">년</option></select>
+              <select name="birth_month" class="form-control" required><option value="">월</option></select>
+              <select name="birth_day" class="form-control" required><option value="">일</option></select>
+            </div>
+            <p class="field-hint">만 14세 이상만 가입할 수 있어요. 생년월일은 가입 후 약국에서만 바꿀 수 있어요.</p>
+          </div>
+          <div class="form-group">
+            <label class="form-label">성별</label>
+            <select name="gender" class="form-control" required>
+              <option value="">선택해 주세요</option>
+              <option value="F">여성</option>
+              <option value="M">남성</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">주소</label>
+            <input name="address" class="form-control" placeholder="도로명 주소" autocomplete="street-address" maxlength="200" required />
+            <input name="address_detail" class="form-control" placeholder="상세 주소 (동·호수)" maxlength="100" style="margin-top: 8px;" />
+          </div>
+
+          <h2 class="section-title">건강 정보</h2>
+          <div class="form-group">
+            <label class="form-label">알레르기</label>
+            <label class="none-check"><input type="checkbox" name="allergy_none" data-none="allergy" /> 없음</label>
+            <textarea name="allergy" class="form-control" maxlength="300" placeholder="예: 페니실린, 아스피린, 조개류"></textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label">지금 복용 중인 약</label>
+            <label class="none-check"><input type="checkbox" name="medications_none" data-none="medications" /> 없음</label>
+            <textarea name="medications" class="form-control" maxlength="300" placeholder="예: 혈압약(암로디핀), 당뇨약"></textarea>
+            <p class="field-hint">약사가 함께 먹으면 안 되는 약이나 성분을 미리 확인하는 데에만 써요. 암호화해 보관하고 약사만 볼 수 있어요.</p>
+          </div>
+
+          <h2 class="section-title">로그인 PIN</h2>
+          <div class="row-2">
+            <div class="form-group">
+              <label class="form-label">PIN 6자리</label>
+              <input name="pin" type="password" inputmode="numeric" pattern="\d{6}" maxlength="6" class="form-control" autocomplete="new-password" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label">PIN 확인</label>
+              <input name="pin_confirm" type="password" inputmode="numeric" pattern="\d{6}" maxlength="6" class="form-control" autocomplete="new-password" required />
+            </div>
+          </div>
+          <p class="field-hint" style="margin: -12px 0 20px;">같은 숫자·연속 숫자·생년월일·휴대폰 번호는 쓸 수 없어요. 5번 틀리면 30분 동안 잠겨요.</p>
 
           <details class="optional-box">
-            <summary>추가 정보 (선택) · 생일 혜택을 받을 수 있어요</summary>
-            <div class="form-group">
-              <label class="form-label">생일</label>
-              <div class="row-2">
-                <select name="birth_month" class="form-control"><option value="">월</option></select>
-                <select name="birth_day" class="form-control"><option value="">일</option></select>
-              </div>
-            </div>
-            <div class="row-2">
-              <div class="form-group">
-                <label class="form-label">출생연도</label>
-                <select name="birth_year" class="form-control"><option value="">선택 안 함</option></select>
-              </div>
-              <div class="form-group">
-                <label class="form-label">성별</label>
-                <select name="gender" class="form-control">
-                  <option value="">선택 안 함</option>
-                  <option value="F">여성</option>
-                  <option value="M">남성</option>
-                </select>
-              </div>
-            </div>
+            <summary>추천인 코드 (선택)</summary>
             <div class="form-group" style="margin-bottom: 0;">
-              <label class="form-label">추천인 코드</label>
               <input name="referral_code" class="form-control" placeholder="친구에게 받은 코드 6자리" maxlength="6" autocapitalize="characters" />
             </div>
           </details>
@@ -333,9 +481,17 @@
             <label><input type="checkbox" name="TERMS" data-consent required /> <b>[필수]</b> 이용약관 동의</label>
             <label><input type="checkbox" name="PRIVACY" data-consent required /> <b>[필수]</b> 개인정보 수집·이용 동의</label>
             <p class="consent-note">
-              수집 항목: 이름, 휴대폰 번호, 구매 내역, (선택) 생일·출생연도·성별 · 이용 목적: 회원 식별, 주문·포인트 관리, 구매 통계 ·
+              수집 항목: 이름, 휴대폰 번호, 생년월일, 성별, 주소, 구매 내역 · 이용 목적: 회원 식별, 구매 인증, 주문·포인트 관리, 구매 통계 ·
               보유 기간: 회원 탈퇴 시까지 (법령상 보관 의무가 있는 거래 기록은 해당 기간까지)
             </p>
+            <div class="sensitive">
+              <label><input type="checkbox" name="HEALTH_INFO" data-consent required /> <b>[필수]</b> 민감정보(건강 정보) 수집·이용 동의</label>
+              <p class="consent-note">
+                수집 항목: 알레르기, 복용 중인 약 · 이용 목적: 복약 상담, 구매 시 함께 먹으면 안 되는 약 안내 ·
+                보유 기간: 동의 철회 또는 회원 탈퇴 시 즉시 파기 · 동의를 거부할 수 있으나, 거부하면 회원 가입을 할 수 없습니다.
+                가입 후에도 내 정보에서 언제든 철회할 수 있습니다.
+              </p>
+            </div>
             <label><input type="checkbox" name="MARKETING_SMS" data-consent data-marketing /> [선택] 혜택·이벤트 문자 수신</label>
             <label><input type="checkbox" name="MARKETING_KAKAO" data-consent data-marketing /> [선택] 혜택·이벤트 알림톡 수신</label>
             <label><input type="checkbox" name="MARKETING_NIGHT" data-consent /> [선택] 야간(21시~08시) 혜택 알림 수신</label>
@@ -343,6 +499,11 @@
           </div>
           <button class="btn-submit" type="submit">가입하고 시작하기</button>
         </form>
+        <div id="pendingBox" class="pending-box" hidden>
+          <h2>가입 신청이 접수됐어요</h2>
+          <p id="pendingMessage"></p>
+          <a class="btn-submit" id="pendingLogin" href="#" style="display: inline-flex; align-items: center; justify-content: center; text-decoration: none;">로그인 화면으로</a>
+        </div>
         <p id="message" class="message"></p>
       </main>
 
@@ -363,11 +524,55 @@
       const thisYear = new Date().getFullYear();
       fillOptions(form.birth_month, Array.from({ length: 12 }, (_, i) => i + 1), (v) => `${v}월`);
       fillOptions(form.birth_day, Array.from({ length: 31 }, (_, i) => i + 1), (v) => `${v}일`);
-      fillOptions(form.birth_year, Array.from({ length: thisYear - 1919 }, (_, i) => thisYear - i), (v) => `${v}년`);
+      fillOptions(form.birth_year, Array.from({ length: thisYear - 14 - 1919 }, (_, i) => thisYear - 14 - i), (v) => `${v}년`);
       if (params.get('ref')) {
         form.referral_code.value = params.get('ref').toUpperCase().slice(0, 6);
         form.querySelector('.optional-box').open = true;
       }
+
+      const normalizeCode = (value) => value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+      const formatCode = (value) => (value.length > 4 ? `${value.slice(0, 4)}-${value.slice(4)}` : value);
+      form.code.addEventListener('input', () => {
+        form.code.value = formatCode(normalizeCode(form.code.value));
+        $('#codeStatus').textContent = '';
+        $('#codeStatus').className = 'code-status';
+      });
+
+      async function verifyCode() {
+        const status = $('#codeStatus');
+        const code = normalizeCode(form.code.value);
+        if (code.length !== 8) {
+          status.className = 'code-status error';
+          status.textContent = '영수증의 8자리 코드를 입력해 주세요.';
+          return false;
+        }
+        try {
+          const { purchase } = await api.request(`/auth/customer/signup-code?pharmacyCode=${encodeURIComponent(pharmacyCode)}&code=${code}`);
+          const date = new Date(`${String(purchase.purchased_at).replace(' ', 'T')}Z`);
+          status.className = 'code-status ok';
+          status.textContent = `${date.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' })} 구매 · ${purchase.amount.toLocaleString('ko-KR')}원 영수증이 확인됐어요.`;
+          return true;
+        } catch (error) {
+          status.className = 'code-status error';
+          status.textContent = error.message;
+          return false;
+        }
+      }
+
+      if (params.get('code')) {
+        form.code.value = formatCode(normalizeCode(params.get('code')));
+        verifyCode();
+      }
+
+      form.querySelectorAll('[data-none]').forEach((box) => {
+        const field = form[box.dataset.none];
+        box.addEventListener('change', () => {
+          field.disabled = box.checked;
+          field.required = !box.checked;
+          if (box.checked) field.value = '';
+        });
+        field.required = true;
+      });
 
       const consentBoxes = [...form.querySelectorAll('[data-consent]')];
       const syncNight = () => {
@@ -401,11 +606,39 @@
 
       $('#signupForm').addEventListener('submit', async (event) => {
         event.preventDefault();
+        message('');
+        if (form.pin.value !== form.pin_confirm.value) return message('PIN과 PIN 확인이 서로 다릅니다.');
         try {
-          const { name, phone, birth_year, birth_month, birth_day, gender, referral_code } = serializeForm(event.target);
-          const body = { name, phone, birth_year, birth_month, birth_day, gender, referral_code, pharmacyCode, channel: channelCode };
-          body.consents = Object.fromEntries(consentBoxes.map((box) => [box.name, box.checked]));
+          const body = {
+            pharmacyCode,
+            channel: channelCode,
+            code: normalizeCode(form.code.value),
+            name: form.name.value,
+            phone: form.phone.value,
+            birth_year: form.birth_year.value,
+            birth_month: form.birth_month.value,
+            birth_day: form.birth_day.value,
+            gender: form.gender.value,
+            address: form.address.value,
+            address_detail: form.address_detail.value,
+            allergy: form.allergy.value,
+            allergy_none: form.allergy_none.checked,
+            medications: form.medications.value,
+            medications_none: form.medications_none.checked,
+            pin: form.pin.value,
+            referral_code: form.referral_code.value,
+            consents: Object.fromEntries(consentBoxes.map((box) => [box.name, box.checked]))
+          };
           const data = await api.request('/auth/customer/signup', { method: 'POST', body });
+          if (data.status === 'PENDING') {
+            form.hidden = true;
+            document.querySelector('.notice-box').hidden = true;
+            $('#pendingMessage').textContent = data.message;
+            $('#pendingLogin').href = `/login.html?pharmacyCode=${encodeURIComponent(pharmacyCode)}`;
+            $('#pendingBox').hidden = false;
+            window.scrollTo({ top: 0 });
+            return;
+          }
           saveSession(data);
           location.href = `/store.html?pharmacyCode=${encodeURIComponent(pharmacyCode)}`;
         } catch (error) {

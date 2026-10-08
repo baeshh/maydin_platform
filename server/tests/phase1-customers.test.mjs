@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { api, check, done, login, uniquePhone } from './lib.mjs';
+import { REQUIRED_CONSENTS, api, check, done, login, signupMember, uniquePhone } from './lib.mjs';
 
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
@@ -7,15 +7,13 @@ const db = new Database(process.env.DB_PATH);
 
 const owner = await login('owner@apharmacy.kr', 'owner1234');
 const admin = await login('admin@maydin.kr', 'admin1234');
-const REQUIRED = { TERMS: true, PRIVACY: true };
+const REQUIRED = REQUIRED_CONSENTS;
 
-function signup(body) {
-  return api('/auth/customer/signup', { method: 'POST', body: { pharmacyCode: 'A001', name: '테스트', phone: uniquePhone(), ...body } });
-}
+const signup = (body) => signupMember(db, body);
 
 console.log('[가입 검증]');
 {
-  let res = await signup({});
+  let res = await signup({ consents: {} });
   check('필수 동의 없이 가입하면 400', res.status === 400, res.data);
   res = await signup({ consents: { TERMS: true } });
   check('개인정보 동의 빠지면 400', res.status === 400, res.data);
@@ -25,7 +23,7 @@ console.log('[가입 검증]');
   check('이름 비면 400', res.status === 400, res.data);
   res = await signup({ consents: REQUIRED, birth_month: 2, birth_day: 30 });
   check('2월 30일 생일 400', res.status === 400, res.data);
-  res = await signup({ consents: REQUIRED, birth_month: 5 });
+  res = await signup({ consents: REQUIRED, birth_month: 5, birth_day: undefined });
   check('생일 월만 입력하면 400', res.status === 400, res.data);
   res = await signup({ consents: REQUIRED, gender: 'X' });
   check('성별 값 오류 400', res.status === 400, res.data);
@@ -73,7 +71,7 @@ let referred;
     consents: { ...REQUIRED, MARKETING_SMS: true, MARKETING_NIGHT: true },
     birth_month: 2,
     birth_day: 29,
-    birth_year: 1985,
+    birth_year: 1984,
     gender: 'f',
     channel: channel.code.toUpperCase()
   });
@@ -82,7 +80,7 @@ let referred;
 
   res = await api('/customers/me', { token: referrer });
   const me = res.data.customer;
-  check('내 정보 조회', res.status === 200 && me.birth_month === 2 && me.birth_day === 29 && me.gender === 'F' && me.birth_year === 1985, me);
+  check('내 정보 조회', res.status === 200 && me.birth_month === 2 && me.birth_day === 29 && me.gender === 'F' && me.birth_year === 1984, me);
   check('추천 코드 6자리 발급', /^[A-Z2-9]{6}$/.test(me.referral_code), me.referral_code);
   check('가입 경로 기록', me.signup_channel_name === '10월 전단', me);
   const c = res.data.consents;
@@ -131,11 +129,11 @@ console.log('[경로 통계]');
 console.log('[고객 본인 수정]');
 {
   let res = await api('/customers/me/profile', { token: referred, method: 'PATCH', body: { birth_month: 12 } });
-  check('월만 저장하면 400', res.status === 400, res.data);
-  res = await api('/customers/me/profile', { token: referred, method: 'PATCH', body: { birth_month: 12, birth_day: 25, gender: 'M' } });
-  check('생일·성별 저장', res.status === 200 && res.data.customer.birth_day === 25 && res.data.customer.gender === 'M', res.data);
+  check('가입 때 등록한 생일은 앱에서 변경 400', res.status === 400, res.data);
+  res = await api('/customers/me/profile', { token: referred, method: 'PATCH', body: { gender: 'M' } });
+  check('성별 변경', res.status === 200 && res.data.customer.gender === 'M', res.data);
   res = await api('/customers/me/profile', { token: referred, method: 'PATCH', body: { gender: '' } });
-  check('성별 지우기', res.status === 200 && res.data.customer.gender === null && res.data.customer.birth_month === 12, res.data);
+  check('성별 비우기 400', res.status === 400, res.data);
   res = await api('/customers/me/profile', { token: referred, method: 'PATCH', body: {} });
   check('빈 수정 400', res.status === 400, res.data);
 

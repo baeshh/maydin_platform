@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { BASE, api, check, done, login, uniquePhone } from './lib.mjs';
+import { BASE, REQUIRED_CONSENTS, api, check, done, login, signupMember } from './lib.mjs';
 
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
@@ -9,14 +9,10 @@ const owner = await login('owner@apharmacy.kr', 'owner1234');
 const thisMonth = new Date().getMonth() + 1;
 
 async function member(name, extra = {}) {
-  const phone = uniquePhone();
-  const res = await api('/auth/customer/signup', {
-    method: 'POST',
-    body: { pharmacyCode: 'A001', name, phone, consents: { TERMS: true, PRIVACY: true, ...(extra.consents || {}) }, ...extra.profile }
-  });
+  const res = await signupMember(db, { name, consents: { ...REQUIRED_CONSENTS, ...(extra.consents || {}) }, ...extra.profile });
   if (res.status !== 201) throw new Error(`가입 실패 ${name}: ${JSON.stringify(res.data)}`);
   const me = await api('/customers/me', { token: res.data.token });
-  return { ...me.data.customer, phone, token: res.data.token };
+  return { ...me.data.customer, phone: res.phone, token: res.data.token };
 }
 
 const product = db.prepare('SELECT id, product_name FROM products WHERE pharmacy_id = 1 ORDER BY id LIMIT 1').get();

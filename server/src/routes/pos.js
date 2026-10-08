@@ -6,6 +6,8 @@ const { PointError, pointPolicy, changePoints, pointEligibleAmount, earnRate, ca
 const { earningContext, grantReferralReward, posBadges } = require('../services/members');
 const { LotError, parseLotInput, insertLot, lotLabel } = require('../services/lots');
 const { taxBreakdown } = require('../services/tax');
+const { CustomerError } = require('../services/customers');
+const { issueSignupCode, receiptSignupCode, readHealth } = require('../services/member-auth');
 
 const router = express.Router();
 
@@ -34,7 +36,13 @@ function handle(fn) {
       const result = fn(req, res);
       if (result !== undefined && !res.headersSent) res.json(result);
     } catch (error) {
-      if (error instanceof PosError || error instanceof VanError || error instanceof PointError || error instanceof LotError) {
+      if (
+        error instanceof PosError ||
+        error instanceof VanError ||
+        error instanceof PointError ||
+        error instanceof LotError ||
+        error instanceof CustomerError
+      ) {
         return res.status(error.status).json({ message: error.message });
       }
       if (String(error.code || '').startsWith('SQLITE_CONSTRAINT')) {
@@ -412,7 +420,7 @@ function getPosOrder(req, id) {
 function buildReceipt(req, orderId) {
   const order = getPosOrder(req, orderId);
   const pharmacy = getOne(
-    'SELECT pharmacy_name, owner_name, business_number, phone, address FROM pharmacies WHERE id = @id',
+    'SELECT pharmacy_code, pharmacy_name, owner_name, business_number, phone, address FROM pharmacies WHERE id = @id',
     { id: req.pharmacyId }
   );
   const items = getAll(
@@ -456,7 +464,10 @@ function buildReceipt(req, orderId) {
       : null,
     tax: taxBreakdown(items),
     payment_balances: order.order_type === 'POS_SALE' ? refundablePaymentBalances(order.id) : {},
+    signup_code: receiptSignupCode(order),
     permissions: {
+      can_issue_signup_code:
+        isOwner(req) && order.order_type === 'POS_SALE' && !order.customer_id && ['COMPLETED', 'PARTIALLY_REFUNDED'].includes(order.order_status),
       can_cancel: isOwner(req) && order.order_type === 'POS_SALE' && order.order_status === 'COMPLETED' && sameDay,
       can_refund:
         isOwner(req) &&
@@ -805,6 +816,7 @@ router.get(
        FROM customers c
        LEFT JOIN orders o ON o.customer_id = c.id
        WHERE c.pharmacy_id = @pharmacy_id
+         AND c.approval_status = 'APPROVED'
          AND (
            c.name LIKE @like
            OR (LENGTH(@phone) >= 3 AND ${PHONE_DIGITS_SQL('c.phone')} LIKE @phone_like)
@@ -830,10 +842,11 @@ router.get(
 router.get(
   '/customers/:id',
   handle((req) => {
-    const customer = getOne('SELECT id, name, phone, email, created_at, member_code, point_balance FROM customers WHERE id = @id AND pharmacy_id = @pharmacy_id', {
-      id: Number(req.params.id),
-      pharmacy_id: req.pharmacyId
-    });
+    const customer = getOne(
+      `SELECT id, name, phone, email, created_at, member_code, point_balance, health_info IS NOT NULL AS has_health
+       FROM customers WHERE id = @id AND pharmacy_id = @pharmacy_id AND approval_status = 'APPROVED'`,
+      { id: Number(req.params.id), pharmacy_id: req.pharmacyId }
+    );
     if (!customer) throw new PosError('고객을 찾을 수 없습니다.', 404);
     const orders = getAll(
       `SELECT o.id, o.order_number, o.order_type, o.sales_channel, o.order_status, o.final_amount, o.created_at,
@@ -844,7 +857,24 @@ router.get(
        LIMIT 10`,
       { id: customer.id, pharmacy_id: req.pharmacyId }
     );
-    return { customer, orders, membership: posBadges(req.pharmacyId, customer.id) };
+    const membership = posBadges(req.pharmacyId, customer.id);
+    if (membership && isOwner(req)) membership.has_health = customer.has_health === 1;
+    return { customer: { ...customer, has_health: undefined }, orders, membership };
+  })
+);
+
+// 알레르기·복용 약은 약사(관리자)만 본다. 열람할 때마다 기록을 남긴다.
+router.get(
+  '/customers/:id/health',
+  handle((req) => {
+    requireOwner(req, '건강 정보 열람');
+    const customer = getOne("SELECT id, name FROM customers WHERE id = @id AND pharmacy_id = @pharmacy_id AND approval_status = 'APPROVED'", {
+      id: Number(req.params.id),
+      pharmacy_id: req.pharmacyId
+    });
+    if (!customer) throw new PosError('고객을 찾을 수 없습니다.', 404);
+    audit(req, 'HEALTH_VIEW', 'CUSTOMER', customer.id, `POS 건강 정보 열람 · ${customer.name}`);
+    return { health: readHealth(customer.id) };
   })
 );
 
@@ -1024,7 +1054,7 @@ router.post(
 
       let customer = null;
       if (customerId) {
-        customer = getOne('SELECT * FROM customers WHERE id = @id AND pharmacy_id = @pharmacy_id', {
+        customer = getOne("SELECT * FROM customers WHERE id = @id AND pharmacy_id = @pharmacy_id AND approval_status = 'APPROVED'", {
           id: customerId,
           pharmacy_id: req.pharmacyId
         });
@@ -1173,6 +1203,7 @@ router.post(
       if (discountAmount > 0) {
         audit(req, 'POS_DISCOUNT', 'ORDER', orderId, `할인 ${won(discountAmount)} · 사유: ${discountReason}`);
       }
+      if (!customer && finalAmount > 0) issueSignupCode({ pharmacyId: req.pharmacyId, orderId, userId: req.user.id });
 
       return buildReceipt(req, orderId);
     })();
@@ -1220,6 +1251,20 @@ router.get(
 router.get(
   '/sales/:id',
   handle((req) => buildReceipt(req, req.params.id))
+);
+
+// 영수증을 잃어버린 고객에게 가입 코드를 다시 준다. 이전 코드는 바로 못 쓰게 된다.
+router.post(
+  '/sales/:id/signup-code',
+  handle((req) => {
+    requireOwner(req, '가입 코드 재발급');
+    const order = getPosOrder(req, req.params.id);
+    return transaction(() => {
+      const issued = issueSignupCode({ pharmacyId: req.pharmacyId, orderId: order.id, userId: req.user.id, reissue: true });
+      audit(req, 'SIGNUP_CODE_REISSUE', 'ORDER', order.id, `가입 코드 재발급 · ${order.order_number}`);
+      return { ...buildReceipt(req, order.id), issued };
+    })();
+  })
 );
 
 router.post(

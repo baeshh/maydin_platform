@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { api, check, done, login, uniquePhone } from './lib.mjs';
+import { api, check, done, login, signupMember } from './lib.mjs';
 
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
@@ -8,10 +8,7 @@ const db = new Database(process.env.DB_PATH);
 const owner = await login('owner@apharmacy.kr', 'owner1234');
 
 async function signup(name) {
-  const res = await api('/auth/customer/signup', {
-    method: 'POST',
-    body: { pharmacyCode: 'A001', name, phone: uniquePhone(), consents: { TERMS: true, PRIVACY: true } }
-  });
+  const res = await signupMember(db, { name });
   const me = await api('/customers/me', { token: res.data.token });
   return { ...me.data.customer, token: res.data.token };
 }

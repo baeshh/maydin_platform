@@ -156,6 +156,36 @@ function needsPointLedgerRebuild() {
   return row && !row.sql.includes("'REWARD'");
 }
 
+function needsConsentsRebuild() {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'customer_consents'").get();
+  return row && !row.sql.includes("'HEALTH_INFO'");
+}
+
+// 구매 인증 가입·PIN 로그인. 이 기능 전에 가입한 회원은 승인된 상태로 두고, PIN은 약국에서 받은 코드로 처음 설정한다.
+function migrateMemberAuth(schema) {
+  if (needsConsentsRebuild()) rebuildTable(schema, 'customer_consents');
+  addColumnIfMissing('customers', 'approval_status', "TEXT NOT NULL DEFAULT 'APPROVED'");
+  addColumnIfMissing('customers', 'approval_note', 'TEXT');
+  addColumnIfMissing('customers', 'approved_at', 'TEXT');
+  addColumnIfMissing('customers', 'approved_by', 'INTEGER');
+  addColumnIfMissing('customers', 'signup_order_id', 'INTEGER');
+  addColumnIfMissing('customers', 'signup_ip_hash', 'TEXT');
+  addColumnIfMissing('customers', 'pin_hash', 'TEXT');
+  addColumnIfMissing('customers', 'pin_failed_count', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('customers', 'pin_locked_until', 'TEXT');
+  addColumnIfMissing('customers', 'health_info', 'TEXT');
+  addColumnIfMissing('customers', 'health_updated_at', 'TEXT');
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_customers_approval ON customers(pharmacy_id, approval_status);
+    CREATE INDEX IF NOT EXISTS idx_customers_signup_ip ON customers(pharmacy_id, signup_ip_hash, created_at);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_signup_order
+      ON customers(signup_order_id) WHERE signup_order_id IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_verification_codes_active_order
+      ON verification_codes(order_id) WHERE status = 'ACTIVE' AND purpose = 'SIGNUP';
+    CREATE INDEX IF NOT EXISTS idx_verification_codes_customer ON verification_codes(customer_id, purpose, status);
+  `);
+}
+
 function migratePos(schema) {
   if (needsUsersRebuild()) rebuildTable(schema, 'users');
   if (needsOrdersRebuild()) rebuildTable(schema, 'orders');
@@ -224,6 +254,7 @@ function migratePos(schema) {
   addColumnIfMissing('products', 'brand', 'TEXT');
   addColumnIfMissing('products', 'supply_days', 'INTEGER');
   migrateCustomerData();
+  migrateMemberAuth(schema);
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_suppliers_pharmacy ON suppliers(pharmacy_id, status);

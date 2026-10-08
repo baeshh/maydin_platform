@@ -1145,6 +1145,97 @@
         display: none;
       }
 
+      .modal-backdrop {
+        align-items: flex-start;
+        background: rgba(25, 31, 40, 0.48);
+        display: flex;
+        inset: 0;
+        justify-content: center;
+        overflow-y: auto;
+        padding: 48px 16px;
+        position: fixed;
+        z-index: 100;
+      }
+
+      .modal-backdrop[hidden] {
+        display: none;
+      }
+
+      .modal-card {
+        background: var(--bg-surface);
+        border-radius: 20px;
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18);
+        max-width: 760px;
+        padding: 24px;
+        width: 100%;
+      }
+
+      body.modal-open {
+        overflow: hidden;
+      }
+
+      #products .card-header,
+      #staff .card-header {
+        flex-wrap: wrap;
+      }
+
+      .product-toolbar {
+        align-items: center;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .product-toolbar .form-control {
+        padding: 8px 12px;
+        width: 260px;
+      }
+
+      .row-no {
+        color: var(--text-muted);
+        font-variant-numeric: tabular-nums;
+        font-weight: 700;
+        text-align: center;
+        width: 48px;
+      }
+
+      .pager {
+        align-items: center;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        justify-content: center;
+        margin-top: 16px;
+      }
+
+      .pager button {
+        background: var(--bg-surface);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        color: var(--text-sub);
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 700;
+        min-width: 34px;
+        padding: 7px 10px;
+      }
+
+      .pager button.active {
+        background: var(--toss-blue);
+        border-color: var(--toss-blue);
+        color: #fff;
+      }
+
+      .pager button:disabled {
+        cursor: default;
+        opacity: 0.4;
+      }
+
+      .pager .gap {
+        color: var(--text-muted);
+        padding: 0 4px;
+      }
+
       body.guest .login-shell {
         display: grid;
       }
@@ -1266,7 +1357,7 @@
             <h1><span id="pagePharmacyName">약국</span> 현황 요약</h1>
             <p>실시간 매출, 주문, 고객, 상품 상태를 확인하고 바로 처리하세요.</p>
           </div>
-          <button class="btn btn-primary" type="button" onclick="scrollToProductForm()">+ 새 상품 등록</button>
+          <button class="btn btn-primary" type="button" onclick="openProductModal()">+ 새 상품 등록</button>
         </header>
 
         <section class="metric-grid" aria-label="핵심 지표">
@@ -1305,6 +1396,7 @@
             <div class="card-header">
               <h2 class="card-title">고객 목록 <span id="customerListCount" class="list-meta">0명</span></h2>
               <div class="inline-actions">
+                <button id="signupRequestBtn" class="btn btn-primary btn-sm" type="button" onclick="openSignupRequests()" hidden>가입 승인 대기 <span id="signupRequestCount">0</span></button>
                 <button id="renewalBtn" class="btn btn-outline btn-sm" type="button" onclick="openConsentRenewals()" hidden>동의 재확인 <span id="renewalCount">0</span></button>
                 <button class="btn btn-outline btn-sm" type="button" onclick="togglePointPolicy()">포인트 정책</button>
               </div>
@@ -1453,13 +1545,25 @@
 
           <section class="card full-width" id="staff">
             <div class="card-header">
-              <h2 class="card-title">POS 직원 계정</h2>
-              <button class="btn btn-outline btn-sm" type="button" onclick="toggleStaffForm()">+ 직원 추가</button>
+              <div>
+                <h2 class="card-title">POS 직원 계정</h2>
+                <span id="staffListCount" class="list-meta">0명</span>
+              </div>
+              <div class="product-toolbar">
+                <input id="staffSearch" class="form-control" type="search" placeholder="이름 · 이메일 · 연락처 검색" oninput="searchStaff(this.value)" />
+                <button class="btn btn-primary btn-sm" type="button" onclick="toggleStaffForm(true)">+ 직원 추가</button>
+              </div>
             </div>
             <p class="list-meta" style="margin: -4px 0 14px;">
               직원 계정은 POS 판매·픽업 수령·입고만 할 수 있고, 취소·반품·일반의약품 판매·현금 입출금·일마감·폐기는 약국 관리자 계정으로만 처리됩니다.
             </p>
-            <form id="staffForm" class="form-grid" hidden style="margin-bottom: 16px;">
+            <div class="modal-backdrop" id="staffModal" hidden onclick="if (event.target === this) toggleStaffForm(false)">
+              <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="staffModalTitle" style="max-width: 560px;">
+            <div class="card-header">
+              <h2 class="card-title" id="staffModalTitle">POS 직원 추가</h2>
+              <button class="muted-link" type="button" onclick="toggleStaffForm(false)">닫기</button>
+            </div>
+            <form id="staffForm" class="form-grid">
               <div class="form-group">
                 <label class="form-label" for="staffName">이름</label>
                 <input id="staffName" class="form-control" name="name" required placeholder="홍길동" />
@@ -1477,16 +1581,20 @@
                 <input id="staffPassword" class="form-control" name="password" type="password" required placeholder="영문+숫자 8자 이상" autocomplete="new-password" />
               </div>
               <div class="form-group full inline-actions">
-                <button class="btn btn-primary" type="submit">직원 계정 만들기</button>
+                <button class="btn btn-primary" type="submit" style="flex: 1;">직원 계정 만들기</button>
                 <button class="btn btn-outline" type="button" onclick="toggleStaffForm(false)">취소</button>
               </div>
             </form>
+              </section>
+            </div>
             <div id="staffTable" class="loading">직원 정보를 불러오는 중입니다.</div>
           </section>
 
-          <section class="card" id="productFormCard">
+          <div class="modal-backdrop" id="productModal" hidden onclick="if (event.target === this) closeProductModal()">
+            <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="productModalTitle">
             <div class="card-header">
-              <h2 class="card-title">신규 상품 등록</h2>
+              <h2 class="card-title" id="productModalTitle">신규 상품 등록</h2>
+              <button class="muted-link" type="button" onclick="closeProductModal()">닫기</button>
             </div>
             <form id="productForm" class="form-grid">
               <div class="form-group full">
@@ -1563,16 +1671,24 @@
                 <label class="form-label" for="description">상품 설명</label>
                 <textarea id="description" class="form-control" name="description" placeholder="고객에게 보여줄 상품 설명"></textarea>
               </div>
-              <div class="form-group full">
-                <button class="btn btn-primary" type="submit" style="padding: 14px;">상품 등록하기</button>
+              <div class="form-group full inline-actions">
+                <button class="btn btn-primary" type="submit" style="padding: 14px; flex: 1;">상품 등록하기</button>
+                <button class="btn btn-outline" type="button" style="padding: 14px;" onclick="closeProductModal()">취소</button>
               </div>
             </form>
-          </section>
+            </section>
+          </div>
 
-          <section class="card" id="products">
+          <section class="card full-width" id="products">
             <div class="card-header">
-              <h2 class="card-title">등록된 상품 목록</h2>
-              <span id="productListCount" class="list-meta">0개</span>
+              <div>
+                <h2 class="card-title">등록된 상품 목록</h2>
+                <span id="productListCount" class="list-meta">0개</span>
+              </div>
+              <div class="product-toolbar">
+                <input id="productSearch" class="form-control" type="search" placeholder="상품명 · 카테고리 · 브랜드 · 바코드 검색" oninput="searchProducts(this.value)" />
+                <button class="btn btn-primary btn-sm" type="button" onclick="openProductModal()">+ 신규 상품 등록</button>
+              </div>
             </div>
             <div id="productsTable" class="loading">상품 정보를 불러오는 중입니다.</div>
           </section>
@@ -1682,9 +1798,53 @@
         return `<div class="empty">${h(text)}</div>`;
       }
 
-      function scrollToProductForm() {
-        $('#productFormCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
-        setTimeout(() => $('#productName')?.focus(), 350);
+      function openModal(id, focusId) {
+        $(`#${id}`).hidden = false;
+        document.body.classList.add('modal-open');
+        setTimeout(() => $(`#${focusId}`)?.focus(), 50);
+      }
+
+      function closeModal(id) {
+        $(`#${id}`).hidden = true;
+        if (!document.querySelector('.modal-backdrop:not([hidden])')) document.body.classList.remove('modal-open');
+      }
+
+      const openProductModal = () => openModal('productModal', 'productName');
+      const closeProductModal = () => closeModal('productModal');
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        document.querySelectorAll('.modal-backdrop:not([hidden])').forEach((modal) => closeModal(modal.id));
+      });
+
+      function pageNumbers(current, total) {
+        if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+        const pages = new Set([1, total, current - 1, current, current + 1]);
+        if (current <= 3) [2, 3, 4].forEach((p) => pages.add(p));
+        if (current >= total - 2) [total - 3, total - 2, total - 1].forEach((p) => pages.add(p));
+        const sorted = [...pages].filter((p) => p >= 1 && p <= total).sort((a, b) => a - b);
+        return sorted.flatMap((p, i) => (i > 0 && p - sorted[i - 1] > 1 ? ['gap', p] : [p]));
+      }
+
+      function pagerHtml(current, total, goFn) {
+        if (total <= 1) return '';
+        return `
+          <div class="pager">
+            <button type="button" ${current <= 1 ? 'disabled' : ''} onclick="${goFn}(${current - 1})">이전</button>
+            ${pageNumbers(current, total)
+              .map((p) => (p === 'gap' ? '<span class="gap">…</span>' : `<button type="button" class="${p === current ? 'active' : ''}" onclick="${goFn}(${p})">${p}</button>`))
+              .join('')}
+            <button type="button" ${current >= total ? 'disabled' : ''} onclick="${goFn}(${current + 1})">다음</button>
+          </div>`;
+      }
+
+      // 검색어로 거른 뒤 현재 페이지 조각과 시작 번호를 돌려준다. 페이지가 범위를 벗어나면 맞춰 준다.
+      function paginate(state, matches, pageSize) {
+        const items = state.query ? state.all.filter((item) => matches(item, state.query)) : state.all;
+        const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+        state.page = Math.min(Math.max(1, state.page), totalPages);
+        const start = (state.page - 1) * pageSize;
+        return { items, totalPages, start, pageItems: items.slice(start, start + pageSize) };
       }
 
       async function loadOwner() {
@@ -1901,6 +2061,7 @@
 
       function renderCustomers(customers) {
         $('#customerListCount').textContent = `${customers.length.toLocaleString()}명`;
+        loadSignupRequests();
         if (customers.length === 0) {
           $('#customerList').innerHTML = renderEmpty('아직 가입한 고객이 없습니다.');
           return;
@@ -2036,7 +2197,15 @@
             <div><span>가입 경로</span><strong>${h(customer.signup_channel_name || '기본 가입 링크')}</strong></div>
             <div><span>추천인</span><strong>${h(customer.referrer_name || '-')}</strong></div>
             <div><span>추천 코드 · 추천한 회원</span><strong>${h(customer.referral_code || '-')} · ${Number(customer.referred_count || 0)}명</strong></div>
+            <div><span>가입 상태</span><strong>${approvalText(customer)}</strong></div>
+            <div><span>로그인 PIN</span><strong>${pinStatusText(customer)}</strong></div>
           </div>
+          <div class="inline-actions" style="margin-bottom: 14px;">
+            ${customer.approval_status === 'APPROVED' ? `<button class="btn btn-outline btn-sm" type="button" onclick="issuePinCode(${customer.id}, ${customer.pin_set ? 1 : 0})">${customer.pin_set ? 'PIN 재설정 코드 발급' : 'PIN 설정 코드 발급'}</button>` : ''}
+            ${customer.has_health ? `<button class="btn btn-outline btn-sm" type="button" onclick="showCustomerHealth(${customer.id})">알레르기·복용 약 보기</button>` : '<span class="list-meta">건강 정보 없음</span>'}
+          </div>
+          <div id="pinCodeBox-${customer.id}"></div>
+          <div id="healthBox-${customer.id}"></div>
           <details style="margin-bottom: 14px;">
             <summary class="muted-link" style="cursor: pointer;">선택 정보 수정 (고객이 요청한 경우)</summary>
             <form class="inline-actions" style="margin-top: 10px;" onsubmit="saveCustomerProfile(event, ${customer.id})">
@@ -2216,6 +2385,123 @@
           showToast('재확인 안내를 기록했습니다.');
           openCustomerInfo(id);
           loadConsentRenewals();
+        } catch (error) {
+          showToast(error.message);
+        }
+      }
+
+      function approvalText(customer) {
+        if (customer.approval_status === 'PENDING') return '<span class="badge orange">승인 대기</span>';
+        if (customer.approval_status === 'REJECTED') return `<span class="badge red">거절</span> <span class="list-meta">${h(customer.approval_note || '')}</span>`;
+        return customer.signup_order_id ? '<span class="badge green">구매 인증 가입</span>' : '<span class="badge gray">기존 가입</span>';
+      }
+
+      function pinStatusText(customer) {
+        if (!customer.pin_set) return '<span class="badge gray">미설정</span>';
+        if (customer.pin_failed_count >= 10) return '<span class="badge red">잠김 (재설정 필요)</span>';
+        if (customer.pin_locked_until && new Date(`${customer.pin_locked_until.replace(' ', 'T')}Z`) > new Date()) {
+          return '<span class="badge orange">일시 잠김</span>';
+        }
+        return '<span class="badge green">설정됨</span>';
+      }
+
+      async function issuePinCode(id, hasPin) {
+        const action = hasPin ? '재설정' : '설정';
+        if (!confirm(`고객 본인인지 확인했나요?\n(방문 시 신분증, 전화는 가입 정보 대조)\n\nPIN ${action} 코드를 발급하면 이전에 발급한 코드는 무효가 됩니다.`)) return;
+        try {
+          const data = await api.request(`/customers/${id}/pin-reset-code`, { method: 'POST' });
+          $(`#pinCodeBox-${id}`).innerHTML = `
+            <div class="insight-box" style="margin-bottom: 14px;">
+              <strong style="font-size: 22px; letter-spacing: 3px;">${h(data.code)}</strong>
+              <p class="list-meta" style="margin: 6px 0 0;">
+                고객에게 이 코드를 알려 주세요. 로그인 화면의 'PIN을 잊었거나…'에서 휴대폰 번호와 함께 입력하면 새 PIN을 정할 수 있습니다.
+                ${h(formatDate(data.expires_at))}까지 한 번만 쓸 수 있고, 잠긴 계정도 함께 풀립니다.
+              </p>
+            </div>`;
+        } catch (error) {
+          showToast(error.message);
+        }
+      }
+
+      async function showCustomerHealth(id) {
+        const box = $(`#healthBox-${id}`);
+        if (box.innerHTML) {
+          box.innerHTML = '';
+          return;
+        }
+        try {
+          const { health } = await api.request(`/customers/${id}/health`);
+          box.innerHTML = `
+            <div class="insight-box" style="margin-bottom: 14px;">
+              <div class="profile-grid" style="margin-bottom: 6px;">
+                <div style="grid-column: span 2;"><span>알레르기</span><strong>${health?.allergy ? h(health.allergy) : '없음'}</strong></div>
+                <div style="grid-column: span 2;"><span>지금 복용 중인 약</span><strong>${health?.medications ? h(health.medications) : '없음'}</strong></div>
+              </div>
+              <p class="list-meta" style="margin: 0;">고객이 입력한 민감정보입니다. 열람 기록이 남으며, 복약 상담 외의 목적으로 쓰지 마세요. 마지막 수정 ${h(formatDate(health?.updated_at))}</p>
+            </div>`;
+        } catch (error) {
+          showToast(error.message);
+        }
+      }
+
+      async function loadSignupRequests() {
+        try {
+          const { requests } = await api.request('/customers/signup-requests');
+          $('#signupRequestBtn').hidden = requests.length === 0;
+          $('#signupRequestCount').textContent = requests.length;
+          return requests;
+        } catch (error) {
+          return [];
+        }
+      }
+
+      async function openSignupRequests() {
+        const requests = await loadSignupRequests();
+        const panel = $('#customerPanel');
+        $('#pointPanel').hidden = true;
+        panel.hidden = false;
+        panel.innerHTML = `
+          <div class="card-header" style="margin-bottom: 10px;">
+            <h3 class="card-title" style="font-size: 16px;">가입 승인 대기 ${requests.length}명</h3>
+            <button class="muted-link" type="button" onclick="$('#customerPanel').hidden = true">닫기</button>
+          </div>
+          <p class="list-meta" style="margin: 0 0 10px;">
+            영수증 코드는 맞지만 이상 징후가 있어 자동 승인하지 않은 가입입니다. 인증한 구매 내역과 사유를 보고, 필요하면 고객에게 연락해 확인한 뒤 처리해 주세요.
+          </p>
+          <div class="list-stack">
+            ${requests.map((r) => `
+              <div class="list-item" style="align-items: flex-start;">
+                <div>
+                  <div class="list-title">${h(r.name)} <span class="list-meta">${h(r.phone || '')}</span></div>
+                  <div class="list-meta">
+                    ${r.birth_year}.${String(r.birth_month).padStart(2, '0')}.${String(r.birth_day).padStart(2, '0')} · ${r.gender === 'F' ? '여성' : '남성'} · 신청 ${h(formatDate(r.created_at))}${r.referrer_name ? ` · 추천인 ${h(r.referrer_name)}` : ''}<br />
+                    인증 구매 ${h(r.order_number || '-')} · ${money(r.order_amount)} · ${h(formatDate(r.order_created_at))}${r.order_items ? ` · ${h(r.order_items)}` : ''}
+                  </div>
+                  <div style="margin-top: 6px;"><span class="badge orange">${h(r.approval_note || '확인 필요')}</span></div>
+                </div>
+                <div class="inline-actions" style="flex-shrink: 0;">
+                  <button class="btn btn-primary btn-sm" type="button" onclick="decideSignup(${r.id}, true)">승인</button>
+                  <button class="btn btn-outline btn-sm" type="button" onclick="decideSignup(${r.id}, false)">거절</button>
+                </div>
+              </div>`).join('') || renderEmpty('승인 대기 중인 가입이 없습니다.')}
+          </div>
+        `;
+      }
+
+      async function decideSignup(id, approve) {
+        let body;
+        if (approve) {
+          if (!confirm('이 가입을 승인할까요? 인증한 구매가 회원 이력으로 옮겨지고 적립됩니다.')) return;
+        } else {
+          const reason = prompt('거절 사유를 적어 주세요. (예: 중복 가입, 본인 확인 불가)');
+          if (!reason || !reason.trim()) return;
+          body = { reason };
+        }
+        try {
+          await api.request(`/customers/${id}/${approve ? 'approve' : 'reject'}`, { method: 'POST', body });
+          showToast(approve ? '가입을 승인했습니다.' : '가입을 거절했습니다. 입력한 건강 정보는 삭제됩니다.');
+          await openSignupRequests();
+          loadOwner();
         } catch (error) {
           showToast(error.message);
         }
@@ -2789,10 +3075,43 @@
         `;
       }
 
+      const PRODUCT_PAGE_SIZE = 10;
+      const productState = { all: [], query: '', page: 1 };
+
       function renderProducts(products) {
-        $('#productListCount').textContent = `${products.length.toLocaleString()}개`;
-        if (products.length === 0) {
+        productState.all = products;
+        renderProductPage();
+      }
+
+      function searchProducts(value) {
+        productState.query = value.trim().toLowerCase();
+        productState.page = 1;
+        renderProductPage();
+      }
+
+      function goProductPage(page) {
+        productState.page = page;
+        renderProductPage();
+        $('#products').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+
+      function renderProductPage() {
+        const { all, query } = productState;
+        const { items: products, totalPages, start, pageItems } = paginate(
+          productState,
+          (p, q) => [p.product_name, p.category_name, p.brand, p.barcode].some((value) => String(value || '').toLowerCase().includes(q)),
+          PRODUCT_PAGE_SIZE
+        );
+
+        $('#productListCount').textContent = query
+          ? `검색 결과 ${products.length.toLocaleString()}개 / 전체 ${all.length.toLocaleString()}개`
+          : `전체 ${all.length.toLocaleString()}개`;
+        if (all.length === 0) {
           $('#productsTable').innerHTML = renderEmpty('등록된 상품이 없습니다. 첫 상품을 등록해 보세요.');
+          return;
+        }
+        if (products.length === 0) {
+          $('#productsTable').innerHTML = renderEmpty(`'${query}'에 맞는 상품이 없습니다.`);
           return;
         }
 
@@ -2801,6 +3120,7 @@
             <table>
               <thead>
                 <tr>
+                  <th class="row-no">번호</th>
                   <th>상품명/카테고리</th>
                   <th>가격/상태</th>
                   <th>재고/상태수정</th>
@@ -2808,10 +3128,12 @@
                 </tr>
               </thead>
               <tbody>
-                ${products.map((product) => `
+                ${pageItems.map((product, index) => `
                   <tr>
+                    <td class="row-no">${start + index + 1}</td>
                     <td>
                       <div class="list-title">${h(product.product_name)}</div>
+                      ${product.brand ? `<div class="list-meta">${h(product.brand)}</div>` : ''}
                       <span class="badge gray">${h(product.category_name || '미분류')}</span>
                       ${product.product_type === 'OTC' ? '<span class="badge orange">일반의약품 · 현장 판매 전용</span>' : ''}
                       <div class="list-meta">${product.barcode ? `바코드 ${h(product.barcode)}` : '바코드 미등록'}</div>
@@ -2860,6 +3182,7 @@
               </tbody>
             </table>
           </div>
+          ${pagerHtml(productState.page, totalPages, 'goProductPage')}
         `;
       }
 
@@ -2983,30 +3306,65 @@
       }
 
       function toggleStaffForm(show) {
-        const form = $('#staffForm');
-        form.hidden = show === undefined ? !form.hidden : !show;
-        if (!form.hidden) setTimeout(() => $('#staffName').focus(), 30);
+        if (show) openModal('staffModal', 'staffName');
+        else closeModal('staffModal');
       }
 
-      let staffList = [];
+      const STAFF_PAGE_SIZE = 10;
+      const staffState = { all: [], query: '', page: 1 };
 
       function staffName(id) {
-        return staffList.find((s) => s.id === id)?.name || '직원';
+        return staffState.all.find((s) => s.id === id)?.name || '직원';
       }
 
       function renderStaff(staff) {
-        staffList = staff;
-        if (staff.length === 0) {
+        staffState.all = staff;
+        renderStaffPage();
+      }
+
+      function searchStaff(value) {
+        staffState.query = value.trim().toLowerCase();
+        staffState.page = 1;
+        renderStaffPage();
+      }
+
+      function goStaffPage(page) {
+        staffState.page = page;
+        renderStaffPage();
+        $('#staff').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+
+      function renderStaffPage() {
+        const { all, query } = staffState;
+        const { items, totalPages, start, pageItems } = paginate(
+          staffState,
+          (s, q) => {
+            const digits = q.replace(/\D/g, '');
+            return [s.name, s.email].some((value) => String(value || '').toLowerCase().includes(q)) ||
+              (digits.length >= 3 && String(s.phone || '').replace(/\D/g, '').includes(digits));
+          },
+          STAFF_PAGE_SIZE
+        );
+        const active = all.filter((s) => s.status === 'ACTIVE').length;
+        $('#staffListCount').textContent = query
+          ? `검색 결과 ${items.length.toLocaleString()}명 / 전체 ${all.length.toLocaleString()}명`
+          : `전체 ${all.length.toLocaleString()}명 · 사용 중 ${active.toLocaleString()}명`;
+        if (all.length === 0) {
           $('#staffTable').innerHTML = renderEmpty('등록된 POS 직원이 없습니다. 카운터 직원 계정을 만들어 주세요.');
+          return;
+        }
+        if (items.length === 0) {
+          $('#staffTable').innerHTML = renderEmpty(`'${query}'에 맞는 직원이 없습니다.`);
           return;
         }
         $('#staffTable').innerHTML = `
           <div class="table-wrap">
             <table>
-              <thead><tr><th>직원</th><th>로그인 이메일</th><th>상태</th><th>오늘 판매</th><th>최근 POS 활동</th><th>관리</th></tr></thead>
+              <thead><tr><th class="row-no">번호</th><th>직원</th><th>로그인 이메일</th><th>상태</th><th>오늘 판매</th><th>최근 POS 활동</th><th>관리</th></tr></thead>
               <tbody>
-                ${staff.map((s) => `
+                ${pageItems.map((s, index) => `
                   <tr>
+                    <td class="row-no">${start + index + 1}</td>
                     <td><div class="list-title">${h(s.name)}</div><div class="list-meta">${h(s.phone || '연락처 없음')}</div></td>
                     <td>${h(s.email)}</td>
                     <td>${s.status === 'ACTIVE' ? '<span class="badge green">사용 중</span>' : '<span class="badge gray">사용 중지</span>'}</td>
@@ -3025,6 +3383,7 @@
               </tbody>
             </table>
           </div>
+          ${pagerHtml(staffState.page, totalPages, 'goStaffPage')}
         `;
       }
 
@@ -4146,6 +4505,7 @@
           event.target.status.value = 'ON_SALE';
           event.target.product_type.value = 'GENERAL';
           event.target.tax_type.value = 'TAXABLE';
+          closeProductModal();
           showToast('상품이 등록되었습니다.');
           loadOwner();
         } catch (error) {

@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { api, check, done, login, uniquePhone } from './lib.mjs';
+import { api, check, done, login, signupMember } from './lib.mjs';
 
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
@@ -19,10 +19,7 @@ let session = (await api('/pos/sessions/current', { token: owner })).data.sessio
 if (!session) session = (await api('/pos/sessions/open', { token: owner, method: 'POST', body: { opening_cash: 0 } })).data.session;
 
 async function member(name, extra = {}) {
-  const res = await api('/auth/customer/signup', {
-    method: 'POST',
-    body: { pharmacyCode: 'A001', name, phone: uniquePhone(), consents: { TERMS: true, PRIVACY: true }, ...extra }
-  });
+  const res = await signupMember(db, { name, ...extra });
   if (res.status !== 201) throw new Error(`가입 실패 ${name}: ${JSON.stringify(res.data)}`);
   const me = await api('/customers/me', { token: res.data.token });
   return { ...me.data.customer, token: res.data.token };
@@ -137,14 +134,17 @@ console.log('[고객 앱 내 등급]');
   check('추천 보상 금액 안내', m.referral_reward === 1000, m.referral_reward);
   check('곧 떨어질 상품 배열', Array.isArray(m.refills), m.refills);
 
-  res = await api('/customers/me/profile', { token: app.token, method: 'PATCH', body: { birth_month: 5, birth_day: 10 } });
-  check('생일 처음 등록은 가능', res.status === 200 && res.data.customer.birth_month === 5, res.data);
+  db.prepare('UPDATE customers SET birth_year = NULL, birth_month = NULL, birth_day = NULL WHERE id = ?').run(app.id);
+  res = await api('/customers/me/profile', { token: app.token, method: 'PATCH', body: { birth_month: 5, birth_day: 10, birth_year: 1990 } });
+  check('생일이 없던 기존 회원은 처음 등록 가능', res.status === 200 && res.data.customer.birth_month === 5, res.data);
   res = await api('/customers/me/profile', { token: app.token, method: 'PATCH', body: { birth_month: thisMonth, birth_day: 1 } });
   check('등록한 생일은 앱에서 변경 불가', res.status === 400 && res.data.message.includes('약국'), res.data);
   res = await api('/customers/me/profile', { token: app.token, method: 'PATCH', body: { birth_month: null, birth_day: null } });
   check('등록한 생일 지우기도 불가', res.status === 400, res.data);
-  res = await api('/customers/me/profile', { token: app.token, method: 'PATCH', body: { birth_month: 5, birth_day: 10, birth_year: 1990, gender: 'F' } });
-  check('같은 생일 + 출생연도·성별 수정은 가능', res.status === 200 && res.data.customer.birth_year === 1990, res.data);
+  res = await api('/customers/me/profile', { token: app.token, method: 'PATCH', body: { birth_year: 1991 } });
+  check('등록한 출생연도도 앱에서 변경 불가', res.status === 400, res.data);
+  res = await api('/customers/me/profile', { token: app.token, method: 'PATCH', body: { birth_month: 5, birth_day: 10, birth_year: 1990, gender: 'M' } });
+  check('같은 생년월일 + 성별 수정은 가능', res.status === 200 && res.data.customer.gender === 'M', res.data);
   res = await api(`/customers/${app.id}/profile`, { token: owner, method: 'PATCH', body: { birth_month: 6, birth_day: 1 } });
   check('약국은 생일 변경 가능', res.status === 200 && res.data.customer.birth_month === 6, res.data);
 

@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { BASE, api, check, done, login, uniquePhone } from './lib.mjs';
+import { BASE, api, check, done, login, signupMember } from './lib.mjs';
 
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
@@ -10,14 +10,10 @@ const admin = await login('admin@maydin.kr', 'admin1234');
 const year = new Date().getFullYear();
 
 async function member(name, pharmacyCode = 'A001') {
-  const phone = uniquePhone();
-  const res = await api('/auth/customer/signup', {
-    method: 'POST',
-    body: { pharmacyCode, name, phone, consents: { TERMS: true, PRIVACY: true } }
-  });
+  const res = await signupMember(db, { pharmacyCode, name });
   if (res.status !== 201) throw new Error(`가입 실패 ${name}: ${JSON.stringify(res.data)}`);
   const me = await api('/customers/me', { token: res.data.token });
-  return { ...me.data.customer, phone, token: res.data.token };
+  return { ...me.data.customer, phone: res.phone, token: res.data.token };
 }
 
 let seq = 0;
@@ -97,7 +93,7 @@ console.log('[가족 · 약국에서 회원 연결]');
   check('가족 연결 감사 로그', audit?.description.includes('회원 연결') && audit.description.includes('배우자'), audit);
 
   const pos = await api(`/pos/customers/${head.id}`, { token: owner });
-  check('POS 배지: 가족 요약', pos.data.membership.family_text === '자녀(7세), 배우자', pos.data.membership);
+  check('POS 배지: 가족 요약 (연결 회원은 출생연도로 나이 표시)', /^자녀\(7세\), 배우자\(\d+세\)$/.test(pos.data.membership.family_text), pos.data.membership);
   const pos2 = await api(`/pos/customers/${spouse.id}`, { token: owner });
   check('POS 배지: 연결 회원은 대표 이름', pos2.data.membership.family_head === '가족대표', pos2.data.membership);
 }
@@ -110,7 +106,7 @@ console.log('[가족 · 회원 분석 필터]');
   check('부모님 등록 회원에는 없음', !(await ids('PARENT')).includes(head.id));
   check('가족 등록 회원', (await ids('ANY')).includes(head.id));
   const list = (await api(`/members?q=가족대표`, { token: owner })).data.members[0];
-  check('목록에 가족 요약', list?.family_text === '자녀(7세), 배우자', list);
+  check('목록에 가족 요약', /^자녀\(7세\), 배우자\(\d+세\)$/.test(list?.family_text || ''), list);
 
   const res = await fetch(`${BASE}/api/members/export.csv?q=가족대표`, { headers: { Authorization: `Bearer ${owner}` } });
   const text = await res.text();

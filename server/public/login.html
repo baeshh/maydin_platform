@@ -100,24 +100,75 @@
       .message {
         color: #d92d20;
         font-size: 13px;
+        line-height: 1.5;
         margin-top: 16px;
         min-height: 20px;
         text-align: center;
+        word-break: keep-all;
+      }
+
+      .message.info {
+        color: #0064ff;
+      }
+
+      .link-btn {
+        background: none;
+        color: #4e5968;
+        font-size: 14px;
+        font-weight: 700;
+        height: auto;
+        margin-top: 16px;
+        text-decoration: underline;
+      }
+
+      .hint {
+        color: #8b95a1;
+        font-size: 13px;
+        margin: -6px 0 18px;
+        padding-left: 4px;
+      }
+
+      .row-2 {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: 1fr 1fr;
       }
     </style>
   </head>
   <body>
     <main class="login-card">
       <h1><span id="pharmacyName">약국</span> 고객 로그인</h1>
-      <p>QR코드로 가입한 휴대폰 번호를 입력하면 해당 약국몰로 입장할 수 있습니다.</p>
+      <p id="introText">가입한 휴대폰 번호와 PIN 6자리를 입력해 주세요.</p>
       <form id="loginForm">
         <label>휴대폰 번호</label>
         <input name="phone" type="tel" placeholder="010-0000-0000" autocomplete="tel" required />
+        <label>PIN 6자리</label>
+        <input name="pin" type="password" inputmode="numeric" pattern="\d{6}" maxlength="6" autocomplete="current-password" required />
         <button>로그인하기</button>
+        <button class="link-btn" type="button" onclick="showReset(true)">PIN을 잊었거나, PIN 없이 가입한 기존 회원이에요</button>
+      </form>
+      <form id="resetForm" hidden>
+        <label>휴대폰 번호</label>
+        <input name="phone" type="tel" placeholder="010-0000-0000" autocomplete="tel" required />
+        <label>약국에서 받은 PIN 설정 코드</label>
+        <input name="code" placeholder="XXXX-XXXX" maxlength="9" autocomplete="off" autocapitalize="characters" required />
+        <p class="hint">약국에서 본인 확인 후 알려 드리는 코드예요. 24시간 동안 한 번 쓸 수 있어요.</p>
+        <div class="row-2">
+          <div>
+            <label>새 PIN 6자리</label>
+            <input name="pin" type="password" inputmode="numeric" pattern="\d{6}" maxlength="6" autocomplete="new-password" required />
+          </div>
+          <div>
+            <label>PIN 확인</label>
+            <input name="pin_confirm" type="password" inputmode="numeric" pattern="\d{6}" maxlength="6" autocomplete="new-password" required />
+          </div>
+        </div>
+        <button>PIN 설정하고 로그인</button>
+        <button class="link-btn" type="button" onclick="showReset(false)">로그인으로 돌아가기</button>
       </form>
       <p id="message" class="message"></p>
       <div class="links">
-        <a id="joinLink" href="#">아직 가입하지 않았다면 QR 가입하기</a>
+        <a id="joinLink" href="#">아직 가입하지 않았다면 영수증 코드로 가입하기</a>
       </div>
     </main>
     <script src="/app.js"></script>
@@ -136,17 +187,42 @@
         }
       }
 
+      function showReset(show) {
+        $('#loginForm').hidden = show;
+        $('#resetForm').hidden = !show;
+        $('#introText').textContent = show
+          ? '약국에서 받은 코드로 새 PIN을 정해 주세요. 같은 숫자·연속 숫자·생년월일·휴대폰 번호는 쓸 수 없어요.'
+          : '가입한 휴대폰 번호와 PIN 6자리를 입력해 주세요.';
+        if (show) $('#resetForm').phone.value = $('#loginForm').phone.value;
+        message('');
+      }
+
+      function enterStore(data) {
+        saveSession(data);
+        location.href = `/store.html?pharmacyCode=${encodeURIComponent(pharmacyCode)}`;
+      }
+
+      // 승인 대기는 오류가 아니라 안내로 보여 준다.
+      async function submitAuth(path, body) {
+        const res = await fetch(`/api${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) return enterStore(data);
+        $('#message').className = data.status === 'PENDING' ? 'message info' : 'message';
+        message(data.message || '요청에 실패했습니다.');
+      }
+
       $('#loginForm').addEventListener('submit', async (event) => {
         event.preventDefault();
-        try {
-          const body = serializeForm(event.target);
-          body.pharmacyCode = pharmacyCode;
-          const data = await api.request('/auth/customer/phone-login', { method: 'POST', body });
-          saveSession(data);
-          location.href = `/store.html?pharmacyCode=${encodeURIComponent(pharmacyCode)}`;
-        } catch (error) {
-          message(error.message);
-        }
+        const form = event.target;
+        await submitAuth('/auth/customer/login', { pharmacyCode, phone: form.phone.value, pin: form.pin.value });
+        form.pin.value = '';
+      });
+
+      $('#resetForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const form = event.target;
+        if (form.pin.value !== form.pin_confirm.value) return message('새 PIN과 PIN 확인이 서로 다릅니다.');
+        await submitAuth('/auth/customer/reset-pin', { pharmacyCode, phone: form.phone.value, code: form.code.value, pin: form.pin.value });
       });
 
       loadPharmacy();
