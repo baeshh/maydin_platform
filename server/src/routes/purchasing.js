@@ -2,6 +2,7 @@ const express = require('express');
 const { getAll, getOne, run, transaction } = require('../db');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { LotError, parseLotInput, insertLot, lotLabel } = require('../services/lots');
+const { ImportError, assertNotSyncing } = require('../services/product-import');
 
 const router = express.Router();
 
@@ -31,7 +32,7 @@ function handle(fn) {
       const result = fn(req, res);
       if (result !== undefined && !res.headersSent) res.json(result);
     } catch (error) {
-      if (error instanceof PurchaseError || error instanceof LotError) {
+      if (error instanceof PurchaseError || error instanceof LotError || error instanceof ImportError) {
         return res.status(error.status).json({ message: error.message });
       }
       if (String(error.code || '').startsWith('SQLITE_CONSTRAINT')) {
@@ -569,6 +570,7 @@ router.post(
   '/orders/:id/receive',
   handle((req, res) => {
     const lines = Array.isArray(req.body.items) ? req.body.items : [];
+    assertNotSyncing(req.pharmacyId, '입고');
     transaction(() => {
       const order = lockOrder(req, ['ORDERED', 'PARTIAL'], '입고');
       const received = [];

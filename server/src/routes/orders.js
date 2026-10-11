@@ -3,6 +3,7 @@ const { getAll, getOne, run, transaction } = require('../db');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { requirePharmacyScope } = require('../middleware/scope');
 const { onlineOrderStatus } = require('../services/member-auth');
+const { onlineStockBuffer } = require('../services/product-import');
 
 const router = express.Router();
 
@@ -23,7 +24,7 @@ function getCartItems(userId, pharmacyId) {
   );
 }
 
-function assertCartReady(cartItems) {
+function assertCartReady(cartItems, buffer = 0) {
   if (cartItems.length === 0) throw new Error('장바구니가 비어 있습니다.');
 
   let total = 0;
@@ -31,14 +32,14 @@ function assertCartReady(cartItems) {
     if (item.product_type === 'OTC') {
       throw new Error(`${item.product_name} 상품은 일반의약품으로 온라인 결제가 불가합니다. 약국 방문 시 구매해 주세요.`);
     }
-    if (item.status !== 'ON_SALE') throw new Error(`${item.product_name} 상품은 판매중이 아닙니다.`);
-    if (item.stock_quantity < item.quantity) throw new Error(`${item.product_name} 재고가 부족합니다.`);
+    if (item.status !== 'ON_SALE' || !Number(item.online_visible ?? 1)) throw new Error(`${item.product_name} 상품은 판매중이 아닙니다.`);
+    if (item.stock_quantity - buffer < item.quantity) throw new Error(`${item.product_name} 재고가 부족합니다.`);
     total += Number(item.discount_price || item.price) * item.quantity;
   }
   return total;
 }
 
-function insertOrderItems(orderId, cartItems, pharmacyId, userId) {
+function insertOrderItems(orderId, cartItems, pharmacyId, userId, buffer = 0) {
   for (const item of cartItems) {
     const price = Number(item.discount_price || item.price);
     run(
@@ -61,8 +62,8 @@ function insertOrderItems(orderId, cartItems, pharmacyId, userId) {
        SET stock_quantity = stock_quantity - @quantity,
            status = CASE WHEN stock_quantity - @quantity <= 0 THEN 'SOLD_OUT' ELSE status END,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = @product_id AND pharmacy_id = @pharmacy_id AND stock_quantity >= @quantity`,
-      { quantity: item.quantity, product_id: item.id, pharmacy_id: pharmacyId }
+       WHERE id = @product_id AND pharmacy_id = @pharmacy_id AND stock_quantity - @buffer >= @quantity`,
+      { quantity: item.quantity, product_id: item.id, pharmacy_id: pharmacyId, buffer }
     );
     if (stockResult.changes === 0) throw new Error(`${item.product_name} 재고가 부족합니다.`);
 
@@ -201,7 +202,8 @@ router.post('/', requireRole('CUSTOMER'), requirePharmacyScope, (req, res) => {
     }
 
     const cartItems = getCartItems(req.user.id, req.pharmacyId);
-    const total = assertCartReady(cartItems);
+    const buffer = onlineStockBuffer(req.pharmacyId);
+    const total = assertCartReady(cartItems, buffer);
     const preferredAt = String(req.body.preferred_at || '').trim();
     const memo = String(req.body.memo || '').trim();
     const contactName = String(req.body.contact_name || customer.name || '').trim();
@@ -234,7 +236,7 @@ router.post('/', requireRole('CUSTOMER'), requirePharmacyScope, (req, res) => {
         }
       );
 
-      insertOrderItems(orderResult.lastInsertRowid, cartItems, req.pharmacyId, req.user.id);
+      insertOrderItems(orderResult.lastInsertRowid, cartItems, req.pharmacyId, req.user.id, buffer);
 
       run(
         `INSERT INTO payments (order_id, payment_method, payment_provider, payment_status, paid_amount, paid_at)
@@ -280,7 +282,7 @@ router.post('/', requireRole('CUSTOMER'), requirePharmacyScope, (req, res) => {
       }
     );
 
-    insertOrderItems(orderResult.lastInsertRowid, cartItems, req.pharmacyId, req.user.id);
+    insertOrderItems(orderResult.lastInsertRowid, cartItems, req.pharmacyId, req.user.id, buffer);
 
     run(
       `INSERT INTO payments (order_id, payment_method, payment_provider, payment_status, paid_amount, paid_at)

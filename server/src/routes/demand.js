@@ -94,7 +94,9 @@ customerRouter.post('/restock-alerts', (req, res) => {
     "SELECT * FROM products WHERE id = @id AND pharmacy_id = @pharmacy_id AND status != 'HIDDEN'",
     { id: Number(req.body.product_id), pharmacy_id: req.customer.pharmacy_id }
   );
-  if (!product || product.product_type === 'OTC') return res.status(404).json({ message: '상품을 찾을 수 없습니다.' });
+  if (!product || product.product_type === 'OTC' || !Number(product.online_visible ?? 1)) {
+    return res.status(404).json({ message: '상품을 찾을 수 없습니다.' });
+  }
   if (isAvailable(product)) return res.status(400).json({ message: '지금 구매할 수 있는 상품입니다.' });
   const existing = getOne("SELECT id FROM restock_alerts WHERE customer_id = @customer_id AND product_id = @product_id AND status = 'WAITING'", {
     customer_id: req.customer.id,

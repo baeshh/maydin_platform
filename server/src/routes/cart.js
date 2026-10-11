@@ -2,6 +2,7 @@ const express = require('express');
 const { getAll, getOne, run } = require('../db');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { requirePharmacyScope } = require('../middleware/scope');
+const { onlineStockBuffer } = require('../services/product-import');
 
 const router = express.Router();
 
@@ -17,7 +18,8 @@ router.get('/', (req, res) => {
      ORDER BY c.id DESC`,
     { user_id: req.user.id, pharmacy_id: req.pharmacyId }
   );
-  res.json({ items });
+  const buffer = onlineStockBuffer(req.pharmacyId);
+  res.json({ items: items.map((item) => ({ ...item, stock_quantity: Math.max(0, item.stock_quantity - buffer) })) });
 });
 
 router.post('/', (req, res) => {
@@ -25,7 +27,7 @@ router.post('/', (req, res) => {
     product_id: Number(req.body.product_id),
     pharmacy_id: req.pharmacyId
   });
-  if (!product) return res.status(404).json({ message: '상품을 찾을 수 없습니다.' });
+  if (!product || !Number(product.online_visible ?? 1)) return res.status(404).json({ message: '상품을 찾을 수 없습니다.' });
   if (product.product_type === 'OTC') {
     return res.status(400).json({ message: '일반의약품은 온라인 결제가 불가합니다. 약국 방문 시 구매해 주세요.' });
   }

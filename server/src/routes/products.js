@@ -2,6 +2,7 @@ const express = require('express');
 const { getAll, getOne, run } = require('../db');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { requirePharmacyScope } = require('../middleware/scope');
+const { ImportError, assertNotSyncing, onlineStockBuffer } = require('../services/product-import');
 
 const router = express.Router();
 
@@ -53,8 +54,24 @@ function assertBarcodeAvailable(pharmacyId, barcode, exceptId = 0) {
   if (duplicate) throw new Error(`이미 "${duplicate.product_name}" 상품에 등록된 바코드입니다.`);
 }
 
-function publicProduct({ cost_price, supplier_id, safety_stock, pos_sale_enabled, ...product }) {
-  return product;
+function publicProduct(
+  { cost_price, supplier_id, safety_stock, pos_sale_enabled, online_visible, needs_review, external_code, ...product },
+  buffer = 0
+) {
+  // 기존 POS와 병행 중이면 동기화 사이의 오차만큼 온라인에 덜 보여 준다.
+  const stock = Math.max(0, Number(product.stock_quantity) - buffer);
+  return {
+    ...product,
+    stock_quantity: stock,
+    status: stock <= 0 && product.status === 'ON_SALE' ? 'SOLD_OUT' : product.status
+  };
+}
+
+const MALL_VISIBLE_SQL = "p.status != 'HIDDEN' AND COALESCE(p.product_type, 'GENERAL') != 'OTC' AND COALESCE(p.online_visible, 1) = 1";
+
+function syncBlocked(res, error) {
+  if (error instanceof ImportError) return res.status(error.status).json({ message: error.message });
+  throw error;
 }
 
 // 폐쇄몰: 그 약국의 승인된 회원만 상품을 본다. 약국 운영자·직원은 자기 약국, 본사 관리자는 모든 약국을 미리 볼 수 있다.
@@ -93,11 +110,12 @@ router.get('/mall', authenticate, mallPharmacy, (req, res) => {
     `SELECT p.*, c.category_name
      FROM products p
      LEFT JOIN categories c ON c.id = p.category_id
-     WHERE p.pharmacy_id = @pharmacy_id AND p.status != 'HIDDEN' AND COALESCE(p.product_type, 'GENERAL') != 'OTC'
+     WHERE p.pharmacy_id = @pharmacy_id AND ${MALL_VISIBLE_SQL}
      ORDER BY p.id DESC`,
     { pharmacy_id: req.mallPharmacyId }
   );
-  res.json({ products: products.map(publicProduct) });
+  const buffer = onlineStockBuffer(req.mallPharmacyId);
+  res.json({ products: products.map((product) => publicProduct(product, buffer)) });
 });
 
 router.get('/mall/:id', authenticate, mallPharmacy, (req, res) => {
@@ -106,11 +124,11 @@ router.get('/mall/:id', authenticate, mallPharmacy, (req, res) => {
      FROM products p
      JOIN pharmacies ph ON ph.id = p.pharmacy_id
      LEFT JOIN categories c ON c.id = p.category_id
-     WHERE p.id = @id AND p.pharmacy_id = @pharmacy_id AND p.status != 'HIDDEN' AND COALESCE(p.product_type, 'GENERAL') != 'OTC'`,
+     WHERE p.id = @id AND p.pharmacy_id = @pharmacy_id AND ${MALL_VISIBLE_SQL}`,
     { id: Number(req.params.id), pharmacy_id: req.mallPharmacyId }
   );
   if (!product) return res.status(404).json({ message: '상품을 찾을 수 없습니다.' });
-  res.json({ product: publicProduct(product) });
+  res.json({ product: publicProduct(product, onlineStockBuffer(req.mallPharmacyId)) });
 });
 
 router.use(authenticate, requireRole('PHARMACY_OWNER', 'ADMIN'), requirePharmacyScope);
@@ -153,6 +171,13 @@ router.post('/', (req, res) => {
     assertBarcodeAvailable(req.pharmacyId, barcode);
   } catch (error) {
     return res.status(400).json({ message: error.message });
+  }
+  if (Number(stock_quantity || 0) > 0) {
+    try {
+      assertNotSyncing(req.pharmacyId, '초기 재고 입력');
+    } catch (error) {
+      return syncBlocked(res, error);
+    }
   }
 
   let categoryId = null;
@@ -231,6 +256,20 @@ router.patch('/:id', (req, res) => {
   if (!Number.isInteger(nextStock) || nextStock < 0) {
     return res.status(400).json({ message: '재고는 0 이상의 정수여야 합니다.' });
   }
+  if (Number(product.stock_quantity) !== nextStock) {
+    try {
+      assertNotSyncing(req.pharmacyId, '재고 수정');
+    } catch (error) {
+      return syncBlocked(res, error);
+    }
+  }
+  const onlineVisible = Number(next.online_visible) === 0 || next.online_visible === false ? 0 : 1;
+  const needsReview =
+    req.body.needs_review !== undefined
+      ? Number(Boolean(Number(req.body.needs_review)))
+      : onlineVisible && !Number(product.online_visible ?? 1)
+        ? 0
+        : Number(product.needs_review || 0);
 
   run(
     `UPDATE products
@@ -249,11 +288,15 @@ router.patch('/:id', (req, res) => {
          pos_sale_enabled = @pos_sale_enabled,
          brand = @brand,
          supply_days = @supply_days,
+         online_visible = @online_visible,
+         needs_review = @needs_review,
          updated_at = CURRENT_TIMESTAMP
      WHERE id = @id AND pharmacy_id = @pharmacy_id`,
     {
       id: product.id,
       pharmacy_id: req.pharmacyId,
+      online_visible: onlineVisible,
+      needs_review: needsReview,
       brand,
       supply_days: supplyDays,
       product_name: next.product_name,
@@ -295,6 +338,28 @@ router.patch('/:id', (req, res) => {
   }
 
   res.json({ product: getOne('SELECT * FROM products WHERE id = @id', { id: product.id }) });
+});
+
+// 일괄 등록으로 들어온 상품을 확인한 뒤 온라인에 한꺼번에 공개하거나 내린다. 공개하면 구분 확인도 끝난 것으로 본다.
+router.post('/bulk-visibility', (req, res) => {
+  const ids = [...new Set((Array.isArray(req.body.ids) ? req.body.ids : []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+  if (!ids.length) return res.status(400).json({ message: '상품을 선택해 주세요.' });
+  if (ids.length > 5000) return res.status(400).json({ message: '한 번에 5,000개까지 바꿀 수 있습니다.' });
+  const visible = req.body.online_visible === true || Number(req.body.online_visible) === 1 ? 1 : 0;
+  const placeholders = ids.map((_, index) => `@id${index}`).join(',');
+  const params = { pharmacy_id: req.pharmacyId, visible };
+  ids.forEach((id, index) => {
+    params[`id${index}`] = id;
+  });
+  const result = run(
+    `UPDATE products
+     SET online_visible = @visible,
+         needs_review = CASE WHEN @visible = 1 THEN 0 ELSE needs_review END,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE pharmacy_id = @pharmacy_id AND id IN (${placeholders})`,
+    params
+  );
+  res.json({ updated: result.changes });
 });
 
 router.delete('/:id', (req, res) => {

@@ -186,6 +186,30 @@ function migrateMemberAuth(schema) {
   `);
 }
 
+function migrateProductImport() {
+  addColumnIfMissing('products', 'external_code', 'TEXT');
+  addColumnIfMissing('products', 'online_visible', 'INTEGER NOT NULL DEFAULT 1');
+  addColumnIfMissing('products', 'needs_review', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('pharmacies', 'pos_sync_enabled', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('pharmacies', 'pos_sync_reflected_until', 'TEXT');
+  addColumnIfMissing('pharmacies', 'pos_sync_reflected_log_id', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('import_batches', 'reflected_log_id', 'INTEGER');
+  addColumnIfMissing('pharmacies', 'online_stock_buffer', 'INTEGER NOT NULL DEFAULT 1');
+  addColumnIfMissing('pharmacies', 'pos_sync_interval_hours', 'INTEGER NOT NULL DEFAULT 24');
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_products_pharmacy_external_code
+      ON products(pharmacy_id, external_code) WHERE external_code IS NOT NULL AND external_code != '';
+    CREATE INDEX IF NOT EXISTS idx_import_batches_pharmacy ON import_batches(pharmacy_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_import_batch_rows_batch ON import_batch_rows(batch_id, row_no);
+    CREATE INDEX IF NOT EXISTS idx_inventory_logs_pharmacy_created ON inventory_logs(pharmacy_id, created_at);
+    -- 상품을 지울 때 외래 키 검사가 표 전체를 훑지 않도록 상품을 가리키는 열마다 인덱스를 둔다.
+    CREATE INDEX IF NOT EXISTS idx_import_batch_rows_product ON import_batch_rows(product_id);
+    CREATE INDEX IF NOT EXISTS idx_order_items_product ON order_items(product_id);
+    CREATE INDEX IF NOT EXISTS idx_carts_product ON carts(product_id);
+    CREATE INDEX IF NOT EXISTS idx_product_images_product ON product_images(product_id);
+  `);
+}
+
 function migratePos(schema) {
   if (needsUsersRebuild()) rebuildTable(schema, 'users');
   if (needsOrdersRebuild()) rebuildTable(schema, 'orders');
@@ -255,6 +279,7 @@ function migratePos(schema) {
   addColumnIfMissing('products', 'supply_days', 'INTEGER');
   migrateCustomerData();
   migrateMemberAuth(schema);
+  migrateProductImport();
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_suppliers_pharmacy ON suppliers(pharmacy_id, status);

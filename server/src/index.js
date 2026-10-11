@@ -23,6 +23,7 @@ const reportRoutes = require('./routes/reports');
 const customerRoutes = require('./routes/customers');
 const memberRoutes = require('./routes/members');
 const demandRoutes = require('./routes/demand');
+const productImportRoutes = require('./routes/product-import');
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -32,6 +33,8 @@ migrate();
 // 같은 서버의 리버스 프록시(nginx 등)를 거칠 때만 X-Forwarded-For를 믿는다. 가입·로그인 실패 제한이 IP 기준이다.
 app.set('trust proxy', 'loopback');
 app.use(cors());
+// 2만 행 일괄 등록 본문이 8MB를 넘을 수 있어 이 경로만 한도를 늘린다.
+app.use('/api/product-import', express.json({ limit: '25mb' }));
 app.use(express.json({ limit: '8mb' }));
 app.use(express.urlencoded({ extended: true, limit: '8mb' }));
 
@@ -57,13 +60,18 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/members', memberRoutes);
 app.use('/api/demand', demandRoutes);
+app.use('/api/product-import', productImportRoutes);
 
 const nodeModules = path.join(__dirname, '../node_modules');
 const vendorFiles = {
   'jsbarcode.min.js': path.join(nodeModules, 'jsbarcode/dist/JsBarcode.all.min.js'),
   'qrcode.js': path.join(nodeModules, 'qrcode-generator/dist/qrcode.js'),
-  'html5-qrcode.min.js': path.join(nodeModules, 'html5-qrcode/html5-qrcode.min.js')
+  'html5-qrcode.min.js': path.join(nodeModules, 'html5-qrcode/html5-qrcode.min.js'),
+  'xlsx.full.min.js': path.join(nodeModules, 'xlsx/dist/xlsx.full.min.js')
 };
+for (const dir of ['build', 'cmaps', 'standard_fonts']) {
+  app.use(`/vendor/pdfjs/${dir}`, express.static(path.join(nodeModules, 'pdfjs-dist', dir), { index: false, maxAge: '1d' }));
+}
 app.get('/vendor/:file', (req, res, next) => {
   const file = vendorFiles[req.params.file];
   if (!file) return next();

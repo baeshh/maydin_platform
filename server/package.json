@@ -18,6 +18,8 @@
     "html5-qrcode": "^2.3.8",
     "jsbarcode": "^3.12.3",
     "jsonwebtoken": "^9.0.2",
-    "qrcode-generator": "^2.0.4"
+    "pdfjs-dist": "^4.10.38",
+    "qrcode-generator": "^2.0.4",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   }
 }

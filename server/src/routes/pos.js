@@ -8,6 +8,7 @@ const { LotError, parseLotInput, insertLot, lotLabel } = require('../services/lo
 const { taxBreakdown } = require('../services/tax');
 const { CustomerError } = require('../services/customers');
 const { issueSignupCode, receiptSignupCode, readHealth } = require('../services/member-auth');
+const { ImportError, assertNotSyncing } = require('../services/product-import');
 
 const router = express.Router();
 
@@ -41,7 +42,8 @@ function handle(fn) {
         error instanceof VanError ||
         error instanceof PointError ||
         error instanceof LotError ||
-        error instanceof CustomerError
+        error instanceof CustomerError ||
+        error instanceof ImportError
       ) {
         return res.status(error.status).json({ message: error.message });
       }
@@ -1777,6 +1779,7 @@ router.post(
     const price = toInt(req.body.price, '판매가', { min: 0, max: 10000000 });
     const stock = toInt(req.body.stock_quantity ?? 0, '재고', { min: 0, max: 100000 });
     const safetyStock = toInt(req.body.safety_stock ?? 0, '안전재고', { min: 0, max: 100000 });
+    if (stock > 0) assertNotSyncing(req.pharmacyId, '초기 재고 입력');
     const productType = String(req.body.product_type || 'GENERAL').toUpperCase();
     if (!['GENERAL', 'OTC'].includes(productType)) throw new PosError('상품 유형이 올바르지 않습니다.');
     const taxType = String(req.body.tax_type || 'TAXABLE').toUpperCase();
@@ -2111,6 +2114,7 @@ router.post(
     const config = STOCK_ADJUST_TYPES[type];
     if (!config) throw new PosError('입고·폐기·실사 조정 중 하나를 선택해 주세요.');
     if (type !== 'RECEIVE') requireOwner(req, config.label);
+    assertNotSyncing(req.pharmacyId, config.label);
     const reason = cleanText(req.body.reason);
     const lot = type === 'RECEIVE' ? parseLotInput(req.body) : null;
     const lotId = type === 'DISPOSE' && req.body.lot_id ? Number(req.body.lot_id) : null;

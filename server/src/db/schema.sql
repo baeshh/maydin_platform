@@ -500,6 +500,59 @@ CREATE TABLE IF NOT EXISTS verification_codes (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS import_profiles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  column_map TEXT NOT NULL,
+  options TEXT NOT NULL DEFAULT '{}',
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (pharmacy_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS import_batches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  mode TEXT NOT NULL CHECK (mode IN ('MIGRATE', 'ADD', 'SYNC')),
+  status TEXT NOT NULL DEFAULT 'PREVIEW' CHECK (status IN ('PREVIEW', 'APPLIED', 'REVERTED', 'EXPIRED')),
+  file_name TEXT,
+  source_type TEXT,
+  options TEXT NOT NULL DEFAULT '{}',
+  snapshot_at TEXT,
+  reflected_until TEXT,
+  reflected_log_id INTEGER,
+  total_rows INTEGER NOT NULL DEFAULT 0,
+  create_count INTEGER NOT NULL DEFAULT 0,
+  update_count INTEGER NOT NULL DEFAULT 0,
+  unchanged_count INTEGER NOT NULL DEFAULT 0,
+  skip_count INTEGER NOT NULL DEFAULT 0,
+  error_count INTEGER NOT NULL DEFAULT 0,
+  warning_count INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  applied_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  applied_at TEXT,
+  reverted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  reverted_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS import_batch_rows (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  batch_id INTEGER NOT NULL REFERENCES import_batches(id) ON DELETE CASCADE,
+  row_no INTEGER NOT NULL,
+  input TEXT NOT NULL,
+  product_id INTEGER REFERENCES products(id) ON DELETE SET NULL,
+  action TEXT NOT NULL CHECK (action IN ('CREATE', 'UPDATE', 'UNCHANGED', 'SKIP', 'ERROR')),
+  before_values TEXT,
+  after_values TEXT,
+  stock_before INTEGER,
+  stock_after INTEGER,
+  messages TEXT NOT NULL DEFAULT '[]',
+  created_lot_id INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS customer_consents (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
