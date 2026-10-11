@@ -8,10 +8,22 @@ const { LotError, parseLotInput, insertLot, lotLabel } = require('../services/lo
 const { taxBreakdown } = require('../services/tax');
 const { CustomerError } = require('../services/customers');
 const { issueSignupCode, receiptSignupCode, readHealth } = require('../services/member-auth');
-const { ImportError, assertNotSyncing, syncStatus } = require('../services/product-import');
+const { ImportError, assertNotSyncing, syncSettings, syncStatus } = require('../services/product-import');
 const { ProductKindError, normalizeProductType, posSaleBlockReason, isPointEligible } = require('../services/product-kind');
 const { saleCost, refundCost } = require('../services/order-cost');
 const { recordHistory } = require('../services/order-flow');
+const {
+  OUTAGE_KINDS,
+  RECOVERY_SOURCES,
+  RecoveryError,
+  assertOutageOpen,
+  createOutage,
+  listOutages,
+  outageDetail,
+  parseClientSaleId,
+  parseRecovery,
+  saleFingerprint
+} = require('../services/pos-recovery');
 
 const router = express.Router();
 
@@ -48,7 +60,8 @@ function handle(fn) {
         error instanceof PointError ||
         error instanceof LotError ||
         error instanceof CustomerError ||
-        error instanceof ImportError
+        error instanceof ImportError ||
+        error instanceof RecoveryError
       ) {
         return res.status(error.status).json({ message: error.message });
       }
@@ -1026,45 +1039,79 @@ router.post(
     const { terminal, session } = requireOpenSession(req);
     const rawItems = Array.isArray(req.body.items) ? req.body.items : [];
     if (rawItems.length === 0) throw new PosError('판매할 상품을 담아 주세요.');
+    const clientSaleId = parseClientSaleId(req.body.client_sale_id);
+    const recovery = parseRecovery(req.body.recovery, req.pharmacyId);
+    if (recovery) {
+      if (!clientSaleId) throw new PosError('장애 복구 거래에는 거래 고유번호가 필요합니다.');
+      if (recovery.source === 'MANUAL') requireOwner(req, '수기 거래 복구');
+    }
 
+    // 장애 중 판매는 그때 받은 가격을 그대로 기록한다. 같은 상품을 다른 가격으로 두 번 담을 수는 없다.
     const merged = new Map();
     for (const raw of rawItems) {
       const productId = Number(raw.product_id);
       const quantity = toInt(raw.quantity, '수량', { min: 1, max: 999 });
-      merged.set(productId, (merged.get(productId) || 0) + quantity);
+      const price = recovery && raw.price !== undefined && raw.price !== null ? toInt(raw.price, '판매 가격') : null;
+      const line = merged.get(productId);
+      if (line && line.price !== price) throw new PosError('같은 상품을 다른 가격으로 나눠 담을 수 없습니다.');
+      merged.set(productId, { quantity: (line?.quantity || 0) + quantity, price });
     }
 
     const customerId = req.body.customer_id ? Number(req.body.customer_id) : null;
-    const counselOrderId = req.body.counsel_order_id ? Number(req.body.counsel_order_id) : null;
+    const counselOrderId = recovery ? null : req.body.counsel_order_id ? Number(req.body.counsel_order_id) : null;
     const discountAmount = toInt(req.body.discount_amount || 0, '할인 금액');
     const discountReason = cleanText(req.body.discount_reason);
     const memo = cleanText(req.body.memo, 500);
+    const fingerprint = clientSaleId
+      ? saleFingerprint({ items: merged, discountAmount, payments: req.body.payments, customerId, occurredAt: recovery?.occurredAt })
+      : null;
 
     const receipt = transaction(() => {
+      if (clientSaleId) {
+        const existing = getOne('SELECT id, client_sale_hash FROM orders WHERE pharmacy_id = @pharmacy_id AND client_sale_id = @id', {
+          pharmacy_id: req.pharmacyId,
+          id: clientSaleId
+        });
+        if (existing) {
+          if (existing.client_sale_hash !== fingerprint) {
+            throw new PosError('같은 거래 고유번호로 내용이 다른 거래가 이미 저장되어 있습니다. 판매 내역을 확인해 주세요.', 409);
+          }
+          return { ...buildReceipt(req, existing.id), duplicate: true };
+        }
+      }
+      if (recovery) assertOutageOpen(recovery.outage);
+
       const lines = [];
-      for (const [productId, quantity] of merged) {
+      for (const [productId, { quantity, price: chargedPrice }] of merged) {
         const product = getOne('SELECT * FROM products WHERE id = @id AND pharmacy_id = @pharmacy_id', {
           id: productId,
           pharmacy_id: req.pharmacyId
         });
-        if (!product || product.status === 'HIDDEN') throw new PosError('판매할 수 없는 상품이 포함되어 있습니다.');
+        if (!product || (!recovery && product.status === 'HIDDEN')) throw new PosError('판매할 수 없는 상품이 포함되어 있습니다.');
         const blocked = posSaleBlockReason(product, { isPharmacist: isOwner(req) });
         if (blocked) throw new PosError(blocked.message, blocked.status);
-        if (product.status !== 'ON_SALE' || product.stock_quantity <= 0) {
-          throw new PosError(`${product.product_name}은(는) 품절 상품입니다.`);
+        // 장애 중에 이미 건넨 상품은 시스템 재고가 모자라도 기록한다. 모자란 만큼은 재고 대사에서 맞춘다.
+        if (!recovery) {
+          if (product.status !== 'ON_SALE' || product.stock_quantity <= 0) {
+            throw new PosError(`${product.product_name}은(는) 품절 상품입니다.`);
+          }
+          if (product.stock_quantity < quantity) {
+            throw new PosError(`${product.product_name} 재고가 부족합니다. (현재 ${product.stock_quantity}개)`);
+          }
         }
-        if (product.stock_quantity < quantity) {
-          throw new PosError(`${product.product_name} 재고가 부족합니다. (현재 ${product.stock_quantity}개)`);
-        }
-        const price = Number(product.discount_price || product.price);
-        lines.push({ product, quantity, price, total: price * quantity });
+        const price = chargedPrice ?? Number(product.discount_price || product.price);
+        const taken = Math.min(quantity, Math.max(0, product.stock_quantity));
+        lines.push({ product, quantity, price, total: price * quantity, taken, shortage: quantity - taken });
       }
 
       const subtotal = lines.reduce((sum, line) => sum + line.total, 0);
       if (discountAmount > subtotal) throw new PosError('할인 금액이 상품 합계보다 클 수 없습니다.');
       if (discountAmount > 0 && !discountReason) throw new PosError('할인 사유를 입력해 주세요.');
       const finalAmount = subtotal - discountAmount;
-      const payments = normalizePayments(req.body.payments, finalAmount);
+      const payments = normalizePayments(req.body.payments, finalAmount, { allowPoint: !recovery });
+      if (recovery && payments.some((p) => p.van_transaction_id)) {
+        throw new PosError('장애 중 거래는 카드 단말기 영수증의 승인번호를 직접 입력해 주세요.');
+      }
 
       let customer = null;
       if (customerId) {
@@ -1091,11 +1138,14 @@ router.post(
         `INSERT INTO orders (
           order_number, pharmacy_id, customer_id, order_type, sales_channel, total_product_amount, delivery_fee,
           discount_amount, final_amount, payment_status, order_status, delivery_status, memo, contact_name,
-          contact_phone, pos_terminal_id, pos_session_id, cashier_user_id, discount_reason, counsel_order_id
+          contact_phone, pos_terminal_id, pos_session_id, cashier_user_id, discount_reason, counsel_order_id,
+          client_sale_id, client_sale_hash, recovery_source, recovered_at, outage_id, created_at, updated_at
         ) VALUES (
           @order_number, @pharmacy_id, @customer_id, 'POS_SALE', 'POS', @subtotal, 0,
           @discount_amount, @final_amount, 'PAID', 'COMPLETED', 'NOT_APPLICABLE', @memo, @contact_name,
-          @contact_phone, @terminal_id, @session_id, @user_id, @discount_reason, @counsel_order_id
+          @contact_phone, @terminal_id, @session_id, @user_id, @discount_reason, @counsel_order_id,
+          @client_sale_id, @client_sale_hash, @recovery_source, @recovered_at, @outage_id,
+          COALESCE(@occurred_at, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP
         )`,
         {
           order_number: nextOrderNumber('POS', req.pharmacyId),
@@ -1111,7 +1161,13 @@ router.post(
           session_id: session.id,
           user_id: req.user.id,
           discount_reason: discountAmount > 0 ? discountReason : null,
-          counsel_order_id: counsel ? counsel.id : null
+          counsel_order_id: counsel ? counsel.id : null,
+          client_sale_id: clientSaleId,
+          client_sale_hash: fingerprint,
+          recovery_source: recovery ? recovery.source : null,
+          recovered_at: recovery ? getOne('SELECT CURRENT_TIMESTAMP AS now').now : null,
+          outage_id: recovery?.outage ? recovery.outage.id : null,
+          occurred_at: recovery ? recovery.occurredAt : null
         }
       );
       const orderId = orderResult.lastInsertRowid;
@@ -1125,10 +1181,10 @@ router.post(
         run(
           `INSERT INTO order_items (
             order_id, product_id, product_name, quantity, price, total_price, product_type, tax_type, discount_amount, discount_reason,
-            unit_cost, cost_amount, cost_source
+            unit_cost, cost_amount, cost_source, stock_shortage
           ) VALUES (
             @order_id, @product_id, @product_name, @quantity, @price, @total_price, @product_type, @tax_type, @discount_amount, @discount_reason,
-            @unit_cost, @cost_amount, @cost_source
+            @unit_cost, @cost_amount, @cost_source, @stock_shortage
           )`,
           {
             order_id: orderId,
@@ -1141,26 +1197,30 @@ router.post(
             tax_type: line.product.tax_type || 'TAXABLE',
             discount_amount: share,
             discount_reason: share > 0 ? discountReason : null,
+            stock_shortage: line.shortage,
             ...saleCost(line.product.id, line.quantity)
           }
         );
 
+        if (line.taken === 0) return;
         const stock = run(
           `UPDATE products
            SET stock_quantity = stock_quantity - @quantity,
                status = CASE WHEN stock_quantity - @quantity <= 0 THEN 'SOLD_OUT' ELSE status END,
                updated_at = CURRENT_TIMESTAMP
            WHERE id = @id AND pharmacy_id = @pharmacy_id AND stock_quantity >= @quantity`,
-          { id: line.product.id, pharmacy_id: req.pharmacyId, quantity: line.quantity }
+          { id: line.product.id, pharmacy_id: req.pharmacyId, quantity: line.taken }
         );
         if (stock.changes === 0) throw new PosError(`${line.product.product_name} 재고가 부족합니다.`);
         logInventory(
           req,
           line.product.id,
           line.product.stock_quantity,
-          line.product.stock_quantity - line.quantity,
+          line.product.stock_quantity - line.taken,
           'POS_SALE',
-          '현장 판매 재고 차감',
+          recovery
+            ? `장애 복구 판매 재고 차감${line.shortage ? ` · 시스템 재고 ${line.shortage}개 부족 (재고 대사 필요)` : ''}`
+            : '현장 판매 재고 차감',
           orderId
         );
       });
@@ -1180,6 +1240,9 @@ router.post(
       }
 
       insertPayments(orderId, payments, { session, terminal, userId: req.user.id, customerId: customer ? customer.id : null });
+      if (recovery) {
+        run('UPDATE payments SET paid_at = @at WHERE order_id = @id', { id: orderId, at: recovery.occurredAt });
+      }
 
       const boost = customer ? earningContext(req.pharmacyId, customer.id, { excludeOrderId: orderId }) : null;
       const earned = customer ? calcEarn(policy, eligible, pointsUsed, boost) : 0;
@@ -1221,13 +1284,125 @@ router.post(
       if (discountAmount > 0) {
         audit(req, 'POS_DISCOUNT', 'ORDER', orderId, `할인 ${won(discountAmount)} · 사유: ${discountReason}`);
       }
-      if (!customer && finalAmount > 0) issueSignupCode({ pharmacyId: req.pharmacyId, orderId, userId: req.user.id });
+      if (recovery) {
+        const shortage = lines.filter((line) => line.shortage > 0).map((line) => `${line.product.product_name} ${line.shortage}개`);
+        audit(
+          req,
+          'POS_SALE_RECOVERED',
+          'ORDER',
+          orderId,
+          `${RECOVERY_SOURCES[recovery.source]} · 장애 #${recovery.outage.id} · 실제 판매 ${recovery.occurredAt} UTC${recovery.note ? ` · ${recovery.note}` : ''}${shortage.length ? ` · 시스템 재고 부족: ${shortage.join(', ')}` : ''}`
+        );
+      }
+      if (!recovery && !customer && finalAmount > 0) issueSignupCode({ pharmacyId: req.pharmacyId, orderId, userId: req.user.id });
 
       return buildReceipt(req, orderId);
     })();
 
-    res.status(201);
+    res.status(receipt.duplicate ? 200 : 201);
     return receipt;
+  })
+);
+
+// 장애 때 단말기에 보관할 상품 목록. 바코드·가격·구분만 담고 고객 정보는 넣지 않는다.
+router.get(
+  '/offline-catalog',
+  handle((req) => {
+    const products = getAll(
+      `SELECT p.id, p.product_name, p.barcode, p.price, p.discount_price, COALESCE(p.discount_price, p.price) AS sale_price,
+              COALESCE(p.product_type, 'GENERAL') AS product_type, p.status, p.stock_quantity, p.category_id, c.category_name
+       FROM products p LEFT JOIN categories c ON c.id = p.category_id
+       WHERE p.pharmacy_id = @pharmacy_id AND p.status != 'HIDDEN' AND COALESCE(p.pos_sale_enabled, 1) = 1
+         AND COALESCE(p.product_type, 'GENERAL') != 'ETC'
+       ORDER BY p.product_name ASC`,
+      { pharmacy_id: req.pharmacyId }
+    );
+    return { products, generated_at: new Date().toISOString() };
+  })
+);
+
+router.get(
+  '/outages',
+  handle((req) => ({ outages: listOutages(req.pharmacyId), kinds: OUTAGE_KINDS }))
+);
+
+router.post(
+  '/outages',
+  handle((req, res) => {
+    const outage = transaction(() => {
+      const created = createOutage({
+        pharmacyId: req.pharmacyId,
+        userId: req.user.id,
+        kind: req.body.kind,
+        startedAt: req.body.started_at,
+        endedAt: req.body.ended_at,
+        note: req.body.note
+      });
+      audit(req, 'POS_OUTAGE', 'OUTAGE', created.id, `장애 기록 · ${OUTAGE_KINDS[created.kind]} · ${created.started_at} ~ ${created.ended_at} UTC${created.note ? ` · ${created.note}` : ''}`);
+      return created;
+    })();
+    res.status(201);
+    return { outage };
+  })
+);
+
+router.get(
+  '/outages/:id',
+  handle((req) => ({ ...outageDetail(req.pharmacyId, req.params.id), legacy_stock: syncSettings(req.pharmacyId).enabled }))
+);
+
+// 장애 뒤 재고 대사: 복구 거래에 나온 상품을 모두 세어 시스템 재고를 실제 수량으로 맞추고 장애를 닫는다.
+// 기존 POS가 재고 기준이면 수량은 기존 POS에서 맞추므로 확인만 기록한다.
+router.post(
+  '/outages/:id/reconcile',
+  handle((req) => {
+    requireOwner(req, '장애 후 재고 대사');
+    const legacy = syncSettings(req.pharmacyId).enabled;
+    const note = cleanText(req.body.note, 300);
+    const counts = new Map((Array.isArray(req.body.counts) ? req.body.counts : []).map((c) => [Number(c.product_id), c.counted_quantity]));
+
+    return transaction(() => {
+      const detail = outageDetail(req.pharmacyId, req.params.id);
+      if (detail.outage.status === 'RECONCILED') throw new PosError('이미 재고 대사를 마친 장애입니다.', 409);
+      const adjusted = [];
+      if (!legacy) {
+        for (const item of detail.products) {
+          if (!counts.has(item.product_id) || counts.get(item.product_id) === '' || counts.get(item.product_id) === null) {
+            throw new PosError(`${item.product_name}의 실제 재고를 세어 입력해 주세요.`);
+          }
+          const after = toInt(counts.get(item.product_id), `${item.product_name} 실사 수량`, { min: 0, max: 100000 });
+          const before = getOne('SELECT stock_quantity FROM products WHERE id = @id', { id: item.product_id }).stock_quantity;
+          if (after === before) continue;
+          run(
+            `UPDATE products
+             SET stock_quantity = @after,
+                 status = CASE
+                   WHEN @after > 0 AND status = 'SOLD_OUT' THEN 'ON_SALE'
+                   WHEN @after <= 0 AND status = 'ON_SALE' THEN 'SOLD_OUT'
+                   ELSE status END,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = @id AND stock_quantity = @before`,
+            { id: item.product_id, before, after }
+          );
+          logStock(req, item.product_id, before, after, 'COUNT_ADJUST', `장애 #${detail.outage.id} 후 재고 대사${note ? ` · ${note}` : ''}`);
+          adjusted.push({ product_id: item.product_id, product_name: item.product_name, before, after });
+        }
+      }
+      run(
+        `UPDATE pos_outages
+         SET status = 'RECONCILED', reconciled_at = CURRENT_TIMESTAMP, reconciled_by = @user_id, reconcile_note = @note
+         WHERE id = @id AND status != 'RECONCILED'`,
+        { id: detail.outage.id, user_id: req.user.id, note: note || null }
+      );
+      audit(
+        req,
+        'POS_OUTAGE_RECONCILE',
+        'OUTAGE',
+        detail.outage.id,
+        `장애 #${detail.outage.id} 재고 대사 완료 · 상품 ${detail.products.length}종 확인${legacy ? ' (기존 POS 재고 기준 — 수량은 기존 POS에서 조정)' : ` · 조정 ${adjusted.length}종`}${adjusted.length ? ` (${adjusted.map((a) => `${a.product_name} ${a.before}→${a.after}`).join(', ')})` : ''}`
+      );
+      return { ...outageDetail(req.pharmacyId, detail.outage.id), adjusted, legacy_stock: legacy };
+    })();
   })
 );
 

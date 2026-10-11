@@ -248,6 +248,22 @@ function migrateOrderFlow() {
   `);
 }
 
+// 장애 대응: 같은 판매를 두 번 저장하지 않도록 단말기가 만든 거래 고유번호를 받고, 복구한 거래를 표시한다.
+function migratePosRecovery() {
+  addColumnIfMissing('orders', 'client_sale_id', 'TEXT');
+  addColumnIfMissing('orders', 'client_sale_hash', 'TEXT');
+  addColumnIfMissing('orders', 'recovery_source', 'TEXT');
+  addColumnIfMissing('orders', 'recovered_at', 'TEXT');
+  addColumnIfMissing('orders', 'outage_id', 'INTEGER');
+  addColumnIfMissing('order_items', 'stock_shortage', 'INTEGER NOT NULL DEFAULT 0');
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_client_sale
+      ON orders(pharmacy_id, client_sale_id) WHERE client_sale_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_orders_outage ON orders(outage_id) WHERE outage_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_pos_outages_pharmacy ON pos_outages(pharmacy_id, id DESC);
+  `);
+}
+
 function migratePos(schema) {
   if (needsUsersRebuild()) rebuildTable(schema, 'users');
   if (needsOrdersRebuild()) rebuildTable(schema, 'orders');
@@ -319,6 +335,7 @@ function migratePos(schema) {
   migrateMemberAuth(schema);
   migrateProductImport();
   migrateOrderFlow();
+  migratePosRecovery();
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_suppliers_pharmacy ON suppliers(pharmacy_id, status);
@@ -415,6 +432,7 @@ function run(sql, params = {}) {
 
 module.exports = {
   db,
+  dbPath,
   migrate,
   assignMemberCode,
   assignReferralCode,

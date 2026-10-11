@@ -2,7 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const { getAll, getOne, run, transaction } = require('../db');
+const { db, getAll, getOne, run, transaction } = require('../db');
+const backup = require('../services/backup');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { pharmacyPerformance } = require('../services/members');
 const { sendCsv } = require('../services/csv');
@@ -246,5 +247,39 @@ router.delete('/inquiries/:id', (req, res) => {
   run('DELETE FROM partnership_inquiries WHERE id = @id', { id });
   res.json({ ok: true, id });
 });
+
+// 백업 파일 자체는 내려주지 않는다(개인정보). 상태 확인과 즉시 백업·복구 훈련만 제공한다.
+router.get('/backups', (req, res) => {
+  res.json(backup.status());
+});
+
+let backupBusy = false;
+
+async function exclusive(res, fn) {
+  if (backupBusy) return res.status(409).json({ message: '다른 백업 작업이 진행 중입니다. 잠시 후 다시 시도하세요.' });
+  backupBusy = true;
+  try {
+    return await fn();
+  } catch (error) {
+    console.error('[backup]', error);
+    return res.status(500).json({ message: `백업 작업 실패: ${error.message}` });
+  } finally {
+    backupBusy = false;
+  }
+}
+
+router.post('/backups', (req, res) =>
+  exclusive(res, async () => {
+    const entry = await backup.createBackup(db, { reason: 'manual' });
+    res.status(entry.ok ? 201 : 500).json({ backup: entry, ...backup.status() });
+  })
+);
+
+router.post('/backups/drill', (req, res) =>
+  exclusive(res, async () => {
+    const drill = await backup.runRestoreDrill({ file: req.body && req.body.file ? String(req.body.file).replace(/[^A-Za-z0-9._-]/g, '') : undefined });
+    res.status(drill.ok ? 200 : 500).json({ drill, ...backup.status() });
+  })
+);
 
 module.exports = router;

@@ -7,7 +7,12 @@
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
     "init-db": "node src/db/init.js",
-    "test": "node tests/run.mjs"
+    "test": "node tests/run.mjs",
+    "backup": "node scripts/backup.js backup",
+    "backup:status": "node scripts/backup.js status",
+    "backup:verify": "node scripts/backup.js verify",
+    "backup:drill": "node scripts/backup.js drill",
+    "backup:restore": "node scripts/backup.js restore"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

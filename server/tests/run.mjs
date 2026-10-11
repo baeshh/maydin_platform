@@ -34,7 +34,13 @@ async function waitForServer(base, child) {
 }
 
 const tempDir = mkdtempSync(path.join(tmpdir(), 'maydin-test-'));
-const env = { ...process.env, DB_PATH: path.join(tempDir, 'test.db'), PORT: String(await freePort()), NODE_ENV: 'test' };
+const env = {
+  ...process.env,
+  DB_PATH: path.join(tempDir, 'test.db'),
+  BACKUP_DIR: path.join(tempDir, 'backups'),
+  PORT: String(await freePort()),
+  NODE_ENV: 'test'
+};
 const base = `http://127.0.0.1:${env.PORT}`;
 
 const init = spawnSync(process.execPath, ['src/db/init.js'], { cwd: serverDir, env, encoding: 'utf8' });
@@ -51,7 +57,8 @@ server.stderr.on('data', (chunk) => (serverLog += chunk));
 let failed = 0;
 try {
   await waitForServer(base, server);
-  const files = readdirSync(testsDir).filter((name) => name.endsWith('.test.mjs') && name.includes(filter)).sort();
+  const files = readdirSync(testsDir).filter((name) => name.endsWith('.test.mjs') && name.includes(filter))
+    .sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
   for (const file of files) {
     console.log(`\n▶ ${file}`);
     const result = spawnSync(process.execPath, [path.join(testsDir, file)], {

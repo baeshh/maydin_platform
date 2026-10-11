@@ -3,7 +3,8 @@ require('dotenv').config();
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
-const { migrate } = require('./db');
+const { db, getOne, migrate } = require('./db');
+const { startSchedule: startBackupSchedule } = require('./services/backup');
 
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
@@ -38,8 +39,15 @@ app.use('/api/product-import', express.json({ limit: '25mb' }));
 app.use(express.json({ limit: '8mb' }));
 app.use(express.urlencoded({ extended: true, limit: '8mb' }));
 
+// POS가 15초마다 부르는 장애 감지용 확인. 프로세스만 살아 있고 DB를 못 읽으면 503으로 알린다.
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, service: 'maydin-closed-mall', time: new Date().toISOString() });
+  res.set('Cache-Control', 'no-store');
+  try {
+    getOne('SELECT 1 AS ok');
+    res.json({ ok: true, service: 'maydin-closed-mall', db: 'ok', time: new Date().toISOString() });
+  } catch (error) {
+    res.status(503).json({ ok: false, service: 'maydin-closed-mall', db: 'error', time: new Date().toISOString() });
+  }
 });
 
 app.use('/api/auth', authRoutes);
@@ -92,4 +100,5 @@ app.use((err, req, res, next) => {
 
 app.listen(port, () => {
   console.log(`Maydin closed mall server running on http://localhost:${port}`);
+  startBackupSchedule(db);
 });
