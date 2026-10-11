@@ -348,11 +348,51 @@ CREATE TABLE IF NOT EXISTS van_transactions (
   card_company TEXT,
   masked_identity TEXT,
   original_approval_number TEXT,
-  status TEXT NOT NULL DEFAULT 'APPROVED' CHECK (status IN ('APPROVED', 'USED', 'VOIDED', 'DECLINED')),
+  status TEXT NOT NULL DEFAULT 'APPROVED'
+    CHECK (status IN ('REQUESTED', 'APPROVED', 'USED', 'VOIDED', 'DECLINED', 'UNKNOWN', 'NOT_FOUND')),
   order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
   is_demo INTEGER NOT NULL DEFAULT 1,
   message TEXT,
   created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  request_id TEXT,
+  sale_draft_id INTEGER,
+  source TEXT,
+  van_reference TEXT,
+  resolved_at TEXT,
+  resolved_by INTEGER
+);
+
+-- 결제 전에 서버에 올려 두는 판매. 카드 승인은 이 판매에 묶이고, 승인 뒤에는 상품·금액을 바꿀 수 없다.
+CREATE TABLE IF NOT EXISTS pos_sale_drafts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  terminal_id INTEGER NOT NULL REFERENCES pos_terminals(id) ON DELETE CASCADE,
+  session_id INTEGER NOT NULL REFERENCES pos_sessions(id) ON DELETE CASCADE,
+  client_sale_id TEXT NOT NULL,
+  pickup_order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
+  request_json TEXT,
+  request_hash TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'CONFIRMED', 'CANCELED')),
+  order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  closed_at TEXT,
+  UNIQUE (pharmacy_id, client_sale_id)
+);
+
+-- 데모 VAN사의 거래 원장. 실제 VAN사 서버에 있는 기록을 흉내 내며, 결과 조회(대사)는 여기서만 답을 찾는다.
+CREATE TABLE IF NOT EXISTS van_demo_ledger (
+  request_id TEXT PRIMARY KEY,
+  pharmacy_id INTEGER NOT NULL,
+  transaction_type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  approval_number TEXT,
+  card_company TEXT,
+  original_approval_number TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

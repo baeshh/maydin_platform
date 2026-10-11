@@ -1,3 +1,6 @@
+// 카운터로 등록된 PC의 기기 토큰. 로그인한 사람이 아니라 PC에 묶이므로 로그아웃해도 지우지 않는다.
+const POS_DEVICE_KEY = 'maydin_pos_device';
+
 const api = {
   async request(path, options = {}) {
     const token = localStorage.getItem('token');
@@ -6,6 +9,8 @@ const api = {
       ...(options.headers || {})
     };
     if (token) headers.Authorization = `Bearer ${token}`;
+    const device = path.startsWith('/pos/') ? localStorage.getItem(POS_DEVICE_KEY) : null;
+    if (device) headers['X-POS-Device'] = device;
 
     const res = await fetch(`/api${path}`, {
       ...options,
@@ -16,6 +21,8 @@ const api = {
     if (!res.ok) {
       const error = new Error(data.message || '요청에 실패했습니다.');
       error.status = res.status;
+      if (data.reason) error.reason = data.reason;
+      error.data = data;
       throw error;
     }
     return data;
@@ -28,6 +35,46 @@ const api = {
 
 function $(selector) {
   return document.querySelector(selector);
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
+// http(s) 주소와 이 서버의 경로만 통과시킨다. javascript:·data: 등은 빈 문자열이 된다.
+function safeUrl(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw || raw.length > 2048 || /[\u0000-\u001f\\]/.test(raw)) return '';
+  try {
+    const url = new URL(raw, location.origin);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : '';
+  } catch (error) {
+    return '';
+  }
+}
+
+// 서버에서 온 값은 textContent·속성으로만 넣어 HTML로 해석되지 않게 한다.
+// 이벤트는 함수로만 받고, src·href는 safeUrl을 통과한 값만 넣는다.
+function el(tag, props = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(props || {})) {
+    if (value === undefined || value === null || value === false) continue;
+    if (key.startsWith('on')) {
+      if (typeof value !== 'function') throw new TypeError(`${key}에는 함수만 넣을 수 있습니다.`);
+      node.addEventListener(key.slice(2), value);
+    } else if (key === 'class') {
+      node.className = value;
+    } else if (key === 'src' || key === 'href') {
+      const url = safeUrl(value);
+      if (url) node.setAttribute(key, url);
+    } else if (key === 'value' && 'value' in node) {
+      node.value = value;
+    } else {
+      node.setAttribute(key, value === true ? '' : String(value));
+    }
+  }
+  node.append(...children.flat().filter((child) => child !== null && child !== undefined && child !== false));
+  return node;
 }
 
 function money(value) {
@@ -172,6 +219,92 @@ async function guardOnlineOrder(noticeParent, controls = []) {
   }
   showOrderGuardNotice(noticeParent, status.message);
   return false;
+}
+
+/* ---------- 온라인 결제 ---------- */
+
+let paymentSettings = null;
+
+// 결제 모드 안내를 붙이고, 결제가 닫혀 있으면 주문 버튼을 막는다. 서버도 결제 요청 때 다시 막는다.
+async function showPaymentMode(parent, controls = []) {
+  try {
+    paymentSettings = await api.request('/payments/config');
+  } catch (error) {
+    paymentSettings = null;
+  }
+  const notice = document.createElement('div');
+  notice.dataset.paymentMode = '';
+  notice.style.cssText = 'border-radius:16px;font-size:14px;font-weight:700;line-height:1.55;padding:14px 16px;';
+  if (!paymentSettings || !paymentSettings.enabled) {
+    notice.style.cssText += 'background:#fff4e5;border:1px solid #ffd8a8;color:#8a4b00;';
+    notice.textContent = paymentSettings?.message || '결제 설정을 확인하지 못했어요. 잠시 후 다시 시도해 주세요.';
+    setOrderControls(controls.filter(Boolean), false);
+  } else if (paymentSettings.mode !== 'LIVE') {
+    notice.style.cssText += 'background:#fff0f0;border:1px solid #ffc9c9;color:#c92a2a;';
+    notice.textContent = paymentSettings.message || `${paymentSettings.label} — 실제 결제가 아닙니다.`;
+  } else {
+    return paymentSettings;
+  }
+  parent.querySelector('[data-payment-mode]')?.remove();
+  parent.prepend(notice);
+  return paymentSettings;
+}
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = src;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error('결제창을 불러오지 못했어요. 인터넷 연결을 확인해 주세요.'));
+    document.head.append(script);
+  });
+}
+
+function newCheckoutKey() {
+  return (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, '');
+}
+
+// 결제 요청을 만들고 결제창으로 보낸다. 주문은 결제사 승인을 서버가 확인한 뒤에 만들어진다.
+async function startOnlinePayment(body, pharmacyCode = pharmacyCodeFromUrl()) {
+  const checkoutKey = newCheckoutKey();
+  let created;
+  try {
+    created = await api.request('/payments/checkouts', { method: 'POST', body: { ...body, checkout_key: checkoutKey } });
+  } catch (error) {
+    if (error.status === 409 && /이미 결제했습니다/.test(error.message)) {
+      if (!confirm(`${error.message}\n\n같은 상품을 한 번 더 주문할까요?`)) return null;
+      created = await api.request('/payments/checkouts', { method: 'POST', body: { ...body, allow_duplicate: true } });
+    } else {
+      throw error;
+    }
+  }
+  const checkout = created.checkout;
+  const resultUrl = new URL(withPharmacy('/pay-result.html', pharmacyCode), location.origin);
+  resultUrl.searchParams.set('checkout', checkout.id);
+
+  if (checkout.provider === 'DEMO') {
+    const demoUrl = new URL(withPharmacy('/pay-demo.html', pharmacyCode), location.origin);
+    demoUrl.searchParams.set('checkout', checkout.id);
+    location.href = demoUrl.toString();
+    return checkout;
+  }
+  if (checkout.provider === 'TOSS') {
+    if (!checkout.client_key) throw new Error('결제 설정이 바뀌었어요. 새로고침 후 다시 시도해 주세요.');
+    if (!window.TossPayments) await loadScript('https://js.tosspayments.com/v2/standard');
+    const failUrl = new URL(resultUrl);
+    failUrl.searchParams.set('fail', '1');
+    const payment = window.TossPayments(checkout.client_key).payment({ customerKey: window.TossPayments.ANONYMOUS });
+    await payment.requestPayment({
+      method: 'CARD',
+      amount: { currency: 'KRW', value: checkout.amount },
+      orderId: checkout.pg_order_id,
+      orderName: checkout.order_name,
+      successUrl: resultUrl.toString(),
+      failUrl: failUrl.toString()
+    });
+    return checkout;
+  }
+  throw new Error('지원하지 않는 결제 방식입니다.');
 }
 
 function orderTypeLabel(type) {

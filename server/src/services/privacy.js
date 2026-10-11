@@ -160,6 +160,12 @@ function erasePersonal(customer, { kind, userId = null }) {
   );
   run('DELETE FROM addresses WHERE user_id = @user_id', { user_id: customer.user_id });
   run('DELETE FROM carts WHERE user_id = @user_id', { user_id: customer.user_id });
+  run(
+    `UPDATE online_checkouts
+     SET payload = NULL, status = CASE WHEN status = 'READY' THEN 'EXPIRED' ELSE status END, updated_at = CURRENT_TIMESTAMP
+     WHERE customer_id = @id AND (payload IS NOT NULL OR status = 'READY')`,
+    { id: customer.id }
+  );
   run('DELETE FROM family_members WHERE head_customer_id = @id OR linked_customer_id = @id', { id: customer.id });
   run('DELETE FROM restock_alerts WHERE customer_id = @id', { id: customer.id });
   run('UPDATE product_requests SET customer_id = NULL WHERE customer_id = @id', { id: customer.id });
@@ -195,6 +201,11 @@ function withdrawCustomer({ customerId, pharmacyId, source, userId = null, reaso
       409
     );
   }
+  const paying = getOne(
+    "SELECT pg_order_id FROM online_checkouts WHERE customer_id = @id AND status IN ('CONFIRMING', 'UNKNOWN', 'REFUND_REQUIRED') LIMIT 1",
+    { id: customer.id }
+  );
+  if (paying) throw new CustomerError(`결제 결과를 확인하는 중인 주문(${paying.pg_order_id})이 있어요. 확인이 끝난 뒤 탈퇴할 수 있어요.`, 409);
 
   transaction(() => {
     const counsels = getAll(

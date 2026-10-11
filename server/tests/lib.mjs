@@ -23,6 +23,20 @@ export async function api(path, { token, method = 'GET', body, headers = {} } = 
   return { status: res.status, data };
 }
 
+// 배송·픽업 주문: 결제 요청 → (데모) 결제창 인증 → 서버 승인. 성공하면 201과 { order }를 돌려준다.
+export async function checkout(token, body, { scenario = 'APPROVE' } = {}) {
+  const created = await api('/payments/checkouts', { token, method: 'POST', body });
+  if (created.status >= 300) return created;
+  const { checkout: request } = created.data;
+  const auth = await api('/payments/demo/authorize', { token, method: 'POST', body: { checkout_id: request.id, scenario } });
+  if (auth.status !== 200) return auth;
+  const confirmed = await api('/payments/confirm', { token, method: 'POST', body: auth.data });
+  return {
+    status: confirmed.status === 200 ? 201 : confirmed.status,
+    data: { ...confirmed.data, checkout_id: request.id, payment: auth.data }
+  };
+}
+
 export async function login(email, password) {
   const { status, data } = await api('/auth/login', { method: 'POST', body: { email, password } });
   if (status !== 200) throw new Error(`로그인 실패: ${email} (${status})`);

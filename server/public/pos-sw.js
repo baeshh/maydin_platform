@@ -1,7 +1,20 @@
 // POS 화면 파일만 보관해 두었다가 서버에 연결되지 않을 때 다시 열 수 있게 한다.
 // API 응답(판매·고객 정보)은 절대 보관하지 않는다. 연결되어 있으면 항상 새 파일을 받는다.
-const CACHE = 'maydin-pos-shell-v1';
-const SHELL = ['/pos.html', '/app.js', '/scan-kit.js', '/vendor/jsbarcode.min.js', '/vendor/qrcode.js'];
+// pos.html이 읽는 파일이 바뀌면 이 목록과 CACHE 이름을 함께 바꾼다.
+const CACHE = 'maydin-pos-shell-v2';
+const POS_SCRIPTS = [
+  'core', 'auth', 'local-store', 'recovery', 'session', 'catalog', 'cart', 'customer', 'van-bridge', 'payment',
+  'approvals', 'receipt', 'refund', 'pickup', 'hold', 'inventory', 'terminal', 'counter', 'report', 'main'
+];
+const SHELL = [
+  '/pos.html',
+  '/pos/pos.css',
+  '/app.js',
+  '/scan-kit.js',
+  '/vendor/jsbarcode.min.js',
+  '/vendor/qrcode.js',
+  ...POS_SCRIPTS.map((name) => `/pos/${name}.js`)
+];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

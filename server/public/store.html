@@ -749,9 +749,22 @@
         return Math.round((1 - Number(product.discount_price) / Number(product.price)) * 100);
       }
 
-      function imageBox(product, extra = '') {
-        const img = product.thumbnail_url ? `<img src="${product.thumbnail_url}" alt="${product.product_name}" />` : '<span class="placeholder">상품 이미지</span>';
-        return `<div class="img-box">${extra}${img}</div>`;
+      function imagePlaceholder() {
+        return el('span', { class: 'placeholder' }, '상품 이미지');
+      }
+
+      function imageBox(product, ...extras) {
+        const src = safeUrl(product.thumbnail_url);
+        const image = src
+          ? el('img', {
+              src,
+              alt: product.product_name || '',
+              loading: 'lazy',
+              referrerpolicy: 'no-referrer',
+              onerror: (event) => event.currentTarget.replaceWith(imagePlaceholder())
+            })
+          : imagePlaceholder();
+        return el('div', { class: 'img-box' }, ...extras, image);
       }
 
       function filterCategory(category) {
@@ -763,9 +776,19 @@
 
       function renderCategories() {
         const categories = ['전체', ...new Set(products.map(safeCategory))];
-        $('#categoryChips').innerHTML = categories.map((category) => `
-          <button class="chip ${category === selectedCategory ? 'active' : ''}" onclick="filterCategory('${category.replace(/'/g, "\\'")}')">${category}</button>
-        `).join('');
+        $('#categoryChips').replaceChildren(
+          ...categories.map((category) =>
+            el(
+              'button',
+              {
+                type: 'button',
+                class: category === selectedCategory ? 'chip active' : 'chip',
+                onclick: () => filterCategory(category)
+              },
+              category
+            )
+          )
+        );
       }
 
       function renderBestProducts() {
@@ -773,19 +796,21 @@
           .sort((a, b) => Number(b.stock_quantity > 0) - Number(a.stock_quantity > 0) || salePrice(b) - salePrice(a))
           .slice(0, 5);
 
-        $('#bestProducts').innerHTML = best.length
-          ? best.map((product, index) => `
-              <article class="h-card" onclick="addCart(${product.id})">
-                ${imageBox(product, `<span class="rank-badge">${index + 1}</span>`)}
-                <h4>${product.product_name}</h4>
-                <div class="price">${money(salePrice(product))}</div>
-              </article>
-            `).join('')
-          : '<p class="muted" style="padding: 0 20px;">등록된 상품이 없습니다. 약국 운영자 화면에서 상품을 등록해주세요.</p>';
+        $('#bestProducts').replaceChildren(
+          ...(best.length
+            ? best.map((product, index) =>
+                el(
+                  'article',
+                  { class: 'h-card', onclick: () => addCart(product.id) },
+                  imageBox(product, el('span', { class: 'rank-badge' }, String(index + 1))),
+                  el('h4', {}, product.product_name),
+                  el('div', { class: 'price' }, money(salePrice(product)))
+                )
+              )
+            : [el('p', { class: 'muted', style: 'padding: 0 20px;' }, '등록된 상품이 없습니다. 약국 운영자 화면에서 상품을 등록해주세요.')])
+        );
       }
 
-      const esc = (value) =>
-        String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
       let alertedProducts = new Map();
       const loggedMisses = new Set();
       let missTimer;
@@ -814,14 +839,15 @@
       }
 
       function requestBox(query) {
-        return `
-          <div class="request-box">
-            <h4>'${esc(query)}' 상품이 아직 없어요</h4>
-            <p class="muted">찾는 상품을 약국에 요청하면 입고를 검토하고 답변해 드려요.</p>
-            <input id="requestName" maxlength="80" value="${esc(query)}" placeholder="찾는 상품 이름" />
-            <input id="requestMemo" maxlength="200" placeholder="용량·브랜드 등 메모 (선택)" />
-            <button class="add-btn" style="width: 100%;" onclick="requestProduct()">약국에 요청하기</button>
-          </div>`;
+        return el(
+          'div',
+          { class: 'request-box' },
+          el('h4', {}, `'${query}' 상품이 아직 없어요`),
+          el('p', { class: 'muted' }, '찾는 상품을 약국에 요청하면 입고를 검토하고 답변해 드려요.'),
+          el('input', { id: 'requestName', maxlength: 80, value: query, placeholder: '찾는 상품 이름' }),
+          el('input', { id: 'requestMemo', maxlength: 200, placeholder: '용량·브랜드 등 메모 (선택)' }),
+          el('button', { type: 'button', class: 'add-btn', style: 'width: 100%;', onclick: requestProduct }, '약국에 요청하기')
+        );
       }
 
       async function requestProduct() {
@@ -873,9 +899,15 @@
       }
 
       function cardButton(product, soldOut) {
-        if (!soldOut) return `<button class="add-btn" onclick="addCart(${product.id})">장바구니 담기</button>`;
+        if (!soldOut) {
+          return el('button', { type: 'button', class: 'add-btn', onclick: () => addCart(product.id) }, '장바구니 담기');
+        }
         const on = alertedProducts.has(product.id);
-        return `<button class="add-btn alert-btn ${on ? 'on' : ''}" onclick="toggleRestockAlert(${product.id})">${on ? '입고 알림 신청됨' : '입고 알림 받기'}</button>`;
+        return el(
+          'button',
+          { type: 'button', class: on ? 'add-btn alert-btn on' : 'add-btn alert-btn', onclick: () => toggleRestockAlert(product.id) },
+          on ? '입고 알림 신청됨' : '입고 알림 받기'
+        );
       }
 
       function renderProductGrid() {
@@ -887,34 +919,46 @@
 
         if (query && !visible.length && !products.some((product) => matchesSearch(product, query))) {
           logSearchMiss(query);
-          $('#productGrid').innerHTML = requestBox(query);
+          $('#productGrid').replaceChildren(requestBox(query));
           return;
         }
 
-        $('#productGrid').innerHTML = visible.length
-          ? visible.map((product, index) => {
-              const rate = discountRate(product);
-              const soldOut = product.status === 'SOLD_OUT' || Number(product.stock_quantity) <= 0;
-              return `
-                <article class="v-card">
-                  ${imageBox(product, `
-                    <div class="badge-wrap">
-                      ${index < 2 ? '<span class="tag blue">BEST</span>' : ''}
-                      ${salePrice(product) >= 50000 ? '<span class="tag red">무료배송</span>' : ''}
-                      ${soldOut ? '<span class="tag red">품절</span>' : ''}
-                    </div>
-                  `)}
-                  <div class="brand">${esc(product.brand || safeCategory(product))}</div>
-                  <h4>${esc(product.product_name)}</h4>
-                  <div class="price-wrap">
-                    ${rate ? `<span class="discount">${rate}%</span>` : ''}
-                    <span class="price">${money(salePrice(product))}</span>
-                  </div>
-                  ${cardButton(product, soldOut)}
-                </article>
-              `;
-            }).join('')
-          : `<p class="muted">${query ? `'${esc(query)}' 검색 결과가 이 카테고리에는 없습니다.` : '선택한 카테고리에 상품이 없습니다.'}</p>`;
+        if (!visible.length) {
+          $('#productGrid').replaceChildren(
+            el('p', { class: 'muted' }, query ? `'${query}' 검색 결과가 이 카테고리에는 없습니다.` : '선택한 카테고리에 상품이 없습니다.')
+          );
+          return;
+        }
+
+        $('#productGrid').replaceChildren(
+          ...visible.map((product, index) => {
+            const rate = discountRate(product);
+            const soldOut = product.status === 'SOLD_OUT' || Number(product.stock_quantity) <= 0;
+            return el(
+              'article',
+              { class: 'v-card' },
+              imageBox(
+                product,
+                el(
+                  'div',
+                  { class: 'badge-wrap' },
+                  index < 2 && el('span', { class: 'tag blue' }, 'BEST'),
+                  salePrice(product) >= 50000 && el('span', { class: 'tag red' }, '무료배송'),
+                  soldOut && el('span', { class: 'tag red' }, '품절')
+                )
+              ),
+              el('div', { class: 'brand' }, product.brand || safeCategory(product)),
+              el('h4', {}, product.product_name),
+              el(
+                'div',
+                { class: 'price-wrap' },
+                rate ? el('span', { class: 'discount' }, `${rate}%`) : null,
+                el('span', { class: 'price' }, money(salePrice(product)))
+              ),
+              cardButton(product, soldOut)
+            );
+          })
+        );
       }
 
       $('#storeSearch').addEventListener('input', () => {

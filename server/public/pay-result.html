@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>결제 결과</title>
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+    <style>
+      :root { --blue:#3182f6; --green:#12b886; --red:#e03131; --text:#191f28; --sub:#4e5968; --muted:#8b95a1; --bg:#f2f4f6; --line:#e5e8eb; }
+      * { box-sizing:border-box; margin:0; padding:0; font-family:"Pretendard",system-ui,sans-serif; }
+      body { background:var(--bg); color:var(--text); min-height:100vh; padding:24px 20px 40px; word-break:keep-all; }
+      main { margin:0 auto; max-width:480px; display:grid; gap:14px; }
+      .card { background:#fff; border:1px solid var(--line); border-radius:20px; padding:22px; text-align:center; }
+      .icon { font-size:40px; margin-bottom:10px; }
+      h1 { font-size:20px; font-weight:800; margin-bottom:8px; }
+      p { color:var(--sub); font-size:14px; line-height:1.6; }
+      .muted { color:var(--muted); font-size:13px; margin-top:6px; }
+      .demo { background:#fff0f0; border:1px solid #ffc9c9; border-radius:16px; color:#c92a2a; font-size:13px; font-weight:700; line-height:1.55; padding:12px 14px; }
+      a.button { background:var(--blue); border-radius:14px; color:#fff; display:block; font-weight:800; margin-top:14px; padding:14px; text-decoration:none; }
+      a.secondary { background:#f2f4f6; color:var(--sub); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="card">
+        <div class="icon" id="icon">⏳</div>
+        <h1 id="title">결제를 확인하고 있어요</h1>
+        <p id="message">창을 닫지 말고 잠시만 기다려 주세요.</p>
+        <p class="muted" id="detail"></p>
+        <div id="actions"></div>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+    <script>
+      const pharmacyCode = pharmacyCodeFromUrl();
+      const params = new URLSearchParams(location.search);
+      const checkoutId = Number(params.get('checkout'));
+      const historyUrl = withPharmacy('/order-history.html', pharmacyCode);
+      const orderUrl = withPharmacy('/order.html', pharmacyCode);
+
+      function show({ icon, title, message, detail = '', actions = [] }) {
+        $('#icon').textContent = icon;
+        $('#title').textContent = title;
+        $('#message').textContent = message;
+        $('#detail').textContent = detail;
+        $('#actions').innerHTML = actions
+          .map((a, i) => `<a class="button ${i ? 'secondary' : ''}" href="${a.href}">${a.label}</a>`)
+          .join('');
+      }
+
+      function showResult(data) {
+        const checkout = data.checkout || {};
+        if (checkout.payment_mode && checkout.payment_mode !== 'LIVE') {
+          const banner = document.createElement('div');
+          banner.className = 'demo';
+          banner.textContent = `${checkout.provider_label} — 실제 결제가 아닙니다.`;
+          $('main').prepend(banner);
+        }
+        if (data.state === 'DONE' && data.order) {
+          return show({
+            icon: '✅',
+            title: '결제가 완료되어 주문이 접수됐어요',
+            message: `${checkout.order_name || ''} · ${money(data.order.final_amount)}`,
+            detail: `주문번호 ${data.order.order_number}`,
+            actions: [{ href: historyUrl, label: '주문 내역 보기' }]
+          });
+        }
+        if (data.pending) return null;
+        return show({
+          icon: '⚠️',
+          title: data.state === 'CANCELED' ? '결제를 취소했어요' : '결제가 완료되지 않았어요',
+          message: data.message || '주문이 접수되지 않았습니다.',
+          detail: data.state === 'CANCELED' ? '카드사 사정에 따라 취소 반영까지 며칠 걸릴 수 있어요.' : '장바구니는 그대로 있어요.',
+          actions: [{ href: orderUrl, label: '다시 주문하기' }, { href: historyUrl, label: '주문 내역' }]
+        });
+      }
+
+      // 결과를 모르면 몇 번 더 결제사에 확인한다. 그래도 모르면 주문 내역에서 확인하도록 안내한다.
+      async function poll(tries = 0) {
+        let data;
+        try {
+          data = await api.request(`/payments/checkouts/${checkoutId}/sync`, { method: 'POST' });
+        } catch (error) {
+          data = { state: 'FAILED', message: error.message };
+        }
+        if (!data.pending) return showResult(data);
+        if (tries >= 10) {
+          return show({
+            icon: '⏳',
+            title: '결제 결과를 아직 확인하고 있어요',
+            message: '결제사 응답이 늦어지고 있어요. 승인되면 주문이 자동으로 접수되고, 승인되지 않았으면 청구되지 않아요.',
+            actions: [{ href: historyUrl, label: '주문 내역에서 확인하기' }]
+          });
+        }
+        setTimeout(() => poll(tries + 1), 2000);
+      }
+
+      async function run() {
+        if (params.get('fail')) {
+          return show({
+            icon: '⚠️',
+            title: '결제가 완료되지 않았어요',
+            message: params.get('message') || '결제가 취소되었거나 실패했습니다. 청구되지 않았어요.',
+            detail: params.get('code') ? `사유 코드: ${params.get('code')}` : '',
+            actions: [{ href: orderUrl, label: '다시 주문하기' }]
+          });
+        }
+        try {
+          const result = await fetch('/api/payments/confirm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+            body: JSON.stringify({ paymentKey: params.get('paymentKey'), orderId: params.get('orderId'), amount: Number(params.get('amount')) })
+          });
+          const data = await result.json().catch(() => ({}));
+          // 새로고침해도 같은 결제를 다시 승인하지 않도록 주소에서 결제 정보를 지운다(서버도 중복 승인을 막는다).
+          history.replaceState(null, '', withPharmacy(`/pay-result.html?checkout=${checkoutId}`, pharmacyCode));
+          if (result.status === 202 || data.pending) return poll();
+          if (!result.ok && !data.state) {
+            return showResult({ state: 'FAILED', message: data.message || '결제를 확인하지 못했습니다.' });
+          }
+          showResult(data);
+        } catch (error) {
+          poll();
+        }
+      }
+
+      if (requireCustomerLogin(pharmacyCode)) {
+        if (!params.get('paymentKey') && !params.get('fail') && checkoutId) poll();
+        else run();
+      }
+    </script>
+  </body>
+</html>

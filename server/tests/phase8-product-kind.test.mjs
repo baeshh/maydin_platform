@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { api, check, done, login, signupMember } from './lib.mjs';
+import { api, check, checkout, done, login, signupMember } from './lib.mjs';
 
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
@@ -132,11 +132,7 @@ console.log('[온라인 — 일반 상품만 담고 주문]');
   res = await api('/cart', { token, method: 'POST', body: { product_id: sellable.id, quantity: 1 } });
   check('일반 상품은 담김', res.status === 201 || res.status === 200, res.data);
   db.prepare("UPDATE products SET product_type = 'UNCLASSIFIED' WHERE id = ?").run(sellable.id);
-  res = await api('/orders', {
-    token,
-    method: 'POST',
-    body: { order_type: 'PICKUP', payment_method: 'MOCK_CARD', contact_name: '테스트', contact_phone: '01000000000', preferred_at: '2026-12-01T10:00' }
-  });
+  res = await checkout(token, { order_type: 'PICKUP', contact_name: '테스트', contact_phone: '01000000000', preferred_at: '2026-12-01T10:00' });
   check('담은 뒤 분류 전으로 바뀌면 주문 막힘', res.status === 400 && /온라인에서 판매하지/.test(res.data.message), res.data);
   db.prepare('DELETE FROM carts WHERE product_id = ?').run(sellable.id);
 }

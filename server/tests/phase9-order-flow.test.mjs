@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { api, check, done, login, signupMember } from './lib.mjs';
+import { api, check, checkout, done, login, signupMember } from './lib.mjs';
 
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
@@ -112,9 +112,9 @@ fill(goods.id, 20);
 
 async function order(type = 'PICKUP', quantity = 1, token = customer) {
   await api('/cart', { token, method: 'POST', body: { product_id: goods.id, quantity } });
-  const body = { order_type: type, payment_method: 'MOCK_CARD', contact_name: '흐름', contact_phone: '01000000000', preferred_at: '2026-12-01T10:00' };
+  const body = { order_type: type, contact_name: '흐름', contact_phone: '01000000000', preferred_at: '2026-12-01T10:00', allow_duplicate: true };
   if (type === 'DELIVERY') body.delivery = { receiver_name: '흐름', receiver_phone: '01000000000', address: '서울시 테스트로 1' };
-  const res = await api('/orders', { token, method: 'POST', body });
+  const res = await checkout(token, body);
   return res.data.order;
 }
 const patch = (id, body, token = owner) => api(`/orders/${id}/status`, { token, method: 'PATCH', body });

@@ -3,6 +3,7 @@ import {
   TEST_PIN,
   api,
   check,
+  checkout,
   createSignupCode,
   done,
   login,
@@ -317,12 +318,11 @@ console.log('[추천 보상 — 인증 구매는 첫 구매로 안 침]');
 
 console.log('[온라인 주문 — 매장 구매 인증한 승인 회원만]');
 {
-  const order = (token, type = 'PICKUP') =>
-    api('/orders', {
-      token,
-      method: 'POST',
-      body: { order_type: type, payment_method: 'MOCK_CARD', contact_name: '테스트', contact_phone: '01000000000', preferred_at: '2026-12-01T10:00' }
-    });
+  const order = (token, type = 'PICKUP') => {
+    const body = { order_type: type, contact_name: '테스트', contact_phone: '01000000000', preferred_at: '2026-12-01T10:00' };
+    if (type === 'DELIVERY') body.delivery = { address: '서울시 테스트로 1' };
+    return type === 'COUNSEL' ? api('/orders', { token, method: 'POST', body }) : checkout(token, body);
+  };
   const addCart = (token) => api('/cart', { token, method: 'POST', body: { product_id: productId, quantity: 1 } });
 
   const sale = await sell();

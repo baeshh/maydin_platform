@@ -49,6 +49,26 @@ function normalizeBrand(value) {
   return brand || null;
 }
 
+// 상품 이미지는 http(s) 주소나 이 서버의 경로(/...)만 받는다. javascript:·data: 주소는 화면에서 스크립트로 실행될 수 있다.
+function thumbnailUrlOrNull(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw || raw.length > 2048 || /[\u0000-\u0020\\"'<>`]/.test(raw)) return null;
+  if (raw.startsWith('/')) return raw.startsWith('//') ? null : raw;
+  try {
+    const url = new URL(raw);
+    return ['http:', 'https:'].includes(url.protocol) ? url.href : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function normalizeThumbnailUrl(value) {
+  if (value === undefined || value === null || String(value).trim() === '') return null;
+  const url = thumbnailUrlOrNull(value);
+  if (!url) throw new Error('이미지 주소는 https:// 또는 http:// 로 시작하는 주소만 쓸 수 있습니다.');
+  return url;
+}
+
 // 1회 구매 수량 1개를 다 먹거나 쓰는 데 걸리는 일수. 다음 구매 예상일 계산에 쓴다.
 function normalizeSupplyDays(value) {
   if (value === undefined || value === null || value === '') return null;
@@ -74,6 +94,7 @@ function publicProduct(
   const stock = Math.max(0, Number(product.stock_quantity) - buffer);
   return {
     ...product,
+    thumbnail_url: thumbnailUrlOrNull(product.thumbnail_url),
     stock_quantity: stock,
     status: stock <= 0 && product.status === 'ON_SALE' ? 'SOLD_OUT' : product.status
   };
@@ -175,8 +196,7 @@ router.post('/', (req, res) => {
     discount_price,
     stock_quantity,
     status,
-    category_name,
-    thumbnail_url
+    category_name
   } = req.body;
 
   let barcode;
@@ -185,7 +205,9 @@ router.post('/', (req, res) => {
   let taxType;
   let brand;
   let supplyDays;
+  let thumbnailUrl;
   try {
+    thumbnailUrl = normalizeThumbnailUrl(req.body.thumbnail_url);
     barcode = normalizeBarcode(req.body.barcode);
     productType = normalizeProductType(req.body.product_type);
     onlineVisible = resolveOnlineVisible(productType, req.body.online_visible, 0);
@@ -239,7 +261,7 @@ router.post('/', (req, res) => {
       discount_price: discount_price ? Number(discount_price) : null,
       stock_quantity: Number(stock_quantity || 0),
       status: status || 'ON_SALE',
-      thumbnail_url,
+      thumbnail_url: thumbnailUrl,
       barcode,
       product_type: productType,
       online_visible: onlineVisible,
@@ -267,7 +289,12 @@ router.patch('/:id', (req, res) => {
   let taxType;
   let brand;
   let supplyDays;
+  let thumbnailUrl;
   try {
+    // 이미지 주소를 고치지 않는 수정은 예전에 저장된 잘못된 주소 때문에 막지 않고 비워 둔다.
+    thumbnailUrl = 'thumbnail_url' in req.body
+      ? normalizeThumbnailUrl(req.body.thumbnail_url)
+      : thumbnailUrlOrNull(product.thumbnail_url);
     barcode = normalizeBarcode(next.barcode);
     productType = normalizeProductType(next.product_type, product.product_type);
     // 구분이 바뀌면 온라인 판매는 약국이 다시 켜야 한다.
@@ -324,7 +351,7 @@ router.patch('/:id', (req, res) => {
       discount_price: next.discount_price ? Number(next.discount_price) : null,
       stock_quantity: nextStock,
       status: next.status,
-      thumbnail_url: next.thumbnail_url,
+      thumbnail_url: thumbnailUrl,
       barcode,
       product_type: productType,
       tax_type: taxType,

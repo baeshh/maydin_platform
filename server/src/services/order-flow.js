@@ -97,6 +97,7 @@ function nextStatuses(order) {
 function availableActions(order, role) {
   const type = orderTypeOf(order);
   const customer = role === 'CUSTOMER';
+  if (order.cancel_lock_at) return { next_statuses: [], can_cancel: false, can_refund: false, cancel_in_progress: true };
   return {
     next_statuses: customer ? [] : nextStatuses(order),
     can_cancel: (customer ? CUSTOMER_CANCELABLE : CANCELABLE)[type]?.includes(order.order_status) || false,
@@ -152,17 +153,21 @@ function recordHistory({ order, action, from = null, to, reason = null, amount =
   );
 }
 
-// 상태를 바꾼다. 다른 요청이 먼저 바꿨다면(현재 상태가 다르면) 실패한다.
+// 상태를 바꾼다. 다른 요청이 먼저 바꿨거나(현재 상태가 다르면) 결제 취소가 진행 중이면 실패한다.
 function setStatus(order, to, { action = 'TRANSITION', actorType = 'STAFF', userId = null, reason = null, extra = {} } = {}) {
   const type = orderTypeOf(order);
   const deliveryStatus = deliveryStatusFor(type, to, order.delivery_status);
   const updated = run(
     `UPDATE orders
      SET order_status = @to, delivery_status = @delivery_status, updated_at = CURRENT_TIMESTAMP
-     WHERE id = @id AND order_status = @from`,
+     WHERE id = @id AND order_status = @from AND cancel_lock_at IS NULL`,
     { id: order.id, to, from: order.order_status, delivery_status: deliveryStatus }
   );
-  if (updated.changes === 0) throw new OrderFlowError('다른 화면에서 주문 상태가 먼저 바뀌었습니다. 새로고침해 주세요.', 409, 'STALE');
+  if (updated.changes === 0) {
+    const locked = getOne('SELECT cancel_lock_at FROM orders WHERE id = @id', { id: order.id })?.cancel_lock_at;
+    if (locked) throw new OrderFlowError('결제 취소를 처리하는 중인 주문입니다. 잠시 후 다시 확인해 주세요.', 409, 'CANCEL_IN_PROGRESS');
+    throw new OrderFlowError('다른 화면에서 주문 상태가 먼저 바뀌었습니다. 새로고침해 주세요.', 409, 'STALE');
+  }
 
   if (type === 'DELIVERY') {
     run(
@@ -196,36 +201,24 @@ function transition(order, to, options = {}) {
   return setStatus(order, to, options);
 }
 
-// 온라인 주문 생성 직후 결제까지의 이력. 지금은 데모 결제라 같은 요청 안에서 바로 승인된다.
-function recordCreatedAndPaid(order, { userId, paymentMethod }) {
-  recordHistory({ order, action: 'CREATE', to: 'CREATED', actorType: 'CUSTOMER', userId });
-  recordHistory({ order, action: 'PAYMENT_REQUEST', from: 'CREATED', to: 'PAYMENT_PENDING', amount: order.final_amount, actorType: 'CUSTOMER', userId });
-  run(
-    `INSERT INTO payments (order_id, payment_method, payment_provider, payment_status, paid_amount, paid_at)
-     VALUES (@order_id, @payment_method, 'MOCK', 'PAID', @paid_amount, CURRENT_TIMESTAMP)`,
-    { order_id: order.id, payment_method: paymentMethod, paid_amount: order.final_amount }
-  );
-  run("UPDATE orders SET payment_status = 'PAID' WHERE id = @id", { id: order.id });
-  return setStatus({ ...order, order_status: 'PAYMENT_PENDING' }, 'PAYMENT_COMPLETED', {
-    action: 'PAYMENT_APPROVED',
-    actorType: 'SYSTEM',
-    reason: '온라인 결제 승인 (데모)'
-  });
-}
-
 function orderNumber(prefix) {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
 }
 
-// 결제를 취소한다. 데모 결제만 즉시 취소할 수 있고, 취소 금액이 주문 금액과 맞는지 확인한다.
-function cancelPayments(order, kind) {
-  const payments = getAll("SELECT * FROM payments WHERE order_id = @id AND payment_status = 'PAID' AND paid_amount > 0", { id: order.id });
+function paidPayments(orderId) {
+  return getAll("SELECT * FROM payments WHERE order_id = @id AND payment_status = 'PAID' AND paid_amount > 0 ORDER BY id ASC", { id: orderId });
+}
+
+// 결제를 취소 처리한다. 결제사 결제는 결제사가 취소를 확인해 준 건(gatewayCancels)만 취소로 바꾼다.
+// 예전 데모(MOCK) 결제는 결제사가 없으므로 바로 취소한다. 취소 금액이 주문 금액과 맞는지 확인한다.
+function cancelPayments(order, kind, gatewayCancels = new Map()) {
+  const payments = paidPayments(order.id);
   const paid = payments.reduce((sum, p) => sum + p.paid_amount, 0);
   if (paid !== order.final_amount) {
     throw new OrderFlowError(`결제 금액(${paid.toLocaleString('ko-KR')}원)이 주문 금액과 달라 자동 ${kind === 'REFUND' ? '환불' : '취소'}할 수 없습니다.`, 409, 'PAYMENT_MISMATCH');
   }
-  const external = payments.find((p) => p.payment_provider !== 'MOCK');
-  if (external) throw new OrderFlowError('외부 결제사 취소 연동 전에는 결제사 관리 화면에서 먼저 취소해 주세요.', 409, 'PAYMENT_PROVIDER');
+  const unconfirmed = payments.find((p) => p.payment_provider !== 'MOCK' && !gatewayCancels.has(p.id));
+  if (unconfirmed) throw new OrderFlowError('결제사 취소가 확인되지 않아 주문을 취소할 수 없습니다.', 409, 'PAYMENT_PROVIDER');
 
   const status = kind === 'REFUND' ? 'REFUNDED' : 'CANCELED';
   for (const payment of payments) {
@@ -233,9 +226,10 @@ function cancelPayments(order, kind) {
       `UPDATE payments
        SET payment_status = @status,
            canceled_at = CASE WHEN @status = 'CANCELED' THEN CURRENT_TIMESTAMP ELSE canceled_at END,
-           refunded_at = CASE WHEN @status = 'REFUNDED' THEN CURRENT_TIMESTAMP ELSE refunded_at END
+           refunded_at = CASE WHEN @status = 'REFUNDED' THEN CURRENT_TIMESTAMP ELSE refunded_at END,
+           cancel_transaction_key = COALESCE(@transaction_key, cancel_transaction_key)
        WHERE id = @id AND payment_status = 'PAID'`,
-      { id: payment.id, status }
+      { id: payment.id, status, transaction_key: gatewayCancels.get(payment.id)?.transactionKey || null }
     );
     if (result.changes === 0) throw new OrderFlowError('결제가 이미 취소되었습니다.', 409, 'PAYMENT_ALREADY_CANCELED');
   }
@@ -312,14 +306,16 @@ function createReversalOrder(order, items, payments, { reason, paymentStatus }) 
 
   for (const payment of payments) {
     run(
-      `INSERT INTO payments (order_id, payment_method, payment_provider, payment_status, paid_amount, paid_at)
-       VALUES (@order_id, @payment_method, @payment_provider, @payment_status, @paid_amount, CURRENT_TIMESTAMP)`,
+      `INSERT INTO payments (order_id, payment_method, payment_provider, payment_status, paid_amount, paid_at, payment_key, payment_mode)
+       VALUES (@order_id, @payment_method, @payment_provider, @payment_status, @paid_amount, CURRENT_TIMESTAMP, @payment_key, @payment_mode)`,
       {
         order_id: reversalId,
         payment_method: payment.payment_method,
         payment_provider: payment.payment_provider,
         payment_status: paymentStatus,
-        paid_amount: -payment.paid_amount
+        paid_amount: -payment.paid_amount,
+        payment_key: payment.payment_key || null,
+        payment_mode: payment.payment_mode || null
       }
     );
   }
@@ -368,13 +364,13 @@ function restoreStock(order, items, { userId, reason }) {
   return restored;
 }
 
-function reverseOrder(order, { kind, reason, restock, userId, actorType }) {
+function reverseOrder(order, { kind, reason, restock, userId, actorType, gatewayCancels }) {
   const items = getAll('SELECT * FROM order_items WHERE order_id = @id ORDER BY id ASC', { id: order.id });
   let reversalId = null;
   let paymentStatus = order.payment_status;
   let restored = [];
   if (order.final_amount > 0) {
-    const canceled = cancelPayments(order, kind);
+    const canceled = cancelPayments(order, kind, gatewayCancels);
     paymentStatus = canceled.status;
     if (restock) restored = restoreStock(order, items, { userId, reason: kind === 'REFUND' ? '온라인 환불 재입고' : '온라인 주문 취소 재고 원복' });
     reversalId = createReversalOrder(order, items, canceled.payments, { reason, paymentStatus });
@@ -384,7 +380,8 @@ function reverseOrder(order, { kind, reason, restock, userId, actorType }) {
   const updated = run(
     `UPDATE orders
      SET order_status = @to, payment_status = @payment_status, refund_reason = @reason,
-         canceled_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+         canceled_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
+         cancel_lock_at = NULL, cancel_request = NULL
      WHERE id = @id AND order_status = @from`,
     { id: order.id, to, from: order.order_status, payment_status: paymentStatus, reason }
   );
@@ -407,30 +404,32 @@ function reverseOrder(order, { kind, reason, restock, userId, actorType }) {
   return { order: getOne('SELECT * FROM orders WHERE id = @id', { id: order.id }), reversal_order_id: reversalId, restored };
 }
 
-function cancelOrder(order, { reason, userId, actorType }) {
+// 취소(CANCEL)·환불(REFUND)을 지금 할 수 있는지. 결제사 호출 전에 먼저 확인한다.
+function assertReversible(order, kind, actorType = 'STAFF') {
   assertOnlineOrder(order);
-  const table = actorType === 'CUSTOMER' ? CUSTOMER_CANCELABLE : CANCELABLE;
-  if (!table[orderTypeOf(order)]?.includes(order.order_status)) {
-    if (order.order_status === 'CANCELED' || order.order_status === 'REFUNDED') {
-      throw new OrderFlowError('이미 취소·환불된 주문입니다.', 409, 'ALREADY_CLOSED');
-    }
+  const closed = order.order_status === 'CANCELED' || order.order_status === 'REFUNDED';
+  if (kind === 'CANCEL') {
+    const table = actorType === 'CUSTOMER' ? CUSTOMER_CANCELABLE : CANCELABLE;
+    if (table[orderTypeOf(order)]?.includes(order.order_status)) return;
+    if (closed) throw new OrderFlowError('이미 취소·환불된 주문입니다.', 409, 'ALREADY_CLOSED');
     if (actorType === 'CUSTOMER') {
       throw new OrderFlowError('약국에서 상품 준비를 시작해 직접 취소할 수 없습니다. 약국에 문의해 주세요.', 409, 'CUSTOMER_CANCEL_CLOSED');
     }
     throw new OrderFlowError(`${label(order.order_status)} 상태에서는 취소할 수 없습니다. 수령·배송 완료 뒤 환불로 처리해 주세요.`);
   }
-  return reverseOrder(order, { kind: 'CANCEL', reason, restock: true, userId, actorType });
+  if (REFUNDABLE[orderTypeOf(order)]?.includes(order.order_status)) return;
+  if (closed) throw new OrderFlowError('이미 취소·환불된 주문입니다.', 409, 'ALREADY_CLOSED');
+  throw new OrderFlowError(`${label(order.order_status)} 상태에서는 환불할 수 없습니다. 수령·배송 전이면 취소로 처리해 주세요.`);
 }
 
-function refundOrder(order, { reason, restock, userId }) {
-  assertOnlineOrder(order);
-  if (!REFUNDABLE[orderTypeOf(order)]?.includes(order.order_status)) {
-    if (order.order_status === 'REFUNDED' || order.order_status === 'CANCELED') {
-      throw new OrderFlowError('이미 취소·환불된 주문입니다.', 409, 'ALREADY_CLOSED');
-    }
-    throw new OrderFlowError(`${label(order.order_status)} 상태에서는 환불할 수 없습니다. 수령·배송 전이면 취소로 처리해 주세요.`);
-  }
-  return reverseOrder(order, { kind: 'REFUND', reason, restock, userId, actorType: 'STAFF' });
+function cancelOrder(order, { reason, userId, actorType, gatewayCancels }) {
+  assertReversible(order, 'CANCEL', actorType);
+  return reverseOrder(order, { kind: 'CANCEL', reason, restock: true, userId, actorType, gatewayCancels });
+}
+
+function refundOrder(order, { reason, restock, userId, actorType = 'STAFF', gatewayCancels }) {
+  assertReversible(order, 'REFUND', actorType);
+  return reverseOrder(order, { kind: 'REFUND', reason, restock, userId, actorType, gatewayCancels });
 }
 
 function orderHistory(orderId) {
@@ -450,14 +449,17 @@ function orderHistory(orderId) {
 }
 
 module.exports = {
+  CANCELABLE,
   OrderFlowError,
+  REFUNDABLE,
   STATUS_LABELS,
+  assertReversible,
   availableActions,
   assertTransition,
   cancelOrder,
   nextStatuses,
   orderHistory,
-  recordCreatedAndPaid,
+  paidPayments,
   recordHistory,
   refundOrder,
   setStatus,

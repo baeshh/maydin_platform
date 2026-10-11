@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>(데모) 결제창</title>
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+    <style>
+      :root { --blue:#3182f6; --red:#e03131; --text:#191f28; --sub:#4e5968; --muted:#8b95a1; --bg:#f2f4f6; --line:#e5e8eb; }
+      * { box-sizing:border-box; margin:0; padding:0; font-family:"Pretendard",system-ui,sans-serif; }
+      body { background:var(--bg); color:var(--text); min-height:100vh; padding:24px 20px 40px; word-break:keep-all; }
+      main { margin:0 auto; max-width:480px; display:grid; gap:14px; }
+      .demo { background:#fff0f0; border:1px solid #ffc9c9; border-radius:16px; color:#c92a2a; font-size:14px; font-weight:700; line-height:1.55; padding:14px 16px; }
+      .card { background:#fff; border:1px solid var(--line); border-radius:20px; padding:20px; }
+      .card h1 { font-size:18px; font-weight:800; margin-bottom:6px; }
+      .amount { font-size:28px; font-weight:800; margin:12px 0 4px; }
+      .muted { color:var(--muted); font-size:13px; line-height:1.5; }
+      button { border:0; border-radius:14px; cursor:pointer; font:inherit; font-weight:800; margin-top:10px; padding:14px; width:100%; }
+      .approve { background:var(--blue); color:#fff; }
+      .decline { background:#fff; border:1px solid var(--line); color:var(--red); }
+      .back { background:#f2f4f6; color:var(--sub); }
+      button:disabled { opacity:.5; }
+      #error { color:var(--red); font-size:14px; font-weight:700; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="demo">(데모) 결제창입니다. 실제 카드사·결제사로 연결되지 않고 돈이 오가지 않습니다. 이 결제로 접수된 주문은 상품을 내보내면 안 됩니다.</div>
+      <section class="card">
+        <h1 id="orderName">결제 정보를 불러오는 중…</h1>
+        <p class="muted" id="orderId"></p>
+        <div class="amount" id="amount"></div>
+        <p class="muted" id="expires"></p>
+        <p id="error"></p>
+        <button class="approve" id="approve" type="button" disabled>(데모) 결제 승인</button>
+        <button class="decline" id="decline" type="button" disabled>(데모) 카드 거절 시험</button>
+        <button class="back" id="back" type="button">결제 그만두기</button>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+    <script>
+      const pharmacyCode = pharmacyCodeFromUrl();
+      const checkoutId = Number(new URLSearchParams(location.search).get('checkout'));
+      const resultUrl = (params) => {
+        const url = new URL(withPharmacy('/pay-result.html', pharmacyCode), location.origin);
+        url.searchParams.set('checkout', checkoutId);
+        for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+        return url.toString();
+      };
+
+      async function load() {
+        try {
+          const { checkout } = await api.request(`/payments/checkouts/${checkoutId}`);
+          if (!checkout || checkout.status !== 'READY') {
+            $('#orderName').textContent = '이미 처리된 결제 요청입니다.';
+            $('#error').textContent = checkout?.fail_message || '';
+            return;
+          }
+          $('#orderName').textContent = checkout.order_name;
+          $('#orderId').textContent = `주문번호 ${checkout.pg_order_id}`;
+          $('#amount').textContent = money(checkout.amount);
+          const until = new Date(`${checkout.expires_at.replace(' ', 'T')}Z`).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+          $('#expires').textContent = `${until}까지 결제하지 않으면 주문서가 닫힙니다.`;
+          $('#approve').disabled = false;
+          $('#decline').disabled = false;
+        } catch (error) {
+          $('#orderName').textContent = '결제 정보를 불러오지 못했습니다.';
+          $('#error').textContent = error.message;
+        }
+      }
+
+      async function pay(scenario) {
+        $('#approve').disabled = true;
+        $('#decline').disabled = true;
+        try {
+          const auth = await api.request('/payments/demo/authorize', { method: 'POST', body: { checkout_id: checkoutId, scenario } });
+          location.replace(resultUrl({ paymentKey: auth.paymentKey, orderId: auth.orderId, amount: auth.amount }));
+        } catch (error) {
+          $('#error').textContent = error.message;
+        }
+      }
+
+      $('#approve').addEventListener('click', () => pay('APPROVE'));
+      $('#decline').addEventListener('click', () => pay('DECLINE'));
+      $('#back').addEventListener('click', () =>
+        location.replace(resultUrl({ fail: '1', code: 'PAY_PROCESS_CANCELED', message: '결제를 그만두었습니다.' }))
+      );
+
+      if (requireCustomerLogin(pharmacyCode)) load();
+    </script>
+  </body>
+</html>

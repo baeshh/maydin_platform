@@ -6,6 +6,7 @@ const cors = require('cors');
 const { db, getOne, migrate } = require('./db');
 const { startSchedule: startBackupSchedule } = require('./services/backup');
 const { startRetentionSchedule } = require('./services/privacy');
+const { startPaymentSchedule } = require('./services/online-payments');
 
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
@@ -17,7 +18,7 @@ const orderRoutes = require('./routes/orders');
 const dashboardRoutes = require('./routes/dashboard');
 const qrCodeRoutes = require('./routes/qrcodes');
 const inquiryRoutes = require('./routes/inquiries');
-const posRoutes = require('./routes/pos');
+const posRoutes = require('./pos');
 const staffRoutes = require('./routes/staff');
 const pointRoutes = require('./routes/points');
 const purchasingRoutes = require('./routes/purchasing');
@@ -26,6 +27,7 @@ const customerRoutes = require('./routes/customers');
 const memberRoutes = require('./routes/members');
 const demandRoutes = require('./routes/demand');
 const productImportRoutes = require('./routes/product-import');
+const paymentRoutes = require('./routes/payments');
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
@@ -70,6 +72,7 @@ app.use('/api/customers', customerRoutes);
 app.use('/api/members', memberRoutes);
 app.use('/api/demand', demandRoutes);
 app.use('/api/product-import', productImportRoutes);
+app.use('/api/payments', paymentRoutes);
 
 const nodeModules = path.join(__dirname, '../node_modules');
 const vendorFiles = {
@@ -103,4 +106,5 @@ app.listen(port, () => {
   console.log(`Maydin closed mall server running on http://localhost:${port}`);
   startBackupSchedule(db);
   startRetentionSchedule();
+  startPaymentSchedule();
 });

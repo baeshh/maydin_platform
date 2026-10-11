@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BASE, api, check, done, login, signupMember } from './lib.mjs';
+import { BASE, api, check, checkout, done, login, signupMember } from './lib.mjs';
 
 const require = createRequire(import.meta.url);
 const Database = require('better-sqlite3');
@@ -371,20 +371,12 @@ console.log('[기존 POS 병행 동기화]');
   const lastSync = db.prepare("SELECT id, applied_at FROM import_batches WHERE mode = 'SYNC' AND status = 'APPLIED' ORDER BY id DESC LIMIT 1").get();
   db.prepare("UPDATE import_batches SET applied_at = datetime('now', '-25 hours') WHERE id = ?").run(lastSync.id);
   check('주기(24시간)가 지나면 다시 멈춤', (await api('/product-import/sync', { token: owner })).data.online_paused === true);
-  res = await api('/orders', {
-    token: member.data.token,
-    method: 'POST',
-    body: { order_type: 'PICKUP', payment_method: 'MOCK_CARD', contact_name: '테스트', contact_phone: '01000000000', preferred_at: '2026-12-01T10:00' }
-  });
+  res = await checkout(member.data.token, { order_type: 'PICKUP', contact_name: '테스트', contact_phone: '01000000000', preferred_at: '2026-12-01T10:00' });
   check('멈춘 동안 온라인 주문 막힘(409)', res.status === 409 && res.data.reason === 'STOCK_SYNC_PAUSED', res.data);
   const cartView = await api('/cart', { token: member.data.token });
   check('멈춘 동안 장바구니도 재고 0 + 안내', cartView.data.online_paused && cartView.data.items.every((item) => item.stock_quantity === 0), cartView.data);
   db.prepare('UPDATE import_batches SET applied_at = ? WHERE id = ?').run(lastSync.applied_at, lastSync.id);
-  res = await api('/orders', {
-    token: member.data.token,
-    method: 'POST',
-    body: { order_type: 'PICKUP', payment_method: 'MOCK_CARD', contact_name: '테스트', contact_phone: '01000000000', preferred_at: '2026-12-01T10:00' }
-  });
+  res = await checkout(member.data.token, { order_type: 'PICKUP', contact_name: '테스트', contact_phone: '01000000000', preferred_at: '2026-12-01T10:00' });
   check('여유분을 넘는 온라인 주문은 거절(재고 3, 여유분 2)', res.status === 400 && res.data.message.includes('재고'), res.data);
 
   res = await setSync({ stock_master: 'MAYDIN' });

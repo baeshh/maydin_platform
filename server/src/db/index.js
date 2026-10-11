@@ -285,6 +285,129 @@ function migratePrivacy() {
   })();
 }
 
+// 온라인 결제: 결제 요청(주문서)과 결제사 승인을 분리한다. 주문은 결제사 승인을 서버가 확인한 뒤에만 만든다.
+// 카드번호 등 결제수단 정보는 저장하지 않고 결제사가 준 결제 키·영수증 주소만 둔다.
+function migratePayments() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS online_checkouts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id),
+      customer_id INTEGER NOT NULL REFERENCES customers(id),
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      order_type TEXT NOT NULL,
+      pg_order_id TEXT NOT NULL UNIQUE,
+      order_name TEXT NOT NULL,
+      amount INTEGER NOT NULL,
+      total_product_amount INTEGER NOT NULL,
+      delivery_fee INTEGER NOT NULL DEFAULT 0,
+      cart_hash TEXT NOT NULL,
+      client_key TEXT,
+      payload TEXT,
+      provider TEXT NOT NULL,
+      payment_mode TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'READY',
+      payment_key TEXT,
+      order_id INTEGER REFERENCES orders(id),
+      fail_code TEXT,
+      fail_message TEXT,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      expires_at TEXT NOT NULL,
+      confirm_started_at TEXT,
+      confirmed_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_online_checkouts_client
+      ON online_checkouts(customer_id, client_key) WHERE client_key IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_online_checkouts_status ON online_checkouts(status, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_online_checkouts_pharmacy ON online_checkouts(pharmacy_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_online_checkouts_payment_key ON online_checkouts(payment_key) WHERE payment_key IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS payment_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT NOT NULL,
+      event_id TEXT NOT NULL,
+      event_type TEXT,
+      pg_order_id TEXT,
+      payment_key TEXT,
+      result TEXT,
+      error TEXT,
+      attempts INTEGER NOT NULL DEFAULT 1,
+      received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      processed_at TEXT,
+      UNIQUE(provider, event_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS pg_demo_payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      payment_key TEXT NOT NULL UNIQUE,
+      order_id TEXT NOT NULL,
+      order_name TEXT,
+      amount INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'IN_PROGRESS',
+      scenario TEXT NOT NULL DEFAULT 'APPROVE',
+      approved_at TEXT,
+      canceled_at TEXT,
+      cancel_reason TEXT,
+      cancel_transaction_key TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_pg_demo_payments_order ON pg_demo_payments(order_id);
+  `);
+  addColumnIfMissing('payments', 'payment_key', 'TEXT');
+  addColumnIfMissing('payments', 'pg_order_id', 'TEXT');
+  addColumnIfMissing('payments', 'payment_mode', 'TEXT');
+  addColumnIfMissing('payments', 'approved_at', 'TEXT');
+  addColumnIfMissing('payments', 'receipt_url', 'TEXT');
+  addColumnIfMissing('payments', 'cancel_transaction_key', 'TEXT');
+  addColumnIfMissing('orders', 'cancel_lock_at', 'TEXT');
+  addColumnIfMissing('orders', 'cancel_request', 'TEXT');
+  addColumnIfMissing('orders', 'payment_alert', 'TEXT');
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_payment_key
+      ON payments(payment_provider, payment_key) WHERE payment_key IS NOT NULL AND paid_amount > 0;
+    CREATE INDEX IF NOT EXISTS idx_orders_cancel_lock ON orders(cancel_lock_at) WHERE cancel_lock_at IS NOT NULL;
+  `);
+}
+
+function needsVanTransactionsRebuild() {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'van_transactions'").get();
+  return row && !row.sql.includes("'UNKNOWN'");
+}
+
+// 카드 승인은 요청 번호(request_id) 하나에 한 번만. 결과를 모르면 UNKNOWN으로 두고 대사로만 정한다.
+// 수동 입력 승인번호는 단말기 영수증과 대조하기 전까지 '미대조'로 남긴다.
+function migrateVan(schema) {
+  if (needsVanTransactionsRebuild()) rebuildTable(schema, 'van_transactions');
+  addColumnIfMissing('payments', 'verify_status', 'TEXT');
+  addColumnIfMissing('payments', 'verified_by', 'INTEGER');
+  addColumnIfMissing('payments', 'verified_at', 'TEXT');
+  addColumnIfMissing('payments', 'verify_note', 'TEXT');
+  addColumnIfMissing('pos_terminals', 'bridge_key_enc', 'TEXT');
+  addColumnIfMissing('pos_terminals', 'bridge_paired_at', 'TEXT');
+  addColumnIfMissing('pos_sale_drafts', 'pickup_order_id', 'INTEGER');
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_van_transactions_request
+      ON van_transactions(pharmacy_id, request_id) WHERE request_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_van_transactions_draft ON van_transactions(sale_draft_id);
+    CREATE INDEX IF NOT EXISTS idx_payments_verify ON payments(verify_status) WHERE verify_status = 'UNVERIFIED';
+  `);
+}
+
+// 카운터마다 등록된 PC를 하나씩 둔다. 기기 토큰 원문은 저장하지 않고 해시만 둔다.
+function migrateTerminals() {
+  addColumnIfMissing('pos_terminals', 'device_key_hash', 'TEXT');
+  addColumnIfMissing('pos_terminals', 'device_label', 'TEXT');
+  addColumnIfMissing('pos_terminals', 'device_registered_at', 'TEXT');
+  addColumnIfMissing('pos_terminals', 'device_registered_by', 'INTEGER');
+  addColumnIfMissing('pos_terminals', 'last_seen_at', 'TEXT');
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_pos_terminals_device
+      ON pos_terminals(device_key_hash) WHERE device_key_hash IS NOT NULL;
+    DROP INDEX IF EXISTS idx_pos_sessions_open_terminal;
+  `);
+}
+
 function migratePos(schema) {
   if (needsUsersRebuild()) rebuildTable(schema, 'users');
   if (needsOrdersRebuild()) rebuildTable(schema, 'orders');
@@ -358,6 +481,9 @@ function migratePos(schema) {
   migrateOrderFlow();
   migratePosRecovery();
   migratePrivacy();
+  migratePayments();
+  migrateTerminals();
+  migrateVan(schema);
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_suppliers_pharmacy ON suppliers(pharmacy_id, status);

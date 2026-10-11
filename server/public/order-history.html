@@ -119,6 +119,7 @@
                 <p class="muted">${orderStatusLabel(order.order_status)} · ${deliveryStatusLabel(order.delivery_status)}</p>
                 <p class="muted">${detailLine(order)}</p>
                 <div class="amount">${order.order_type === 'COUNSEL' ? '상담 예약' : money(order.final_amount)}</div>
+                ${order.payment_label ? `<p class="muted">${order.payment_label}${order.cancel_in_progress ? ' · 결제 취소 확인 중' : ''}</p>` : ''}
                 ${showPickupCode(order)
                   ? `<div class="pickup-code"><p>매장 카운터에서 이 바코드를 보여 주세요</p><svg data-barcode="${order.order_number}" data-height="44" data-width="1.3"></svg></div>`
                   : ''}
@@ -186,8 +187,7 @@
 
       const POINT_ENTRY_LABELS = { EARN: '적립', USE: '사용', EARN_CANCEL: '적립 취소', USE_RESTORE: '사용 취소', ADJUST: '약국 조정', REWARD: '추천 보상' };
 
-      const esc = (value) =>
-        String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
+      const esc = escapeHtml;
       const won = (value) => `${Number(value || 0).toLocaleString('ko-KR')}원`;
       const MARKETING_TYPES = ['MARKETING_SMS', 'MARKETING_KAKAO', 'MARKETING_NIGHT'];
       const my = { data: null, alerts: [], requests: [], requestStatuses: {}, family: null, relations: {} };
