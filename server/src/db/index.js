@@ -264,6 +264,27 @@ function migratePosRecovery() {
   `);
 }
 
+// 회원 탈퇴·보유기간 파기와 복약상담 내용 암호화.
+// 예전 상담 예약은 문의 내용(증상·복용 약)을 일반 메모에 평문으로 두었으므로 암호문으로 옮기고 메모를 비운다.
+function migratePrivacy() {
+  addColumnIfMissing('customers', 'withdrawn_at', 'TEXT');
+  addColumnIfMissing('customers', 'withdrawal_source', 'TEXT');
+  addColumnIfMissing('customers', 'personal_purged_at', 'TEXT');
+  addColumnIfMissing('customers', 'health_updated_by', 'INTEGER');
+  addColumnIfMissing('orders', 'counsel_note', 'TEXT');
+  addColumnIfMissing('orders', 'counsel_consent_at', 'TEXT');
+  addColumnIfMissing('orders', 'counsel_note_purged_at', 'TEXT');
+  addColumnIfMissing('admin_logs', 'purpose', 'TEXT');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_admin_logs_target ON admin_logs(target_type, target_id, action)');
+
+  const { encrypt } = require('../services/secure');
+  const legacy = db.prepare("SELECT id, memo FROM orders WHERE order_type = 'COUNSEL' AND memo IS NOT NULL AND TRIM(memo) != ''").all();
+  const move = db.prepare('UPDATE orders SET counsel_note = @note, memo = NULL WHERE id = @id');
+  db.transaction(() => {
+    for (const row of legacy) move.run({ id: row.id, note: encrypt(row.memo) });
+  })();
+}
+
 function migratePos(schema) {
   if (needsUsersRebuild()) rebuildTable(schema, 'users');
   if (needsOrdersRebuild()) rebuildTable(schema, 'orders');
@@ -336,6 +357,7 @@ function migratePos(schema) {
   migrateProductImport();
   migrateOrderFlow();
   migratePosRecovery();
+  migratePrivacy();
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_suppliers_pharmacy ON suppliers(pharmacy_id, status);

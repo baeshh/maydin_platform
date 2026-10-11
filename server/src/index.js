@@ -5,6 +5,7 @@ const express = require('express');
 const cors = require('cors');
 const { db, getOne, migrate } = require('./db');
 const { startSchedule: startBackupSchedule } = require('./services/backup');
+const { startRetentionSchedule } = require('./services/privacy');
 
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
@@ -101,4 +102,5 @@ app.use((err, req, res, next) => {
 app.listen(port, () => {
   console.log(`Maydin closed mall server running on http://localhost:${port}`);
   startBackupSchedule(db);
+  startRetentionSchedule();
 });

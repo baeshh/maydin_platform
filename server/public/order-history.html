@@ -99,7 +99,7 @@
 
       function detailLine(order) {
         if (order.order_type === 'COUNSEL') {
-          return `${order.preferred_at || '-'} · ${order.memo || ''}`;
+          return `${esc(order.preferred_at || '-')}${order.counsel_note ? ` · ${esc(order.counsel_note)}` : ''}`;
         }
         if (order.order_type === 'PICKUP') {
           return `픽업 ${order.preferred_at || '-'} · ${order.contact_name || ''} ${order.contact_phone || ''}`;
@@ -125,6 +125,9 @@
                 ${order.can_cancel
                   ? `<button class="small-btn" type="button" style="margin-top:10px;" onclick="cancelOrder(${Number(order.id)})">${order.order_type === 'COUNSEL' ? '예약 취소' : '주문 취소'}</button>`
                   : ''}
+                ${order.order_type === 'COUNSEL' && order.counsel_note
+                  ? `<button class="small-btn" type="button" style="margin-top:10px;" onclick="deleteCounselNote(${Number(order.id)})">문의 내용 삭제</button>`
+                  : ''}
               </article>
             `).join('')
           : '<div class="card"><p class="muted">아직 주문·예약 내역이 없습니다.</p></div>';
@@ -144,6 +147,17 @@
         } catch (error) {
           toast(error.message);
           loadOrders().catch(() => {});
+        }
+      }
+
+      async function deleteCounselNote(id) {
+        if (!confirm('상담 예약에 적은 문의 내용(증상·복용 약)을 삭제할까요?\n예약은 그대로 남고, 약사도 더 이상 볼 수 없어요.')) return;
+        try {
+          await api.request(`/orders/${id}/counsel-note`, { method: 'DELETE' });
+          toast('문의 내용을 삭제했어요.');
+          await loadOrders();
+        } catch (error) {
+          toast(error.message);
         }
       }
 
@@ -283,25 +297,96 @@
         return html;
       }
 
-      function healthForm(health, agreed) {
+      function healthForm(health, agreed, privacy) {
+        const months = privacy?.retention?.health_months || 24;
         const field = (name, label, value, placeholder) => `
           <div class="health-field">
             ${label}
             <label class="check-row"><input type="checkbox" name="${name}_none" ${health && !value ? 'checked' : ''} onchange="this.form.${name}.disabled = this.checked" /> <span>없음</span></label>
             <textarea name="${name}" maxlength="300" rows="2" placeholder="${placeholder}" ${health && !value ? 'disabled' : ''}>${esc(value || '')}</textarea>
           </div>`;
+        const status = health
+          ? `<div class="notice" style="background:#f2f4f6; color:var(--sub);">
+               ${formatDate(health.updated_at)} ${health.updated_by === 'PHARMACIST' ? '약사가 상담 중 수정' : '저장'} ·
+               ${formatDate(health.expires_at)}까지 보관해요. 그때까지 확인이 없으면 자동으로 삭제돼요.
+               <button class="small-btn" type="button" style="margin-top:8px; display:block;" onclick="confirmHealth()">내용 그대로예요 (보관 기간 연장)</button>
+             </div>`
+          : '';
         return `
           <form id="healthForm" onsubmit="saveHealth(event)" style="margin-top:18px; border-top:1px solid var(--line); padding-top:12px;">
-            <strong style="font-size:14px;">건강 정보 (약사 상담용)</strong>
-            <p class="muted" style="margin:4px 0 8px;">약사가 함께 먹으면 안 되는 약을 확인할 때만 써요. 암호화해 보관하고 약사만 볼 수 있어요.</p>
+            <strong style="font-size:14px;">알레르기·복용 약 (선택 · 복약상담용)</strong>
+            <p class="muted" style="margin:4px 0 8px;">
+              적지 않아도 멤버십·주문은 똑같이 쓸 수 있어요. 적어 두면 약사가 함께 먹으면 안 되는 약을 미리 확인해요.
+              암호화해 보관하고 약사만, 열람 목적을 남긴 뒤에 볼 수 있어요. 마지막 확인 뒤 ${months}개월이 지나면 자동 삭제돼요.
+            </p>
+            ${status}
             ${field('allergy', '알레르기', health?.allergy, '예: 페니실린, 조개류')}
             ${field('medications', '지금 복용 중인 약', health?.medications, '예: 혈압약')}
-            ${agreed ? '' : `<label class="check-row"><input type="checkbox" name="consent" required /> <span>[필수] 민감정보(알레르기·복용 약) 수집·이용에 동의합니다. 동의 철회 시 즉시 삭제됩니다.</span></label>`}
-            <div style="display:flex; gap:8px; margin-top:10px;">
-              <button class="small-btn primary" type="submit">건강 정보 저장</button>
+            ${agreed ? '' : `<label class="check-row"><input type="checkbox" name="consent" required /> <span>민감정보(알레르기·복용 약) 보관·이용에 동의합니다. 목적: 복약상담·판매 전 함께 먹으면 안 되는 약 확인 · 보관: 마지막 확인 뒤 ${months}개월 또는 철회·탈퇴 시 즉시 삭제 · 동의하지 않아도 서비스 이용에 제한이 없습니다.</span></label>`}
+            <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+              <button class="small-btn primary" type="submit">${agreed ? '저장' : '동의하고 저장'}</button>
               ${agreed ? '<button class="small-btn" type="button" onclick="withdrawHealth()">동의 철회 · 삭제</button>' : ''}
             </div>
           </form>`;
+      }
+
+      function accessLogBox(privacy) {
+        const log = privacy?.access_log || [];
+        return `
+          <div style="margin-top:18px; border-top:1px solid var(--line); padding-top:12px;">
+            <strong style="font-size:14px;">내 건강 정보 이용 기록</strong>
+            <p class="muted" style="margin:4px 0 6px;">약사가 언제 어떤 목적으로 보거나 고쳤는지, 언제 삭제됐는지 보여 드려요.</p>
+            ${log.length
+              ? log.map((l) => `
+                  <div class="list-row">
+                    <div><b>${esc(l.action_label)}</b><p class="muted">${formatDateTime(l.created_at)} · ${esc(l.by)}${l.purpose_label ? ` · 목적: ${esc(l.purpose_label)}` : ''}</p></div>
+                  </div>`).join('')
+              : '<p class="muted">아직 기록이 없어요.</p>'}
+          </div>`;
+      }
+
+      function withdrawForm(privacy) {
+        const years = privacy?.retention?.transaction_years || 5;
+        return `
+          <details style="margin-top:18px; border-top:1px solid var(--line); padding-top:4px;">
+            <summary>회원 탈퇴</summary>
+            <form onsubmit="withdrawMember(event)" style="margin-top:8px;">
+              <p class="muted">
+                탈퇴하면 이름·휴대폰 번호·생년월일·성별·주소·건강 정보·상담 문의 내용·포인트·가족 연결이 바로 삭제되고, 남은 상담 예약은 취소돼요.
+                구매·결제 기록은 전자상거래법에 따라 이름·연락처 없이 ${years}년 보관한 뒤 파기해요.
+                진행 중인 배송·픽업 주문이 있으면 받은 뒤에 탈퇴할 수 있어요.
+              </p>
+              <label class="check-row"><input type="checkbox" name="confirm" required /> <span>위 내용을 확인했고 탈퇴합니다.</span></label>
+              <div class="form-grid" style="grid-template-columns:1fr;">
+                <label>본인 확인 PIN<input name="pin" type="password" inputmode="numeric" maxlength="6" autocomplete="current-password" required /></label>
+              </div>
+              <button class="small-btn" type="submit" style="margin-top:10px; color:#f04452;">탈퇴하기</button>
+            </form>
+          </details>`;
+      }
+
+      async function confirmHealth() {
+        try {
+          const data = await api.request('/customers/me/health/confirm', { method: 'POST' });
+          my.data.health = data.health;
+          renderMyInfo();
+          toast(`${formatDate(data.health.expires_at)}까지 보관 기간을 늘렸어요.`);
+        } catch (error) {
+          toast(error.message);
+        }
+      }
+
+      async function withdrawMember(event) {
+        event.preventDefault();
+        const f = event.target;
+        if (!confirm('정말 탈퇴할까요? 삭제된 정보와 포인트는 되돌릴 수 없어요.')) return;
+        try {
+          await api.request('/customers/me/withdraw', { method: 'POST', body: { pin: f.pin.value, confirm: f.confirm.checked } });
+          alert('탈퇴가 완료됐어요. 그동안 이용해 주셔서 감사합니다.');
+          logout(withPharmacy('/login.html', pharmacyCode));
+        } catch (error) {
+          toast(error.message);
+        }
       }
 
       function pinForm() {
@@ -346,6 +431,7 @@
           const data = await api.request('/customers/me/health', { method: 'DELETE' });
           my.data.health = null;
           my.data.consents = data.consents;
+          my.data.privacy = data.privacy;
           renderMyInfo();
           toast('동의를 철회하고 건강 정보를 삭제했어요.');
         } catch (error) {
@@ -365,7 +451,7 @@
         }
       }
 
-      function settingsCard({ customer, consents, health }) {
+      function settingsCard({ customer, consents, health, privacy }) {
         const birthdayLocked = customer.birth_month != null;
         const yearLocked = customer.birth_year != null;
         const year = new Date().getFullYear();
@@ -374,14 +460,14 @@
         return `
           <article class="card">
             <details id="settingsBox">
-              <summary style="margin:0; font-size:15px; color:var(--text);">내 정보 · 알림 수신 설정</summary>
+              <summary style="margin:0; font-size:15px; color:var(--text);">내 정보 · 알림 · 개인정보 관리</summary>
               <form id="profileForm" onsubmit="saveProfile(event)">
                 <div class="form-grid">
                   <label>생일(월)<select name="birth_month" ${birthdayLocked ? 'disabled' : ''}>${options(1, 12, customer.birth_month, '월')}</select></label>
                   <label>생일(일)<select name="birth_day" ${birthdayLocked ? 'disabled' : ''}>${options(1, 31, customer.birth_day, '일')}</select></label>
                   <label>출생연도<select name="birth_year" ${yearLocked ? 'disabled' : ''}>${options(year, 1920, customer.birth_year, '년')}</select></label>
-                  <label>성별<select name="gender">
-                    ${customer.gender ? '' : '<option value="">선택 안 함</option>'}
+                  <label>성별 (선택)<select name="gender">
+                    <option value="">선택 안 함</option>
                     <option value="F" ${customer.gender === 'F' ? 'selected' : ''}>여성</option>
                     <option value="M" ${customer.gender === 'M' ? 'selected' : ''}>남성</option>
                   </select></label>
@@ -399,8 +485,10 @@
                 <p class="muted">할인·이벤트·재구매 안내를 받아요. 언제든 끌 수 있고, 꺼도 멤버십 이용에는 영향이 없어요.${missingRequired.length ? '' : ' 이용약관·개인정보 동의는 완료되어 있어요.'}</p>
                 <button class="small-btn primary" type="submit" style="margin-top:10px;">수신 설정 저장</button>
               </form>
-              ${healthForm(health, consents.HEALTH_INFO?.agreed)}
+              ${healthForm(health, consents.HEALTH_INFO?.agreed, privacy)}
+              ${accessLogBox(privacy)}
               ${pinForm()}
+              ${withdrawForm(privacy)}
             </details>
           </article>`;
       }
@@ -593,6 +681,13 @@
       function formatDate(value) {
         const date = new Date(`${String(value).replace(' ', 'T')}Z`);
         return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
+      }
+
+      function formatDateTime(value) {
+        const date = new Date(`${String(value).replace(' ', 'T')}Z`);
+        return Number.isNaN(date.getTime())
+          ? value
+          : date.toLocaleString('ko-KR', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
       }
 
       async function togglePoints() {

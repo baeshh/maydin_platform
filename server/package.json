@@ -12,7 +12,8 @@
     "backup:status": "node scripts/backup.js status",
     "backup:verify": "node scripts/backup.js verify",
     "backup:drill": "node scripts/backup.js drill",
-    "backup:restore": "node scripts/backup.js restore"
+    "backup:restore": "node scripts/backup.js restore",
+    "retention": "node scripts/retention.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

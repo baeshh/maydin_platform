@@ -19,6 +19,8 @@ const { customerMembership } = require('../services/members');
 const { RELATIONS, familyView, addFamily, updateFamily, removeFamily } = require('../services/family');
 const { pointPolicy } = require('../services/points');
 const auth = require('../services/member-auth');
+const privacy = require('../services/privacy');
+const { retentionSettings } = require('../services/customers');
 const bcrypt = require('bcryptjs');
 
 const router = express.Router();
@@ -44,7 +46,7 @@ function profileOf(customerId) {
             c.birth_year, c.birth_month, c.birth_day, c.gender, c.referred_by_customer_id,
             c.approval_status, c.approval_note, c.approved_at, c.signup_order_id,
             c.pin_hash IS NOT NULL AS pin_set, c.pin_failed_count, c.pin_locked_until,
-            c.health_info IS NOT NULL AS has_health, c.health_updated_at,
+            c.health_info IS NOT NULL AS has_health, c.health_updated_at, c.withdrawn_at,
             ch.name AS signup_channel_name, ch.channel_type AS signup_channel_type,
             r.name AS referrer_name,
             (SELECT COUNT(*) FROM customers x WHERE x.referred_by_customer_id = c.id) AS referred_count
@@ -55,8 +57,27 @@ function profileOf(customerId) {
     { id: customerId }
   );
   if (!customer) return null;
-  if (!customer.referral_code) customer.referral_code = assignReferralCode(customer.id);
+  if (!customer.referral_code && !customer.withdrawn_at) customer.referral_code = assignReferralCode(customer.id);
   return customer;
+}
+
+// 동의 철회로 건강 정보를 지운다. 지운 기록은 고객의 '이용 기록'에 남긴다.
+function withdrawHealthConsent(customer, { source, userId }) {
+  const had = Boolean(getOne('SELECT health_info FROM customers WHERE id = @id', { id: customer.id }).health_info);
+  auth.clearHealth(customer.id);
+  if (had) {
+    privacy.logAccess({
+      userId,
+      pharmacyId: customer.pharmacy_id,
+      customerId: customer.id,
+      action: 'HEALTH_CONSENT_WITHDRAWN',
+      description: `건강 정보 동의 철회 삭제 (${source === 'APP' ? '본인' : '약국 대리'})`
+    });
+  }
+}
+
+function privacyInfo(customerId) {
+  return { retention: retentionSettings(), access_log: privacy.accessLog(customerId, 20), purposes: privacy.ACCESS_PURPOSES };
 }
 
 function labels() {
@@ -101,6 +122,7 @@ router.get('/me', requireRole('CUSTOMER'), (req, res) => {
       consents: currentConsents(customer.id),
       membership: customerMembership(customer.pharmacy_id, customer.id),
       point_enabled: pointPolicy(customer.pharmacy_id).enabled,
+      privacy: privacyInfo(customer.id),
       pharmacy,
       labels: labels()
     });
@@ -117,7 +139,6 @@ router.patch('/me/profile', requireRole('CUSTOMER'), (req, res) => {
       (key) => key in req.body && customer[key] != null && Number(req.body[key]) !== customer[key]
     );
     if (changesBirthday) throw new CustomerError('생년월일은 한 번 등록하면 앱에서 바꿀 수 없어요. 약국에 문의해 주세요.');
-    if ('gender' in req.body && !req.body.gender && customer.gender) throw new CustomerError('성별은 비워 둘 수 없어요.');
     updateProfile(customer, req.body);
     return res.json({ customer: profileOf(customer.id) });
   } catch (error) {
@@ -131,11 +152,12 @@ router.patch('/me/consents', requireRole('CUSTOMER'), (req, res) => {
     const changes = normalizeConsentChanges(req.body.consents);
     if (!Object.keys(changes).length) throw new CustomerError('변경할 동의 항목이 없습니다.');
     if (Object.entries(changes).some(([type, agreed]) => CONSENT_TYPES[type].required && !agreed)) {
-      throw new CustomerError('필수 동의를 철회하려면 회원 탈퇴가 필요합니다. 약국에 문의해 주세요.');
+      throw new CustomerError('필수 동의를 철회하려면 회원 탈퇴가 필요합니다. 내 정보 아래 회원 탈퇴에서 진행할 수 있어요.');
     }
+    if (changes.HEALTH_INFO === true) throw new CustomerError('건강 정보 동의는 알레르기·복용 약을 입력할 때 함께 받습니다.');
     transaction(() => {
       recordConsents({ pharmacyId: customer.pharmacy_id, customerId: customer.id, changes, source: 'APP', userId: req.user.id });
-      if (changes.HEALTH_INFO === false) auth.clearHealth(customer.id);
+      if (changes.HEALTH_INFO === false) withdrawHealthConsent(customer, { source: 'APP', userId: req.user.id });
     })();
     return res.json({ consents: currentConsents(customer.id) });
   } catch (error) {
@@ -143,20 +165,33 @@ router.patch('/me/consents', requireRole('CUSTOMER'), (req, res) => {
   }
 });
 
-// 알레르기·복용 약은 민감정보라 동의가 있어야 저장한다. 이 기능 전에 가입한 회원은 여기서 처음 동의할 수 있다.
+// 알레르기·복용 약은 선택 정보다. 복약상담에 쓰려는 회원만 이 화면에서 따로 동의하고 입력한다.
 router.put('/me/health', requireRole('CUSTOMER'), (req, res) => {
   try {
     const customer = myCustomer(req);
     const agreed = currentConsents(customer.id).HEALTH_INFO.agreed;
-    if (!agreed && req.body.consent !== true) throw new CustomerError('민감정보(알레르기·복용 약) 수집·이용에 동의해 주세요.');
+    if (!agreed && req.body.consent !== true) throw new CustomerError('민감정보(알레르기·복용 약) 보관·이용에 동의해 주세요.');
     const health = auth.normalizeHealth(req.body);
     transaction(() => {
       if (!agreed) {
         recordConsents({ pharmacyId: customer.pharmacy_id, customerId: customer.id, changes: { HEALTH_INFO: true }, source: 'APP', userId: req.user.id });
       }
-      auth.saveHealth(customer.id, health);
+      auth.saveHealth(customer.id, health, req.user.id);
     })();
     return res.json({ health: auth.readHealth(customer.id), consents: currentConsents(customer.id) });
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
+// 내용이 그대로라고 고객이 확인하면 보유기간을 다시 센다. 확인하지 않으면 기간이 끝날 때 지운다.
+router.post('/me/health/confirm', requireRole('CUSTOMER'), (req, res) => {
+  try {
+    const customer = myCustomer(req);
+    const health = auth.readHealth(customer.id);
+    if (!health) throw new CustomerError('저장된 건강 정보가 없습니다.', 404);
+    auth.saveHealth(customer.id, { allergy: health.allergy, medications: health.medications }, req.user.id);
+    return res.json({ health: auth.readHealth(customer.id) });
   } catch (error) {
     return fail(res, error);
   }
@@ -167,9 +202,38 @@ router.delete('/me/health', requireRole('CUSTOMER'), (req, res) => {
     const customer = myCustomer(req);
     transaction(() => {
       recordConsents({ pharmacyId: customer.pharmacy_id, customerId: customer.id, changes: { HEALTH_INFO: false }, source: 'APP', userId: req.user.id });
-      auth.clearHealth(customer.id);
+      withdrawHealthConsent(customer, { source: 'APP', userId: req.user.id });
     })();
-    return res.json({ health: null, consents: currentConsents(customer.id) });
+    return res.json({ health: null, consents: currentConsents(customer.id), privacy: privacyInfo(customer.id) });
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
+router.get('/me/privacy', requireRole('CUSTOMER'), (req, res) => {
+  try {
+    const customer = myCustomer(req);
+    return res.json(privacyInfo(customer.id));
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
+// 본인 확인을 위해 PIN을 다시 받는다. 거래 기록은 법정 보존기간 동안 이름·연락처 없이 남는다.
+router.post('/me/withdraw', requireRole('CUSTOMER'), (req, res) => {
+  try {
+    const row = getOne('SELECT * FROM customers WHERE user_id = @user_id', { user_id: req.user.id });
+    if (!row) throw new CustomerError('고객 정보를 찾을 수 없습니다.', 404);
+    if (req.body.confirm !== true) throw new CustomerError('탈퇴 안내를 확인해 주세요.');
+    const lock = auth.pinLock(row);
+    if (lock) throw new CustomerError(lock.message, 423);
+    if (!row.pin_hash || !bcrypt.compareSync(String(req.body.pin || ''), row.pin_hash)) {
+      const after = auth.recordPinFailure(row.id);
+      const nextLock = auth.pinLock(after);
+      throw new CustomerError(nextLock ? nextLock.message : 'PIN이 맞지 않습니다.', nextLock ? 423 : 400);
+    }
+    privacy.withdrawCustomer({ customerId: row.id, pharmacyId: row.pharmacy_id, source: 'APP', userId: req.user.id });
+    return res.json({ withdrawn: true });
   } catch (error) {
     return fail(res, error);
   }
@@ -262,7 +326,9 @@ function pharmacyCustomer(req) {
     pharmacy_id: req.user.pharmacy_id
   });
   if (!row) throw new CustomerError('회원을 찾을 수 없습니다.', 404);
-  return profileOf(row.id);
+  const customer = profileOf(row.id);
+  if (customer.withdrawn_at && req.method !== 'GET') throw new CustomerError('탈퇴한 회원입니다.', 409);
+  return customer;
 }
 
 router.get('/consent-renewals', (req, res) => {
@@ -338,13 +404,70 @@ router.post('/:id/pin-reset-code', (req, res) => {
   }
 });
 
-// 민감정보라 누가 언제 봤는지 남긴다.
+// 민감정보라 약사(대표 계정)만, 목적을 고른 뒤에 열람한다. 누가 언제 어떤 목적으로 봤는지 남기고 고객도 볼 수 있다.
 router.get('/:id/health', (req, res) => {
   try {
     const customer = pharmacyCustomer(req);
+    const purpose = privacy.parsePurpose(req.query.purpose);
     const health = auth.readHealth(customer.id);
-    audit(req, 'HEALTH_VIEW', customer.id, `건강 정보 열람 · ${customer.name}`);
-    return res.json({ health });
+    privacy.logAccess({
+      userId: req.user.id,
+      pharmacyId: customer.pharmacy_id,
+      customerId: customer.id,
+      action: 'HEALTH_VIEW',
+      purpose,
+      description: `건강 정보 열람 · ${customer.name} · 목적: ${privacy.ACCESS_PURPOSES[purpose]}`
+    });
+    return res.json({ health, agreed: currentConsents(customer.id).HEALTH_INFO.agreed });
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
+// 상담 중 고객이 말한 내용으로 고친다. 동의는 고객 본인이 앱에서 해야 하므로, 동의가 없으면 입력할 수 없다.
+router.put('/:id/health', (req, res) => {
+  try {
+    const customer = pharmacyCustomer(req);
+    if (customer.approval_status !== 'APPROVED') throw new CustomerError('승인된 회원만 건강 정보를 둘 수 있습니다.');
+    if (!currentConsents(customer.id).HEALTH_INFO.agreed) {
+      throw new CustomerError('고객이 건강 정보 보관에 동의하지 않았습니다. 고객이 앱 내 정보에서 동의한 뒤 입력할 수 있어요.', 409);
+    }
+    const health = auth.normalizeHealth(req.body);
+    transaction(() => {
+      auth.saveHealth(customer.id, health, req.user.id);
+      privacy.logAccess({
+        userId: req.user.id,
+        pharmacyId: customer.pharmacy_id,
+        customerId: customer.id,
+        action: 'HEALTH_UPDATE',
+        purpose: 'COUNSEL',
+        description: `건강 정보 수정 · ${customer.name}`
+      });
+    })();
+    return res.json({ health: auth.readHealth(customer.id) });
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
+router.get('/:id/privacy', (req, res) => {
+  try {
+    const customer = pharmacyCustomer(req);
+    return res.json(privacyInfo(customer.id));
+  } catch (error) {
+    return fail(res, error);
+  }
+});
+
+// 고객이 방문·전화로 탈퇴를 요청했을 때, 약국이 본인 확인을 한 뒤 대신 처리한다.
+router.post('/:id/withdraw', (req, res) => {
+  try {
+    const customer = pharmacyCustomer(req);
+    if (req.body.identity_checked !== true) throw new CustomerError('고객 본인의 탈퇴 요청인지 확인해 주세요.');
+    const reason = String(req.body.reason || '').trim().slice(0, 200);
+    if (!reason) throw new CustomerError('탈퇴 요청 경로(방문·전화 등)를 적어 주세요.');
+    privacy.withdrawCustomer({ customerId: customer.id, pharmacyId: customer.pharmacy_id, source: 'PARTNER', userId: req.user.id, reason });
+    return res.json({ withdrawn: true, customer: profileOf(customer.id) });
   } catch (error) {
     return fail(res, error);
   }
@@ -373,7 +496,8 @@ function findLinkTarget(pharmacyId, query) {
   const digits = raw.replace(/\D/g, '');
   const row = getOne(
     `SELECT id FROM customers
-     WHERE pharmacy_id = @pharmacy_id AND (UPPER(member_code) = UPPER(@raw) OR (LENGTH(@digits) >= 10 AND REPLACE(phone, '-', '') = @digits))`,
+     WHERE pharmacy_id = @pharmacy_id AND approval_status = 'APPROVED'
+       AND (UPPER(member_code) = UPPER(@raw) OR (LENGTH(@digits) >= 10 AND REPLACE(phone, '-', '') = @digits))`,
     { pharmacy_id: pharmacyId, raw, digits }
   );
   if (!row) throw new CustomerError('연결할 회원을 찾을 수 없습니다. 전화번호 전체 또는 회원코드를 입력해 주세요.', 404);
@@ -445,7 +569,7 @@ router.post('/:id/consents/withdraw', (req, res) => {
     }
     const written = transaction(() => {
       const result = recordConsents({ pharmacyId: customer.pharmacy_id, customerId: customer.id, changes, source: 'PARTNER', userId: req.user.id });
-      if (changes.HEALTH_INFO === false) auth.clearHealth(customer.id);
+      if (changes.HEALTH_INFO === false) withdrawHealthConsent(customer, { source: 'PARTNER', userId: req.user.id });
       if (result.length) {
         audit(req, 'CONSENT_WITHDRAW', customer.id, `동의 철회 대행 · ${customer.name} · ${result.map((type) => CONSENT_TYPES[type].label).join(', ')}`);
       }

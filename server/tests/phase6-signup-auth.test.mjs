@@ -94,12 +94,8 @@ console.log('[가입 막기 — 코드·필수 정보]');
 
   const valid = createSignupCode(db).code;
   const cases = [
-    ['민감정보 동의 없음', { consents: { TERMS: true, PRIVACY: true } }],
-    ['성별 없음', { gender: '' }],
+    ['개인정보 동의 없음', { consents: { TERMS: true } }],
     ['생년 없음', { birth_year: undefined }],
-    ['주소 없음', { address: ' ' }],
-    ['알레르기 미입력', { allergy_none: false, allergy: '' }],
-    ['복용 약 미입력', { medications_none: false }],
     ['만 14세 미만', { birth_year: new Date().getFullYear() - 10 }],
     ['PIN 5자리', { pin: '12345' }],
     ['PIN 같은 숫자', { pin: '777777' }],
@@ -118,13 +114,7 @@ console.log('[가입 막기 — 코드·필수 정보]');
 console.log('[정상 가입 · 자동 승인]');
 let approved;
 {
-  const body = bodyWithCode(saleCode, {
-    name: '자동승인',
-    allergy_none: false,
-    allergy: '페니실린',
-    medications_none: false,
-    medications: '혈압약'
-  });
+  const body = bodyWithCode(saleCode, { name: '자동승인' });
   let res = await postSignup(body);
   check('영수증 코드로 가입 → 자동 승인 201', res.status === 201 && res.data.status === 'APPROVED' && res.data.token, res.data);
   check('인증 구매 적립 200P (2만 원 × 1%)', res.data.points_earned === 200, res.data);
@@ -142,13 +132,23 @@ let approved;
   check('같은 번호 재가입 409', res.status === 409, res.data);
 
   check('PIN은 해시로만 저장', approved.row.pin_hash.startsWith('$2') && !approved.row.pin_hash.includes(TEST_PIN), approved.row.pin_hash);
-  check('건강 정보는 암호문으로 저장', approved.row.health_info.startsWith('v1:') && !approved.row.health_info.includes('페니실린'), approved.row.health_info);
+  check('가입 때는 건강 정보를 받지 않음', approved.row.health_info === null, approved.row.health_info);
   check('주소 저장', db.prepare('SELECT address FROM addresses WHERE id = ?').get(approved.row.default_address_id)?.address === body.address);
 
   res = await api('/customers/me', { token: approved.token });
-  check('본인은 건강 정보 조회', res.data.health?.allergy === '페니실린' && res.data.health.has_alert === true, res.data.health);
   check('본인 응답에 승인 메모·PIN 정보 없음', !('approval_note' in res.data.customer) && !('pin_hash' in res.data.customer), res.data.customer);
-  check('민감정보 동의 기록', res.data.consents.HEALTH_INFO.agreed && res.data.consents.HEALTH_INFO.source === 'SIGNUP', res.data.consents.HEALTH_INFO);
+  check('가입 때 민감정보 동의 기록 없음', !res.data.consents.HEALTH_INFO.agreed && !res.data.consents.HEALTH_INFO.recorded, res.data.consents.HEALTH_INFO);
+
+  res = await api('/customers/me/health', {
+    token: approved.token,
+    method: 'PUT',
+    body: { consent: true, allergy: '페니실린', medications: '혈압약' }
+  });
+  check('복약상담용으로 따로 동의하고 입력', res.status === 200 && res.data.consents.HEALTH_INFO.source === 'APP', res.data);
+  approved.row = customerRow(body.phone);
+  check('건강 정보는 암호문으로 저장', approved.row.health_info.startsWith('v1:') && !approved.row.health_info.includes('페니실린'), approved.row.health_info);
+  res = await api('/customers/me', { token: approved.token });
+  check('본인은 건강 정보 조회', res.data.health?.allergy === '페니실린' && res.data.health.has_alert === true, res.data.health);
 
   res = await api('/dashboard/customers', { token: owner });
   const listed = res.data.customers.find((c) => c.id === approved.row.id);
@@ -287,12 +287,12 @@ console.log('[건강 정보 열람 · 철회]');
 {
   let res = await api(`/customers/${approved.row.id}`, { token: owner });
   check('회원 상세에는 건강 정보 내용 없이 등록 여부만', res.data.customer.has_health === 1 && !('health' in res.data), res.data.customer);
-  res = await api(`/customers/${approved.row.id}/health`, { token: owner });
+  res = await api(`/customers/${approved.row.id}/health?purpose=COUNSEL`, { token: owner });
   check('약사 건강 정보 열람', res.status === 200 && res.data.health.allergy === '페니실린', res.data);
   check('열람 감사 로그', Boolean(db.prepare("SELECT 1 FROM admin_logs WHERE action = 'HEALTH_VIEW' AND target_id = ?").get(approved.row.id)));
   res = await api(`/pos/customers/${approved.row.id}`, { token: owner });
   check('POS 관리자에게 건강 정보 있음 표시', res.data.membership?.has_health === true, res.data.membership);
-  res = await api(`/pos/customers/${approved.row.id}/health`, { token: owner });
+  res = await api(`/pos/customers/${approved.row.id}/health?purpose=SALE_CHECK`, { token: owner });
   check('POS에서 약사 열람', res.status === 200 && res.data.health.medications === '혈압약', res.data);
 
   res = await api('/customers/me/health', { token: approved.token, method: 'DELETE' });
@@ -321,7 +321,7 @@ console.log('[온라인 주문 — 매장 구매 인증한 승인 회원만]');
     api('/orders', {
       token,
       method: 'POST',
-      body: { order_type: type, payment_method: 'MOCK_CARD', contact_name: '테스트', contact_phone: '01000000000', preferred_at: '2026-12-01T10:00', memo: '상담' }
+      body: { order_type: type, payment_method: 'MOCK_CARD', contact_name: '테스트', contact_phone: '01000000000', preferred_at: '2026-12-01T10:00' }
     });
   const addCart = (token) => api('/cart', { token, method: 'POST', body: { product_id: productId, quantity: 1 } });
 

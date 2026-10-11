@@ -16,10 +16,14 @@ const {
   refundOrder,
   transition
 } = require('../services/order-flow');
+const { encrypt } = require('../services/secure');
+const privacy = require('../services/privacy');
 
+const { stripCounselNote } = privacy;
 const router = express.Router();
 
 const ORDER_TYPES = new Set(['DELIVERY', 'PICKUP', 'COUNSEL']);
+const COUNSEL_NOTE_MAX_LENGTH = 500;
 
 function orderNumber(prefix = 'ORD') {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
@@ -124,11 +128,12 @@ router.get('/', requireRole('CUSTOMER', 'PHARMACY_OWNER', 'ADMIN'), requirePharm
        WHERE o.pharmacy_id = @pharmacy_id AND COALESCE(o.sales_channel, 'ONLINE') != 'POS' AND o.order_type != 'ONLINE_REFUND'
        ORDER BY o.id DESC`;
 
-  const orders = getAll(sql, { pharmacy_id: req.pharmacyId, user_id: req.user.id }).map((order) =>
-    ORDER_TYPES.has(order.order_type || 'DELIVERY') && order.sales_channel !== 'POS'
+  const orders = getAll(sql, { pharmacy_id: req.pharmacyId, user_id: req.user.id }).map((row) => {
+    const order = stripCounselNote(row, { reveal: customerOnly });
+    return ORDER_TYPES.has(order.order_type || 'DELIVERY') && order.sales_channel !== 'POS'
       ? { ...order, ...availableActions(order, req.user.role) }
-      : order
-  );
+      : order;
+  });
   res.json({ orders });
 });
 
@@ -178,12 +183,47 @@ router.get('/eligibility', requireRole('CUSTOMER'), requirePharmacyScope, (req, 
   res.json(onlineOrderStatus(findMyCustomer(req)));
 });
 
+// 상담 예약 때 고객이 적은 증상·복용 약은 약사(약국 대표 계정)만 열람하고, 열람 기록이 고객에게도 보인다.
+router.get('/:id/counsel-note', requireRole('PHARMACY_OWNER'), requirePharmacyScope, (req, res) => {
+  try {
+    const order = findOrderFor(req);
+    if (order.order_type !== 'COUNSEL') throw new OrderFlowError('복약상담 예약이 아닙니다.', 400, 'NOT_COUNSEL');
+    const note = privacy.counselNote(order);
+    if (note && order.customer_id) {
+      privacy.logAccess({
+        userId: req.user.id,
+        pharmacyId: req.pharmacyId,
+        customerId: order.customer_id,
+        action: 'COUNSEL_NOTE_VIEW',
+        purpose: 'COUNSEL',
+        description: `상담 내용 열람 · ${order.order_number}`
+      });
+    }
+    res.json({ note, purged_at: order.counsel_note_purged_at });
+  } catch (error) {
+    sendFlowError(res, error);
+  }
+});
+
+// 고객은 언제든 자기 상담 문의 내용을 지울 수 있다(해당 예약의 동의 철회).
+router.delete('/:id/counsel-note', requireRole('CUSTOMER'), requirePharmacyScope, (req, res) => {
+  try {
+    const order = findOrderFor(req);
+    if (order.order_type !== 'COUNSEL') throw new OrderFlowError('복약상담 예약이 아닙니다.', 400, 'NOT_COUNSEL');
+    privacy.deleteCounselNote(order.id);
+    res.json({ order: stripCounselNote(getOne('SELECT * FROM orders WHERE id = @id', { id: order.id }), { reveal: true }) });
+  } catch (error) {
+    sendFlowError(res, error);
+  }
+});
+
 router.get('/:id', requireRole('CUSTOMER', 'PHARMACY_OWNER', 'ADMIN'), requirePharmacyScope, (req, res) => {
-  const order = getOne('SELECT * FROM orders WHERE id = @id AND pharmacy_id = @pharmacy_id', {
+  const row = getOne('SELECT * FROM orders WHERE id = @id AND pharmacy_id = @pharmacy_id', {
     id: Number(req.params.id),
     pharmacy_id: req.pharmacyId
   });
-  if (!order) return res.status(404).json({ message: '주문을 찾을 수 없습니다.' });
+  if (!row) return res.status(404).json({ message: '주문을 찾을 수 없습니다.' });
+  const order = stripCounselNote(row, { reveal: req.user.role === 'CUSTOMER' });
 
   if (req.user.role === 'CUSTOMER') {
     const customer = getOne('SELECT id FROM customers WHERE user_id = @user_id AND pharmacy_id = @pharmacy_id', {
@@ -230,10 +270,14 @@ router.post('/', requireRole('CUSTOMER'), requirePharmacyScope, (req, res) => {
 
   const createOrder = transaction(() => {
     if (orderType === 'COUNSEL') {
+      // 문의 내용은 선택이다. 증상·복용 약이 들어갈 수 있어 적을 때만 이 예약에 대한 동의를 받고 암호화해 둔다.
       const preferredAt = String(req.body.preferred_at || '').trim();
-      const memo = String(req.body.memo || '').trim();
+      const note = String(req.body.memo || '').trim();
       if (!preferredAt) throw new Error('희망 상담 일시를 입력해 주세요.');
-      if (!memo) throw new Error('상담 문의 내용을 입력해 주세요.');
+      if (note.length > COUNSEL_NOTE_MAX_LENGTH) throw new Error(`상담 문의 내용은 ${COUNSEL_NOTE_MAX_LENGTH}자 이내로 적어 주세요.`);
+      if (note && req.body.counsel_consent !== true) {
+        throw new Error('문의 내용(증상·복용 약)을 약사에게 전달하려면 민감정보 수집·이용에 동의해 주세요. 동의하지 않으면 내용을 비우고 예약할 수 있어요.');
+      }
 
       const contactName = String(req.body.contact_name || customer.name || '').trim();
       const contactPhone = String(req.body.contact_phone || customer.phone || '').trim();
@@ -242,20 +286,20 @@ router.post('/', requireRole('CUSTOMER'), requirePharmacyScope, (req, res) => {
         `INSERT INTO orders (
           order_number, pharmacy_id, customer_id, order_type, total_product_amount, delivery_fee,
           discount_amount, final_amount, payment_status, order_status, delivery_status,
-          preferred_at, memo, contact_name, contact_phone
+          preferred_at, contact_name, contact_phone, counsel_note, counsel_consent_at
         ) VALUES (
           @order_number, @pharmacy_id, @customer_id, 'COUNSEL', 0, 0,
           0, 0, 'PAID', 'RESERVED', 'NOT_SHIPPED',
-          @preferred_at, @memo, @contact_name, @contact_phone
+          @preferred_at, @contact_name, @contact_phone, @counsel_note, CASE WHEN @counsel_note IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END
         )`,
         {
           order_number: orderNumber('CNS'),
           pharmacy_id: req.pharmacyId,
           customer_id: customer.id,
           preferred_at: preferredAt,
-          memo,
           contact_name: contactName,
-          contact_phone: contactPhone
+          contact_phone: contactPhone,
+          counsel_note: note ? encrypt(note) : null
         }
       );
 
@@ -372,7 +416,7 @@ router.post('/', requireRole('CUSTOMER'), requirePharmacyScope, (req, res) => {
   });
 
   try {
-    res.status(201).json({ order: createOrder() });
+    res.status(201).json({ order: stripCounselNote(createOrder(), { reveal: true }) });
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
@@ -391,7 +435,7 @@ router.patch('/:id/status', requireRole('PHARMACY_OWNER', 'ADMIN'), requirePharm
         extra: { courier: req.body.courier, tracking_number: req.body.tracking_number }
       });
       auditOrder(req, 'ORDER_STATUS', order, `${order.order_number} ${order.order_status} → ${to}`);
-      return getOne('SELECT * FROM orders WHERE id = @id', { id: order.id });
+      return stripCounselNote(getOne('SELECT * FROM orders WHERE id = @id', { id: order.id }));
     })();
     res.json({ order: { ...result, ...availableActions(result, req.user.role) } });
   } catch (error) {
@@ -411,7 +455,7 @@ router.post('/:id/cancel', requireRole('CUSTOMER', 'PHARMACY_OWNER', 'ADMIN'), r
       auditOrder(req, 'ORDER_CANCEL', order, `${order.order_number} 취소 · ${order.final_amount.toLocaleString('ko-KR')}원 · 사유: ${reason}`);
       return outcome;
     })();
-    res.json(result);
+    res.json({ ...result, order: stripCounselNote(result.order, { reveal: customer }) });
   } catch (error) {
     sendFlowError(res, error);
   }

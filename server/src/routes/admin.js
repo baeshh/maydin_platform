@@ -4,6 +4,8 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const { db, getAll, getOne, run, transaction } = require('../db');
 const backup = require('../services/backup');
+const privacy = require('../services/privacy');
+const { retentionSettings } = require('../services/customers');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { pharmacyPerformance } = require('../services/members');
 const { sendCsv } = require('../services/csv');
@@ -281,5 +283,18 @@ router.post('/backups/drill', (req, res) =>
     res.status(drill.ok ? 200 : 500).json({ drill, ...backup.status() });
   })
 );
+
+// 보유기간 파기를 지금 돌린다. 평소에는 서버가 켜질 때와 하루에 한 번 자동으로 돈다.
+router.get('/privacy/retention', (req, res) => {
+  const runs = getAll(
+    "SELECT description, created_at FROM admin_logs WHERE action = 'PRIVACY_RETENTION' ORDER BY id DESC LIMIT 20"
+  );
+  res.json({ settings: retentionSettings(), runs });
+});
+
+router.post('/privacy/retention', (req, res) => {
+  const result = privacy.runRetention();
+  res.json({ settings: retentionSettings(), result });
+});
 
 module.exports = router;

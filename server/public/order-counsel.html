@@ -37,12 +37,22 @@
       <div class="notice">상품 구매 없이 약사님과 복약·웰니스 상담만 예약할 수 있습니다.</div>
       <section class="card">
         <h2>상담 예약</h2>
-        <p class="muted">희망 일시와 문의 내용을 남겨주시면 약국에서 확인 후 안내드립니다.</p>
+        <p class="muted">희망 일시만 남겨도 예약할 수 있어요. 자세한 내용은 상담 때 약사님께 직접 말씀하셔도 됩니다.</p>
         <form id="counselForm">
           <label>이름 <input name="contact_name" required /></label>
           <label>연락처 <input name="contact_phone" required /></label>
           <label>희망 상담 일시 <input name="preferred_at" type="datetime-local" required /></label>
-          <label>상담 문의 내용 <textarea name="memo" rows="5" placeholder="복용 중인 약, 증상, 궁금한 점을 적어주세요." required></textarea></label>
+          <label>미리 전할 내용 (선택) <textarea name="memo" rows="4" maxlength="500" placeholder="증상, 복용 중인 약, 궁금한 점"></textarea></label>
+          <div id="noteConsent" class="notice" hidden style="margin-bottom:12px;">
+            <label style="display:flex; align-items:flex-start; gap:8px; margin:0; font-weight:600;">
+              <input type="checkbox" name="counsel_consent" style="width:auto; margin-top:3px;" />
+              <span>
+                적은 내용(건강 관련 민감정보)을 약사가 이 상담에 쓰는 데 동의합니다.
+                암호화해 보관하고 약사만 볼 수 있어요. 상담 뒤 1년이 지나면 자동 삭제되고, 내역 화면에서 언제든 지울 수 있어요.
+                동의하지 않으려면 내용을 비우고 예약해 주세요.
+              </span>
+            </label>
+          </div>
           <button type="submit">복약상담 예약하기</button>
         </form>
       </section>
@@ -62,6 +72,15 @@
         window.__toastTimer = setTimeout(() => target.classList.remove('show'), 2200);
       }
 
+      const memoField = $('[name=memo]');
+      const consentBox = $('[name=counsel_consent]');
+      memoField.addEventListener('input', () => {
+        const hasNote = memoField.value.trim().length > 0;
+        $('#noteConsent').hidden = !hasNote;
+        consentBox.required = hasNote;
+        if (!hasNote) consentBox.checked = false;
+      });
+
       $('#counselForm').addEventListener('submit', async (event) => {
         event.preventDefault();
         const form = serializeForm(event.target);
@@ -73,7 +92,8 @@
               contact_name: form.contact_name,
               contact_phone: form.contact_phone,
               preferred_at: form.preferred_at,
-              memo: form.memo
+              memo: form.memo,
+              counsel_consent: consentBox.checked
             }
           });
           toast('복약상담 예약이 접수되었습니다.');

@@ -51,7 +51,7 @@ export function uniquePhone() {
 /* ---------- 구매 인증 가입 ---------- */
 
 export const TEST_PIN = '913572';
-export const REQUIRED_CONSENTS = { TERMS: true, PRIVACY: true, HEALTH_INFO: true };
+export const REQUIRED_CONSENTS = { TERMS: true, PRIVACY: true };
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 let seq = 0;
 
@@ -102,8 +102,6 @@ export function signupBody(db, overrides = {}) {
       birth_day: 1 + ((seq + process.pid) % 28),
       gender: 'F',
       address: '서울시 테스트구 테스트로 1',
-      allergy_none: true,
-      medications_none: true,
       pin: TEST_PIN,
       consents: REQUIRED_CONSENTS,
       ...overrides

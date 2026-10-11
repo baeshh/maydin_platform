@@ -279,7 +279,7 @@ console.log('[상담 예약 — 확정 · 취소 이력]');
   let res = await api('/orders', {
     token: customer,
     method: 'POST',
-    body: { order_type: 'COUNSEL', preferred_at: '2026-12-01T10:00', memo: '복약 상담', contact_name: '흐름', contact_phone: '01000000000' }
+    body: { order_type: 'COUNSEL', preferred_at: '2026-12-01T10:00', memo: '복약 상담', counsel_consent: true, contact_name: '흐름', contact_phone: '01000000000' }
   });
   const counsel = res.data.order;
   check('상담 예약 생성 이력', history(counsel.id)[0]?.to_status === 'RESERVED', history(counsel.id));

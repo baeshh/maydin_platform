@@ -515,7 +515,7 @@ function grantReferralReward({ pharmacyId, customerId, orderId, userId }) {
   const customer = getOne(
     `SELECT c.id, c.name, r.id AS referrer_id, r.name AS referrer_name
      FROM customers c
-     JOIN customers r ON r.id = c.referred_by_customer_id AND r.pharmacy_id = c.pharmacy_id
+     JOIN customers r ON r.id = c.referred_by_customer_id AND r.pharmacy_id = c.pharmacy_id AND r.withdrawn_at IS NULL
      WHERE c.id = @id AND c.pharmacy_id = @pharmacy_id AND c.referral_rewarded_at IS NULL`,
     { id: customerId, pharmacy_id: pharmacyId }
   );

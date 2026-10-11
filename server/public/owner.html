@@ -2415,12 +2415,17 @@
             <div><span>로그인 PIN</span><strong>${pinStatusText(customer)}</strong></div>
             <div><span>온라인 주문</span><strong>${data.online_order?.allowed ? '<span class="badge green">가능</span>' : '<span class="badge gray">매장 구매 인증 전</span>'}</strong></div>
           </div>
+          ${customer.withdrawn_at ? `<p class="list-meta" style="margin: 0 0 14px;">${h(formatDate(customer.withdrawn_at))} 탈퇴한 회원입니다. 개인정보는 파기됐고, 거래 기록만 법정 보존기간 동안 남아 있습니다.</p>` : `
           <div class="inline-actions" style="margin-bottom: 14px;">
             ${customer.approval_status === 'APPROVED' ? `<button class="btn btn-outline btn-sm" type="button" onclick="issuePinCode(${customer.id}, ${customer.pin_set ? 1 : 0})">${customer.pin_set ? 'PIN 재설정 코드 발급' : 'PIN 설정 코드 발급'}</button>` : ''}
-            ${customer.has_health ? `<button class="btn btn-outline btn-sm" type="button" onclick="showCustomerHealth(${customer.id})">알레르기·복용 약 보기</button>` : '<span class="list-meta">건강 정보 없음</span>'}
-          </div>
+            ${customer.has_health || consents.HEALTH_INFO?.agreed
+              ? `<button class="btn btn-outline btn-sm" type="button" onclick="showCustomerHealth(${customer.id})">알레르기·복용 약 ${customer.has_health ? '보기' : '입력'}</button>`
+              : '<span class="list-meta">건강 정보 없음 (고객이 앱에서 동의하지 않음)</span>'}
+            <button class="btn btn-outline btn-sm" type="button" onclick="showHealthAccessLog(${customer.id})">건강 정보 이용 기록</button>
+          </div>`}
           <div id="pinCodeBox-${customer.id}"></div>
           <div id="healthBox-${customer.id}"></div>
+          <div id="healthLogBox-${customer.id}"></div>
           <details style="margin-bottom: 14px;">
             <summary class="muted-link" style="cursor: pointer;">선택 정보 수정 (고객이 요청한 경우)</summary>
             <form class="inline-actions" style="margin-top: 10px;" onsubmit="saveCustomerProfile(event, ${customer.id})">
@@ -2472,7 +2477,38 @@
               </table>
             </div>
           </details>
+          ${customer.withdrawn_at || customer.approval_status !== 'APPROVED' ? '' : `
+          <details style="margin-top: 14px;">
+            <summary class="muted-link" style="cursor: pointer;">회원 탈퇴 처리 (고객 요청)</summary>
+            <form style="margin-top: 10px;" onsubmit="withdrawCustomer(event, ${customer.id})">
+              <p class="list-meta" style="margin: 0 0 8px;">
+                고객이 방문·전화로 탈퇴를 요청한 경우에만 처리합니다. 이름·연락처·생년월일·건강 정보·상담 내용·포인트·주소가 바로 파기되고 되돌릴 수 없습니다.
+                거래 기록은 이름·연락처 없이 법정 보존기간 동안 남습니다. 고객은 앱의 내 정보에서 직접 탈퇴할 수도 있습니다.
+              </p>
+              <div class="inline-actions">
+                <input class="form-control" name="reason" maxlength="200" placeholder="요청 경로 (예: 매장 방문, 전화)" required style="flex: 1; min-width: 180px;" />
+                <label class="list-meta" style="display: inline-flex; gap: 6px; align-items: center;"><input type="checkbox" name="identity_checked" required /> 본인 확인함</label>
+                <button class="btn btn-danger btn-sm" type="submit">탈퇴 처리</button>
+              </div>
+            </form>
+          </details>`}
         `;
+      }
+
+      async function withdrawCustomer(event, id) {
+        event.preventDefault();
+        const form = event.target;
+        if (!confirm('이 회원을 탈퇴 처리할까요?\n개인정보와 포인트가 바로 파기되며 되돌릴 수 없습니다.')) return;
+        try {
+          await api.request(`/customers/${id}/withdraw`, {
+            method: 'POST',
+            body: { reason: form.reason.value, identity_checked: form.identity_checked.checked }
+          });
+          showToast('탈퇴 처리했습니다.');
+          openCustomerInfo(id);
+        } catch (error) {
+          showToast(error.message);
+        }
       }
 
       function familyHtml(family, customerId, L) {
@@ -2608,6 +2644,7 @@
       function approvalText(customer) {
         if (customer.approval_status === 'PENDING') return '<span class="badge orange">승인 대기</span>';
         if (customer.approval_status === 'REJECTED') return `<span class="badge red">거절</span> <span class="list-meta">${h(customer.approval_note || '')}</span>`;
+        if (customer.approval_status === 'WITHDRAWN') return '<span class="badge gray">탈퇴</span>';
         return customer.signup_order_id ? '<span class="badge green">구매 인증 가입</span>' : '<span class="badge gray">기존 가입</span>';
       }
 
@@ -2638,21 +2675,98 @@
         }
       }
 
-      async function showCustomerHealth(id) {
+      const HEALTH_PURPOSES = {
+        COUNSEL: '복약상담',
+        SALE_CHECK: '판매 전 함께 먹으면 안 되는 약 확인',
+        CUSTOMER_REQUEST: '고객 요청에 따른 확인·정정'
+      };
+
+      // 민감정보는 목적을 먼저 고른 뒤에 연다. 목적과 열람 기록은 고객 앱에도 보인다.
+      function showCustomerHealth(id) {
         const box = $(`#healthBox-${id}`);
         if (box.innerHTML) {
           box.innerHTML = '';
           return;
         }
+        box.innerHTML = `
+          <div class="insight-box" style="margin-bottom: 14px;">
+            <strong>열람 목적을 골라 주세요</strong>
+            <div class="inline-actions" style="margin: 8px 0;">
+              ${Object.entries(HEALTH_PURPOSES).map(([key, label]) => `<button class="btn btn-outline btn-sm" type="button" onclick="viewCustomerHealth(${id}, '${key}')">${h(label)}</button>`).join('')}
+            </div>
+            <p class="list-meta" style="margin: 0;">누가 언제 어떤 목적으로 열람했는지 기록되고, 고객도 앱에서 확인할 수 있습니다.</p>
+          </div>`;
+      }
+
+      async function viewCustomerHealth(id, purpose) {
+        const box = $(`#healthBox-${id}`);
         try {
-          const { health } = await api.request(`/customers/${id}/health`);
+          const { health, agreed } = await api.request(`/customers/${id}/health?purpose=${purpose}`);
+          const field = (name, label, value) => `
+            <div class="form-group full" style="margin-bottom: 8px;">
+              <label class="form-label">${label} <span class="list-meta"><input type="checkbox" name="${name}_none" ${health && !value ? 'checked' : ''} /> 없음</span></label>
+              <textarea class="form-control" name="${name}" maxlength="300" rows="2">${h(value || '')}</textarea>
+            </div>`;
           box.innerHTML = `
             <div class="insight-box" style="margin-bottom: 14px;">
               <div class="profile-grid" style="margin-bottom: 6px;">
-                <div style="grid-column: span 2;"><span>알레르기</span><strong>${health?.allergy ? h(health.allergy) : '없음'}</strong></div>
-                <div style="grid-column: span 2;"><span>지금 복용 중인 약</span><strong>${health?.medications ? h(health.medications) : '없음'}</strong></div>
+                <div style="grid-column: span 2;"><span>알레르기</span><strong>${health ? (health.allergy ? h(health.allergy) : '없음') : '입력 전'}</strong></div>
+                <div style="grid-column: span 2;"><span>지금 복용 중인 약</span><strong>${health ? (health.medications ? h(health.medications) : '없음') : '입력 전'}</strong></div>
               </div>
-              <p class="list-meta" style="margin: 0;">고객이 입력한 민감정보입니다. 열람 기록이 남으며, 복약 상담 외의 목적으로 쓰지 마세요. 마지막 수정 ${h(formatDate(health?.updated_at))}</p>
+              <p class="list-meta" style="margin: 0 0 8px;">
+                열람 목적: ${h(HEALTH_PURPOSES[purpose])} ·
+                ${health ? `마지막 ${health.updated_by === 'PHARMACIST' ? '약사 수정' : '고객 입력'} ${h(formatDate(health.updated_at))} · ${h(formatDate(health.expires_at))}에 자동 삭제` : '아직 입력된 내용이 없습니다.'}
+              </p>
+              ${agreed ? `
+                <details>
+                  <summary class="muted-link" style="cursor: pointer;">상담 내용으로 고치기</summary>
+                  <form style="margin-top: 8px;" onsubmit="saveCustomerHealth(event, ${id})">
+                    ${field('allergy', '알레르기', health?.allergy)}
+                    ${field('medications', '지금 복용 중인 약', health?.medications)}
+                    <button class="btn btn-primary btn-sm" type="submit">저장</button>
+                  </form>
+                </details>` : '<p class="list-meta" style="margin: 0;">고객이 보관 동의를 하지 않아 약국에서 입력할 수 없습니다.</p>'}
+            </div>`;
+        } catch (error) {
+          showToast(error.message);
+        }
+      }
+
+      async function saveCustomerHealth(event, id) {
+        event.preventDefault();
+        const f = event.target;
+        try {
+          await api.request(`/customers/${id}/health`, {
+            method: 'PUT',
+            body: { allergy: f.allergy.value, allergy_none: f.allergy_none.checked, medications: f.medications.value, medications_none: f.medications_none.checked }
+          });
+          showToast('건강 정보를 고쳤습니다. 고객 앱의 이용 기록에도 남습니다.');
+          viewCustomerHealth(id, 'COUNSEL');
+        } catch (error) {
+          showToast(error.message);
+        }
+      }
+
+      async function showHealthAccessLog(id) {
+        const box = $(`#healthLogBox-${id}`);
+        if (box.innerHTML) {
+          box.innerHTML = '';
+          return;
+        }
+        try {
+          const { access_log: log, retention } = await api.request(`/customers/${id}/privacy`);
+          box.innerHTML = `
+            <div class="insight-box" style="margin-bottom: 14px;">
+              <strong>건강 정보 이용 기록</strong>
+              <div class="table-wrap" style="margin-top: 8px;">
+                <table class="consent-table">
+                  <thead><tr><th>일시</th><th>내용</th><th>누가</th><th>목적</th></tr></thead>
+                  <tbody>
+                    ${log.map((l) => `<tr><td>${h(formatDate(l.created_at))}</td><td>${h(l.action_label)}</td><td>${h(l.by)}</td><td>${h(l.purpose_label || '-')}</td></tr>`).join('') || '<tr><td colspan="4">기록이 없습니다.</td></tr>'}
+                  </tbody>
+                </table>
+              </div>
+              <p class="list-meta" style="margin: 8px 0 0;">보유기간: 건강 정보는 마지막 확인 뒤 ${retention.health_months}개월, 상담 문의 내용은 ${retention.counsel_days}일 뒤 자동 삭제됩니다.</p>
             </div>`;
         } catch (error) {
           showToast(error.message);
@@ -3254,7 +3368,7 @@
 
       function orderDetailMeta(order) {
         if (order.order_type === 'COUNSEL') {
-          return `${order.contact_phone || order.customer_phone || ''} · 희망 ${order.preferred_at || '-'}${order.memo ? ` · ${order.memo}` : ''}`;
+          return `${order.contact_phone || order.customer_phone || ''} · 희망 ${order.preferred_at || '-'}${order.has_counsel_note ? ' · 미리 전한 내용 있음' : ''}`;
         }
         if (order.order_type === 'PICKUP') {
           return `${order.contact_phone || order.customer_phone || ''} · 픽업 ${order.preferred_at || '-'}`;
@@ -3283,6 +3397,7 @@
         );
         if (order.can_cancel) buttons.push(`<button class="btn btn-danger btn-sm" type="button" onclick="cancelOnlineOrder(${id})">주문 취소</button>`);
         if (order.can_refund) buttons.push(`<button class="btn btn-danger btn-sm" type="button" onclick="refundOnlineOrder(${id})">환불</button>`);
+        if (order.has_counsel_note) buttons.push(`<button class="btn btn-outline btn-sm" type="button" onclick="showCounselNote(${id})">상담 내용</button>`);
         buttons.push(`<button class="btn btn-outline btn-sm" type="button" onclick="toggleOrderHistory(${id})">이력</button>`);
         const shipInputs = next.includes('SHIPPING')
           ? `<div class="ship-grid" style="margin-bottom: 6px;">
@@ -3294,6 +3409,27 @@
           ? `<div class="list-meta" style="margin-bottom: 6px;">사유: ${h(order.refund_reason)}</div>`
           : '';
         return `${shipInputs}${closed}<div class="inline-actions">${buttons.join('')}</div>`;
+      }
+
+      // 고객이 상담 예약 때 적은 증상·복용 약. 열 때마다 열람 기록이 남고 고객 앱에도 보인다.
+      async function showCounselNote(id) {
+        const existing = document.getElementById(`counsel-note-${id}`);
+        if (existing) return existing.remove();
+        try {
+          const { note } = await api.request(`/orders/${id}/counsel-note`);
+          const row = document.getElementById(`order-row-${id}`);
+          if (!row) return;
+          row.insertAdjacentHTML('afterend', `
+            <tr id="counsel-note-${id}">
+              <td colspan="6" style="background: var(--gray-50, #f9fafb);">
+                <strong>미리 전한 내용</strong>
+                <p style="margin: 6px 0; white-space: pre-wrap;">${note ? h(note) : '고객이 삭제했거나 보관기간이 지나 파기됐습니다.'}</p>
+                <span class="list-meta">복약상담 목적으로만 쓰세요. 열람 기록이 남고 고객도 확인할 수 있습니다.</span>
+              </td>
+            </tr>`);
+        } catch (error) {
+          showToast(error.message);
+        }
       }
 
       async function toggleOrderHistory(id) {

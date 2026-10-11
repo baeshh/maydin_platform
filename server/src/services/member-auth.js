@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { getOne, getAll, run } = require('../db');
-const { CustomerError } = require('./customers');
+const { CustomerError, retentionSettings } = require('./customers');
 const { encrypt, decrypt } = require('./secure');
 const { pointPolicy, pointEligibleAmount, earnRate, calcEarn, changePoints } = require('./points');
 const { earningContext } = require('./members');
@@ -169,22 +169,36 @@ function normalizeHealth(body) {
   };
 }
 
-function saveHealth(customerId, health) {
-  run('UPDATE customers SET health_info = @info, health_updated_at = CURRENT_TIMESTAMP WHERE id = @id', {
+// health_updated_at은 보유기간의 기준이다. 고객이 '변경 없음'을 확인하거나 약사가 상담 중 고쳐도 새로 센다.
+function saveHealth(customerId, health, userId = null) {
+  run('UPDATE customers SET health_info = @info, health_updated_at = CURRENT_TIMESTAMP, health_updated_by = @user_id WHERE id = @id', {
     id: customerId,
-    info: encrypt(JSON.stringify(health))
+    info: encrypt(JSON.stringify(health)),
+    user_id: userId
   });
 }
 
 function clearHealth(customerId) {
-  run('UPDATE customers SET health_info = NULL, health_updated_at = CURRENT_TIMESTAMP WHERE id = @id', { id: customerId });
+  run('UPDATE customers SET health_info = NULL, health_updated_at = CURRENT_TIMESTAMP, health_updated_by = NULL WHERE id = @id', { id: customerId });
 }
 
 function readHealth(customerId) {
-  const row = getOne('SELECT health_info, health_updated_at FROM customers WHERE id = @id', { id: customerId });
+  const row = getOne(
+    `SELECT c.health_info, c.health_updated_at, u.role AS updated_by_role,
+            datetime(c.health_updated_at, '+' || @months || ' months') AS expires_at
+     FROM customers c LEFT JOIN users u ON u.id = c.health_updated_by
+     WHERE c.id = @id`,
+    { id: customerId, months: retentionSettings().health_months }
+  );
   if (!row || !row.health_info) return null;
   const data = JSON.parse(decrypt(row.health_info));
-  return { ...data, has_alert: Boolean(data.allergy || data.medications), updated_at: row.health_updated_at };
+  return {
+    ...data,
+    has_alert: Boolean(data.allergy || data.medications),
+    updated_at: row.health_updated_at,
+    updated_by: row.updated_by_role === 'PHARMACY_OWNER' ? 'PHARMACIST' : row.updated_by_role ? 'CUSTOMER' : null,
+    expires_at: row.expires_at
+  };
 }
 
 /* ---------- PIN ---------- */

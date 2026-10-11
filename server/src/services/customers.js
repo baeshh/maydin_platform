@@ -1,13 +1,13 @@
 const crypto = require('crypto');
 const { getOne, getAll, run } = require('../db');
 
-const CONSENT_VERSION = '2026-10-08';
+const CONSENT_VERSION = '2026-10-11';
 
 const CONSENT_TYPES = {
   TERMS: { label: '이용약관 동의', required: true },
   PRIVACY: { label: '개인정보 수집·이용 동의', required: true },
-  // 가입할 때는 꼭 받지만 철회는 막지 않는다. 철회하면 건강 정보를 바로 지운다.
-  HEALTH_INFO: { label: '민감정보(알레르기·복용 약) 수집·이용 동의', sensitive: true },
+  // 가입 때는 받지 않는다. 복약상담에 쓰려는 회원만 따로 동의하고, 철회하면 건강 정보를 바로 지운다.
+  HEALTH_INFO: { label: '민감정보(알레르기·복용 약) 보관·이용 동의', sensitive: true },
   MARKETING_SMS: { label: '마케팅 문자 수신', marketing: true },
   MARKETING_KAKAO: { label: '마케팅 알림톡 수신', marketing: true },
   MARKETING_NIGHT: { label: '야간(21시~08시) 광고 수신', marketing: true },
@@ -33,6 +33,20 @@ const CHANNEL_TYPES = {
   ONLINE: '온라인·SNS',
   ETC: '기타'
 };
+
+// 개인정보 보유기간. 처리방침에 적은 기간과 같아야 하므로 바꾸면 처리방침도 함께 고친다.
+function retentionSettings() {
+  const num = (name, fallback) => {
+    const value = Number(process.env[name]);
+    return Number.isInteger(value) && value > 0 ? value : fallback;
+  };
+  return {
+    health_months: num('HEALTH_RETENTION_MONTHS', 24),
+    counsel_days: num('COUNSEL_NOTE_RETENTION_DAYS', 365),
+    rejected_days: num('REJECTED_SIGNUP_RETENTION_DAYS', 30),
+    transaction_years: num('TRANSACTION_RETENTION_YEARS', 5)
+  };
+}
 
 class CustomerError extends Error {
   constructor(message, status = 400) {
@@ -200,6 +214,7 @@ module.exports = {
   GENDERS,
   CHANNEL_TYPES,
   CustomerError,
+  retentionSettings,
   currentConsents,
   consentHistory,
   normalizeConsentChanges,

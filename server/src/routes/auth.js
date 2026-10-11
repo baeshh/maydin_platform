@@ -107,19 +107,20 @@ router.get('/customer/signup-code', (req, res) => {
   }
 });
 
+// 가입에는 회원 확인·로그인·나이 확인에 꼭 필요한 정보만 받는다.
+// 알레르기·복용 약은 복약상담에 쓰려는 회원만 가입 뒤 따로 동의하고 입력한다. 성별·주소는 선택이다.
 function parseSignup(body, pharmacy) {
   const consents = {
     TERMS: false,
     PRIVACY: false,
-    HEALTH_INFO: false,
     MARKETING_SMS: Boolean(body.marketing_agree),
     MARKETING_KAKAO: false,
     MARKETING_NIGHT: false,
     ...normalizeConsentChanges(body.consents)
   };
   delete consents.THIRD_PARTY;
+  delete consents.HEALTH_INFO;
   if (!consents.TERMS || !consents.PRIVACY) throw new CustomerError('필수 약관(이용약관, 개인정보 수집·이용)에 동의해 주세요.');
-  if (!consents.HEALTH_INFO) throw new CustomerError('알레르기·복용 약 정보 수집(민감정보)에 동의해 주세요.');
   if (consents.MARKETING_NIGHT && !consents.MARKETING_SMS && !consents.MARKETING_KAKAO) {
     throw new CustomerError('야간 광고 수신은 문자 또는 알림톡 수신에 동의한 경우에만 선택할 수 있습니다.');
   }
@@ -133,15 +134,12 @@ function parseSignup(body, pharmacy) {
   const profile = normalizeProfile(body, new Date().getFullYear());
   validateBirthday(profile.birth_month ?? null, profile.birth_day ?? null);
   auth.requireBirthdate(profile);
-  if (!profile.gender) throw new CustomerError('성별을 선택해 주세요.');
 
   const address = String(body.address || '').trim();
-  if (!address) throw new CustomerError('주소를 입력해 주세요.');
   if (address.length > 200) throw new CustomerError('주소가 너무 깁니다.');
   const addressDetail = String(body.address_detail || '').trim().slice(0, 100);
   const zipCode = String(body.zip_code || '').trim().slice(0, 10);
 
-  const health = auth.normalizeHealth(body);
   const pin = auth.validatePin(body.pin, {
     birth: { year: profile.birth_year, month: profile.birth_month, day: profile.birth_day },
     phone
@@ -156,7 +154,7 @@ function parseSignup(body, pharmacy) {
     : null;
   if (referralCode && !referrer) throw new CustomerError('추천인 코드를 찾을 수 없습니다. 코드를 확인하거나 비워 두세요.');
 
-  return { consents, name, phone, profile, address, addressDetail, zipCode, health, pin, referrer };
+  return { consents, name, phone, profile, address, addressDetail, zipCode, pin, referrer };
 }
 
 router.post('/customer/signup', (req, res) => {
@@ -216,7 +214,7 @@ router.post('/customer/signup', (req, res) => {
           birth_year: input.profile.birth_year,
           birth_month: input.profile.birth_month,
           birth_day: input.profile.birth_day,
-          gender: input.profile.gender,
+          gender: input.profile.gender || null,
           referred_by: input.referrer ? input.referrer.id : null,
           signup_channel_id: channel ? channel.id : null,
           approval_note: flags.length ? flags.join(' / ') : null,
@@ -230,23 +228,24 @@ router.post('/customer/signup', (req, res) => {
       assignMemberCode(customerId);
       assignReferralCode(customerId);
       recordConsents({ pharmacyId: pharmacy.id, customerId, changes: input.consents, source: 'SIGNUP', userId });
-      auth.saveHealth(customerId, input.health);
       if (channel) run('UPDATE signup_channels SET signup_count = signup_count + 1 WHERE id = @id', { id: channel.id });
 
-      const addressId = run(
-        `INSERT INTO addresses (user_id, pharmacy_id, receiver_name, phone, zip_code, address, address_detail, is_default)
-         VALUES (@user_id, @pharmacy_id, @receiver_name, @phone, @zip_code, @address, @address_detail, 1)`,
-        {
-          user_id: userId,
-          pharmacy_id: pharmacy.id,
-          receiver_name: input.name,
-          phone: input.phone,
-          zip_code: input.zipCode || null,
-          address: input.address,
-          address_detail: input.addressDetail || null
-        }
-      ).lastInsertRowid;
-      run('UPDATE customers SET default_address_id = @addressId WHERE id = @customerId', { addressId, customerId });
+      if (input.address) {
+        const addressId = run(
+          `INSERT INTO addresses (user_id, pharmacy_id, receiver_name, phone, zip_code, address, address_detail, is_default)
+           VALUES (@user_id, @pharmacy_id, @receiver_name, @phone, @zip_code, @address, @address_detail, 1)`,
+          {
+            user_id: userId,
+            pharmacy_id: pharmacy.id,
+            receiver_name: input.name,
+            phone: input.phone,
+            zip_code: input.zipCode || null,
+            address: input.address,
+            address_detail: input.addressDetail || null
+          }
+        ).lastInsertRowid;
+        run('UPDATE customers SET default_address_id = @addressId WHERE id = @customerId', { addressId, customerId });
+      }
       run('UPDATE qr_codes SET signup_count = signup_count + 1 WHERE pharmacy_id = @pharmacy_id', { pharmacy_id: pharmacy.id });
 
       const approval = flags.length ? null : auth.approveCustomer({ customerId });

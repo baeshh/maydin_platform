@@ -133,7 +133,7 @@ console.log('[고객 본인 수정]');
   res = await api('/customers/me/profile', { token: referred, method: 'PATCH', body: { gender: 'M' } });
   check('성별 변경', res.status === 200 && res.data.customer.gender === 'M', res.data);
   res = await api('/customers/me/profile', { token: referred, method: 'PATCH', body: { gender: '' } });
-  check('성별 비우기 400', res.status === 400, res.data);
+  check('성별은 선택 정보라 비울 수 있음', res.status === 200 && res.data.customer.gender === null, res.data);
   res = await api('/customers/me/profile', { token: referred, method: 'PATCH', body: {} });
   check('빈 수정 400', res.status === 400, res.data);
 

@@ -6,8 +6,9 @@ const { PointError, pointPolicy, changePoints, pointEligibleAmount, earnRate, ca
 const { earningContext, grantReferralReward, posBadges } = require('../services/members');
 const { LotError, parseLotInput, insertLot, lotLabel } = require('../services/lots');
 const { taxBreakdown } = require('../services/tax');
-const { CustomerError } = require('../services/customers');
-const { issueSignupCode, receiptSignupCode, readHealth } = require('../services/member-auth');
+const { CustomerError, currentConsents } = require('../services/customers');
+const { issueSignupCode, receiptSignupCode, readHealth, saveHealth, normalizeHealth } = require('../services/member-auth');
+const privacy = require('../services/privacy');
 const { ImportError, assertNotSyncing, syncSettings, syncStatus } = require('../services/product-import');
 const { ProductKindError, normalizeProductType, posSaleBlockReason, isPointEligible } = require('../services/product-kind');
 const { saleCost, refundCost } = require('../services/order-cost');
@@ -892,17 +893,55 @@ router.get(
   })
 );
 
-// 알레르기·복용 약은 약사(관리자)만 본다. 열람할 때마다 기록을 남긴다.
+function healthCustomer(req) {
+  const customer = getOne("SELECT id, name FROM customers WHERE id = @id AND pharmacy_id = @pharmacy_id AND approval_status = 'APPROVED'", {
+    id: Number(req.params.id),
+    pharmacy_id: req.pharmacyId
+  });
+  if (!customer) throw new PosError('고객을 찾을 수 없습니다.', 404);
+  return customer;
+}
+
+// 알레르기·복용 약은 약사(관리자)만, 목적을 고른 뒤에 본다. 열람 기록은 고객 앱에서도 보인다.
 router.get(
   '/customers/:id/health',
   handle((req) => {
     requireOwner(req, '건강 정보 열람');
-    const customer = getOne("SELECT id, name FROM customers WHERE id = @id AND pharmacy_id = @pharmacy_id AND approval_status = 'APPROVED'", {
-      id: Number(req.params.id),
-      pharmacy_id: req.pharmacyId
+    const customer = healthCustomer(req);
+    const purpose = privacy.parsePurpose(req.query.purpose);
+    privacy.logAccess({
+      userId: req.user.id,
+      pharmacyId: req.pharmacyId,
+      customerId: customer.id,
+      action: 'HEALTH_VIEW',
+      purpose,
+      description: `POS 건강 정보 열람 · ${customer.name} · 목적: ${privacy.ACCESS_PURPOSES[purpose]}`
     });
-    if (!customer) throw new PosError('고객을 찾을 수 없습니다.', 404);
-    audit(req, 'HEALTH_VIEW', 'CUSTOMER', customer.id, `POS 건강 정보 열람 · ${customer.name}`);
+    return { health: readHealth(customer.id), agreed: currentConsents(customer.id).HEALTH_INFO.agreed };
+  })
+);
+
+// 상담하며 들은 내용으로 고친다. 고객이 앱에서 보관에 동의한 경우에만 저장한다.
+router.put(
+  '/customers/:id/health',
+  handle((req) => {
+    requireOwner(req, '건강 정보 수정');
+    const customer = healthCustomer(req);
+    if (!currentConsents(customer.id).HEALTH_INFO.agreed) {
+      throw new PosError('고객이 건강 정보 보관에 동의하지 않았습니다. 고객이 앱 내 정보에서 동의한 뒤 입력할 수 있어요.', 409);
+    }
+    const health = normalizeHealth(req.body);
+    transaction(() => {
+      saveHealth(customer.id, health, req.user.id);
+      privacy.logAccess({
+        userId: req.user.id,
+        pharmacyId: req.pharmacyId,
+        customerId: customer.id,
+        action: 'HEALTH_UPDATE',
+        purpose: 'COUNSEL',
+        description: `POS 건강 정보 수정 · ${customer.name}`
+      });
+    })();
     return { health: readHealth(customer.id) };
   })
 );
@@ -1789,7 +1828,8 @@ router.get(
     const conditions = ['o.pharmacy_id = @pharmacy_id', "o.order_type = 'COUNSEL'"];
     if (scope === 'pending') conditions.push(`o.order_status IN ('${COUNSEL_OPEN_STATUSES.join("','")}')`);
     const counsels = getAll(
-      `SELECT o.id, o.order_number, o.order_status, o.preferred_at, o.memo, o.contact_name, o.contact_phone,
+      `SELECT o.id, o.order_number, o.order_status, o.preferred_at, o.contact_name, o.contact_phone,
+              o.counsel_note IS NOT NULL AS has_note,
               o.customer_id, o.created_at, c.name AS customer_name, c.phone AS customer_phone,
               (SELECT order_number FROM orders s WHERE s.counsel_order_id = o.id ORDER BY s.id DESC LIMIT 1) AS linked_sale_number
        FROM orders o
@@ -1799,7 +1839,33 @@ router.get(
        LIMIT 100`,
       { pharmacy_id: req.pharmacyId }
     );
-    return { counsels };
+    return { counsels: counsels.map((row) => ({ ...row, has_note: row.has_note === 1 })) };
+  })
+);
+
+// 상담 예약 때 고객이 적은 증상·복용 약. 약사만 열람하고 기록을 남긴다.
+router.get(
+  '/counsels/:id/note',
+  handle((req) => {
+    requireOwner(req, '상담 내용 열람');
+    const counsel = getOne(
+      `SELECT o.*, c.name AS customer_name FROM orders o LEFT JOIN customers c ON c.id = o.customer_id
+       WHERE o.id = @id AND o.pharmacy_id = @pharmacy_id AND o.order_type = 'COUNSEL'`,
+      { id: Number(req.params.id), pharmacy_id: req.pharmacyId }
+    );
+    if (!counsel) throw new PosError('복약상담 예약을 찾을 수 없습니다.', 404);
+    const note = privacy.counselNote(counsel);
+    if (note && counsel.customer_id) {
+      privacy.logAccess({
+        userId: req.user.id,
+        pharmacyId: req.pharmacyId,
+        customerId: counsel.customer_id,
+        action: 'COUNSEL_NOTE_VIEW',
+        purpose: 'COUNSEL',
+        description: `상담 내용 열람 · ${counsel.order_number} · ${counsel.customer_name || ''}`
+      });
+    }
+    return { note, purged_at: counsel.counsel_note_purged_at };
   })
 );
 
@@ -1953,7 +2019,7 @@ router.get(
 
     const memberCode = parseMemberCode(code);
     if (memberCode) {
-      const customer = getOne('SELECT id, name FROM customers WHERE pharmacy_id = @pharmacy_id AND member_code = @code', {
+      const customer = getOne("SELECT id, name FROM customers WHERE pharmacy_id = @pharmacy_id AND member_code = @code AND approval_status = 'APPROVED'", {
         pharmacy_id: req.pharmacyId,
         code: memberCode
       });

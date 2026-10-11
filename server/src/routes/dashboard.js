@@ -2,6 +2,7 @@ const express = require('express');
 const { getAll, getOne } = require('../db');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { requirePharmacyScope } = require('../middleware/scope');
+const { stripCounselNote } = require('../services/privacy');
 
 const router = express.Router();
 
@@ -57,7 +58,7 @@ router.get('/pharmacy', (req, res) => {
     { pharmacy_id: req.pharmacyId }
   );
 
-  res.json({ summary: { ...summary, ...counts }, popularProducts, recentOrders });
+  res.json({ summary: { ...summary, ...counts }, popularProducts, recentOrders: recentOrders.map((order) => stripCounselNote(order)) });
 });
 
 router.get('/customers', (req, res) => {
