@@ -108,29 +108,69 @@ function handleMallAuthError(error, pharmacyCode = pharmacyCodeFromUrl()) {
   return false;
 }
 
+let onlineOrderAllowed = false;
+
+function onlineOrderReady() {
+  return onlineOrderAllowed;
+}
+
+function setOrderControls(controls, enabled) {
+  for (const control of controls) {
+    if ('disabled' in control) control.disabled = !enabled;
+    if (control.tagName === 'A') {
+      if (!enabled && control.hasAttribute('href')) {
+        control.dataset.href = control.getAttribute('href');
+        control.removeAttribute('href');
+      }
+      if (enabled && control.dataset.href) control.setAttribute('href', control.dataset.href);
+    }
+    control.setAttribute('aria-disabled', String(!enabled));
+    control.style.opacity = enabled ? '' : '0.45';
+    control.style.pointerEvents = enabled ? '' : 'none';
+  }
+}
+
+function showOrderGuardNotice(parent, text, retry) {
+  const notice = document.createElement('div');
+  notice.dataset.orderGuard = '';
+  notice.setAttribute('role', 'alert');
+  notice.style.cssText =
+    'background:#fff4e5;border:1px solid #ffd8a8;border-radius:16px;color:#8a4b00;font-size:14px;font-weight:700;line-height:1.55;padding:14px 16px;';
+  notice.textContent = text;
+  if (retry) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = '다시 확인';
+    button.style.cssText = 'display:block;width:auto;margin:10px 0 0;padding:8px 14px;background:#fff;color:#8a4b00;border:1px solid #ffd8a8;';
+    button.addEventListener('click', retry);
+    notice.append(button);
+  }
+  parent.prepend(notice);
+}
+
+// 주문 자격을 확인하기 전·확인에 실패했을 때는 주문 버튼을 막아 둔다. 서버도 주문 시 다시 확인한다.
 async function guardOnlineOrder(noticeParent, controls = []) {
+  const targets = controls.filter(Boolean);
+  onlineOrderAllowed = false;
+  setOrderControls(targets, false);
+  noticeParent.querySelector('[data-order-guard]')?.remove();
+
   let status;
   try {
     status = await api.request('/orders/eligibility');
   } catch (error) {
+    if (handleMallAuthError(error)) return false;
+    showOrderGuardNotice(noticeParent, '주문 가능 여부를 확인하지 못했어요. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.', () =>
+      guardOnlineOrder(noticeParent, controls)
+    );
+    return false;
+  }
+  if (status.allowed) {
+    onlineOrderAllowed = true;
+    setOrderControls(targets, true);
     return true;
   }
-  if (status.allowed) return true;
-
-  const notice = document.createElement('div');
-  notice.setAttribute('role', 'alert');
-  notice.style.cssText =
-    'background:#fff4e5;border:1px solid #ffd8a8;border-radius:16px;color:#8a4b00;font-size:14px;font-weight:700;line-height:1.55;padding:14px 16px;';
-  notice.textContent = status.message;
-  noticeParent.prepend(notice);
-
-  for (const control of controls.filter(Boolean)) {
-    if ('disabled' in control) control.disabled = true;
-    control.removeAttribute('href');
-    control.setAttribute('aria-disabled', 'true');
-    control.style.opacity = '0.45';
-    control.style.pointerEvents = 'none';
-  }
+  showOrderGuardNotice(noticeParent, status.message);
   return false;
 }
 
@@ -141,7 +181,8 @@ function orderTypeLabel(type) {
       PICKUP: '매장 픽업',
       COUNSEL: '복약상담',
       POS_SALE: '현장 판매',
-      POS_REFUND: '현장 반품'
+      POS_REFUND: '현장 반품',
+      ONLINE_REFUND: '온라인 취소·환불'
     }[type] || type || '배송 주문'
   );
 }
@@ -149,7 +190,9 @@ function orderTypeLabel(type) {
 function orderStatusLabel(status) {
   return (
     {
+      PAYMENT_PENDING: '결제대기',
       PAYMENT_COMPLETED: '결제완료',
+      PREPARING: '상품준비중',
       SHIPPING: '배송중',
       DELIVERED: '배송완료',
       RESERVED: '예약접수',
@@ -159,7 +202,7 @@ function orderStatusLabel(status) {
       COMPLETED: '완료',
       CANCELED: '취소',
       PARTIALLY_REFUNDED: '부분반품',
-      REFUNDED: '반품완료'
+      REFUNDED: '환불완료'
     }[status] || status || '-'
   );
 }

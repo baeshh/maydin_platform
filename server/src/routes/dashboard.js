@@ -14,9 +14,9 @@ router.get('/pharmacy', (req, res) => {
       COALESCE(SUM(CASE WHEN strftime('%Y-%m', created_at, 'localtime') = strftime('%Y-%m', 'now', 'localtime') THEN final_amount ELSE 0 END), 0) AS month_sales,
       COALESCE(SUM(final_amount), 0) AS total_sales,
       COALESCE(SUM(CASE WHEN date(created_at, 'localtime') = date('now', 'localtime') AND sales_channel = 'POS' THEN final_amount ELSE 0 END), 0) AS today_pos_sales,
-      COUNT(CASE WHEN date(created_at, 'localtime') = date('now', 'localtime') AND order_type != 'POS_REFUND' THEN 1 END) AS today_order_count,
-      COUNT(CASE WHEN strftime('%Y-%m', created_at, 'localtime') = strftime('%Y-%m', 'now', 'localtime') AND order_type != 'POS_REFUND' THEN 1 END) AS month_order_count,
-      COUNT(CASE WHEN order_type = 'DELIVERY' AND delivery_status != 'DELIVERED' THEN 1 END) AS pending_delivery_count,
+      COUNT(CASE WHEN date(created_at, 'localtime') = date('now', 'localtime') AND order_type NOT IN ('POS_REFUND', 'ONLINE_REFUND') THEN 1 END) AS today_order_count,
+      COUNT(CASE WHEN strftime('%Y-%m', created_at, 'localtime') = strftime('%Y-%m', 'now', 'localtime') AND order_type NOT IN ('POS_REFUND', 'ONLINE_REFUND') THEN 1 END) AS month_order_count,
+      COUNT(CASE WHEN order_type = 'DELIVERY' AND delivery_status != 'DELIVERED' AND order_status NOT IN ('CANCELED', 'REFUNDED') THEN 1 END) AS pending_delivery_count,
       COUNT(CASE WHEN order_type = 'DELIVERY' AND delivery_status = 'DELIVERED' THEN 1 END) AS delivered_count
      FROM orders
      WHERE pharmacy_id = @pharmacy_id`,
@@ -65,7 +65,7 @@ router.get('/customers', (req, res) => {
     `SELECT c.id, c.name, c.phone, c.email, c.member_code, c.point_balance, c.created_at,
       COALESCE(SUM(o.final_amount), 0) AS total_purchase_amount,
       MAX(o.created_at) AS last_order_at,
-      COUNT(CASE WHEN o.order_type != 'POS_REFUND' THEN o.id END) AS order_count
+      COUNT(CASE WHEN o.order_type NOT IN ('POS_REFUND', 'ONLINE_REFUND') THEN o.id END) AS order_count
      FROM customers c
      LEFT JOIN orders o ON o.customer_id = c.id
      WHERE c.pharmacy_id = @pharmacy_id AND c.approval_status = 'APPROVED'

@@ -256,6 +256,7 @@ function trendFor(where, params, group, from, to, { today, now }) {
   });
 }
 
+const COST_KNOWN = 'oi.cost_amount IS NOT NULL';
 const ITEM_NET = '(oi.total_price - COALESCE(oi.discount_amount, 0))';
 const ITEM_TAX = "COALESCE(oi.tax_type, p.tax_type, 'TAXABLE')";
 
@@ -346,17 +347,19 @@ function salesReport(pharmacyId, query) {
 
   const costRow = getOne(
     `SELECT
-       COALESCE(SUM(CASE WHEN p.cost_price IS NOT NULL THEN ${ITEM_NET} ELSE 0 END), 0) AS cost_known_net,
-       COALESCE(SUM(CASE WHEN p.cost_price IS NOT NULL THEN oi.quantity * p.cost_price ELSE 0 END), 0) AS cost_amount,
+       COALESCE(SUM(CASE WHEN ${COST_KNOWN} THEN ${ITEM_NET} ELSE 0 END), 0) AS cost_known_net,
+       COALESCE(SUM(COALESCE(oi.cost_amount, 0)), 0) AS cost_amount,
+       COALESCE(SUM(CASE WHEN oi.cost_source = 'BACKFILL' THEN ${ITEM_NET} ELSE 0 END), 0) AS estimated_net,
        COALESCE(SUM(${ITEM_NET}), 0) AS item_net
-     FROM order_items oi JOIN orders o ON o.id = oi.order_id LEFT JOIN products p ON p.id = oi.product_id
+     FROM order_items oi JOIN orders o ON o.id = oi.order_id
      WHERE ${where}`,
     params
   );
   const margin = {
     ...costRow,
     ...marginOf(costRow),
-    coverage_rate: costRow.item_net ? Math.round((costRow.cost_known_net / costRow.item_net) * 1000) / 10 : null
+    coverage_rate: costRow.item_net ? Math.round((costRow.cost_known_net / costRow.item_net) * 1000) / 10 : null,
+    basis: 'SALE_TIME'
   };
 
   const trend = trendFor(where, params, group, from, to, { today, now });
@@ -399,8 +402,9 @@ function salesReport(pharmacyId, query) {
        COALESCE(SUM(${ITEM_NET}), 0) AS net_amount,
        COALESCE(SUM(CASE WHEN oi.quantity > 0 THEN COALESCE(oi.discount_amount, 0) ELSE 0 END), 0) AS discount_amount,
        p.cost_price,
-       CASE WHEN p.cost_price IS NOT NULL THEN COALESCE(SUM(${ITEM_NET}), 0) ELSE 0 END AS cost_known_net,
-       CASE WHEN p.cost_price IS NOT NULL THEN COALESCE(SUM(oi.quantity), 0) * p.cost_price ELSE 0 END AS cost_amount
+       COUNT(CASE WHEN ${COST_KNOWN} THEN 1 END) AS cost_lines,
+       COALESCE(SUM(CASE WHEN ${COST_KNOWN} THEN ${ITEM_NET} ELSE 0 END), 0) AS cost_known_net,
+       COALESCE(SUM(COALESCE(oi.cost_amount, 0)), 0) AS cost_amount
      FROM order_items oi
      JOIN orders o ON o.id = oi.order_id
      LEFT JOIN products p ON p.id = oi.product_id
@@ -530,9 +534,10 @@ const CSV_TABLES = {
       ['과세 공급가액', r.tax.supply_amount],
       ['부가세', r.tax.vat_amount],
       ['면세 매출', r.tax.exempt_amount],
-      ['추정 매출원가 (현재 원가 기준)', r.margin.cost_amount],
-      ['추정 매출총이익', r.margin.margin_amount],
-      ['원가 등록 매출 비중(%)', r.margin.coverage_rate]
+      ['매출원가 (판매 시점 원가, 반품 차감)', r.margin.cost_amount],
+      ['매출총이익', r.margin.margin_amount],
+      ['원가 기록 매출 비중(%)', r.margin.coverage_rate],
+      ['그중 추정 원가 매출 (원가 기록 시작 전 판매)', r.margin.estimated_net]
     ]
   },
   trend: {
@@ -579,7 +584,7 @@ const CSV_TABLES = {
   products: {
     label: '상품별',
     build: (r) => [
-      ['상품명', '바코드', '카테고리', '구분', '과세', '판매 수량', '반품 수량', '순수량', '순매출', '비중(%)', '할인', '현재 원가', '추정 원가', '추정 이익', '이익률(%)'],
+      ['상품명', '바코드', '카테고리', '구분', '과세', '판매 수량', '반품 수량', '순수량', '순매출', '비중(%)', '할인', '현재 원가', '매출원가 (판매 시점)', '매출총이익', '이익률(%)'],
       ...r.products.map((p) => [
         p.product_name,
         p.barcode,
@@ -593,7 +598,7 @@ const CSV_TABLES = {
         p.share,
         p.discount_amount,
         p.cost_price,
-        p.cost_price == null ? null : p.cost_amount,
+        p.cost_lines ? p.cost_amount : null,
         p.margin_amount,
         p.margin_rate
       ])
@@ -602,7 +607,7 @@ const CSV_TABLES = {
   categories: {
     label: '카테고리별',
     build: (r) => [
-      ['카테고리', '상품 수', '순수량', '순매출', '비중(%)', '추정 이익', '이익률(%)'],
+      ['카테고리', '상품 수', '순수량', '순매출', '비중(%)', '매출총이익', '이익률(%)'],
       ...r.categories.map((c) => [c.category_name, c.product_count, c.net_quantity, c.net_amount, c.share, c.margin_amount, c.margin_rate])
     ]
   },

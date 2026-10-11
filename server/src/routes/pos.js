@@ -10,6 +10,8 @@ const { CustomerError } = require('../services/customers');
 const { issueSignupCode, receiptSignupCode, readHealth } = require('../services/member-auth');
 const { ImportError, assertNotSyncing, syncStatus } = require('../services/product-import');
 const { ProductKindError, normalizeProductType, posSaleBlockReason, isPointEligible } = require('../services/product-kind');
+const { saleCost, refundCost } = require('../services/order-cost');
+const { recordHistory } = require('../services/order-flow');
 
 const router = express.Router();
 
@@ -21,7 +23,9 @@ const PAYMENT_METHODS = {
   POINT: '포인트'
 };
 
-const PICKUP_DONE_STATUSES = ['PICKED_UP', 'COMPLETED', 'CANCELED'];
+const PICKUP_DONE_STATUSES = ['PICKED_UP', 'COMPLETED', 'CANCELED', 'REFUNDED'];
+// 카운터에서 건넬 수 있는 픽업 주문. 결제 대기 주문은 카운터에서 결제한 뒤 건넨다.
+const PICKUP_HANDOVER_STATUSES = ['PAYMENT_PENDING', 'PAYMENT_COMPLETED', 'PREPARING', 'READY_FOR_PICKUP'];
 const COUNSEL_OPEN_STATUSES = ['RESERVED', 'CONFIRMED'];
 const PHONE_DIGITS_SQL = (column) => `REPLACE(REPLACE(REPLACE(COALESCE(${column}, ''), '-', ''), ' ', ''), '.', '')`;
 
@@ -533,9 +537,11 @@ function createRefundOrder(req, { original, lines, refundType, reason, payments,
   for (const { item, quantity, amount } of lines) {
     run(
       `INSERT INTO order_items (
-        order_id, product_id, product_name, quantity, price, total_price, product_type, tax_type, discount_amount
+        order_id, product_id, product_name, quantity, price, total_price, product_type, tax_type, discount_amount,
+        unit_cost, cost_amount, cost_source
       ) VALUES (
-        @order_id, @product_id, @product_name, @quantity, @price, @total_price, @product_type, @tax_type, @discount_amount
+        @order_id, @product_id, @product_name, @quantity, @price, @total_price, @product_type, @tax_type, @discount_amount,
+        @unit_cost, @cost_amount, @cost_source
       )`,
       {
         order_id: refundOrderId,
@@ -546,7 +552,8 @@ function createRefundOrder(req, { original, lines, refundType, reason, payments,
         total_price: -(item.price * quantity),
         product_type: item.product_type,
         tax_type: item.tax_type,
-        discount_amount: -(item.price * quantity - amount)
+        discount_amount: -(item.price * quantity - amount),
+        ...refundCost(item, quantity)
       }
     );
 
@@ -819,7 +826,7 @@ router.get(
 
     const customers = getAll(
       `SELECT c.id, c.name, c.phone, c.email, c.created_at, c.member_code, c.point_balance,
-        COUNT(CASE WHEN o.order_type NOT IN ('POS_REFUND', 'COUNSEL') THEN o.id END) AS order_count,
+        COUNT(CASE WHEN o.order_type NOT IN ('POS_REFUND', 'ONLINE_REFUND', 'COUNSEL') THEN o.id END) AS order_count,
         COALESCE(SUM(o.final_amount), 0) AS total_amount,
         MAX(o.created_at) AS last_order_at
        FROM customers c
@@ -1117,9 +1124,11 @@ router.post(
 
         run(
           `INSERT INTO order_items (
-            order_id, product_id, product_name, quantity, price, total_price, product_type, tax_type, discount_amount, discount_reason
+            order_id, product_id, product_name, quantity, price, total_price, product_type, tax_type, discount_amount, discount_reason,
+            unit_cost, cost_amount, cost_source
           ) VALUES (
-            @order_id, @product_id, @product_name, @quantity, @price, @total_price, @product_type, @tax_type, @discount_amount, @discount_reason
+            @order_id, @product_id, @product_name, @quantity, @price, @total_price, @product_type, @tax_type, @discount_amount, @discount_reason,
+            @unit_cost, @cost_amount, @cost_source
           )`,
           {
             order_id: orderId,
@@ -1131,7 +1140,8 @@ router.post(
             product_type: line.product.product_type || 'GENERAL',
             tax_type: line.product.tax_type || 'TAXABLE',
             discount_amount: share,
-            discount_reason: share > 0 ? discountReason : null
+            discount_reason: share > 0 ? discountReason : null,
+            ...saleCost(line.product.id, line.quantity)
           }
         );
 
@@ -1197,6 +1207,7 @@ router.post(
         run("UPDATE orders SET order_status = 'COMPLETED', updated_at = CURRENT_TIMESTAMP WHERE id = @id", {
           id: counsel.id
         });
+        recordHistory({ order: counsel, action: 'COUNSEL_SALE', from: counsel.order_status, to: 'COMPLETED', userId: req.user.id });
       }
 
       const methods = payments.map((p) => `${PAYMENT_METHODS[p.method]} ${won(p.amount)}`).join(' + ');
@@ -1537,7 +1548,9 @@ router.post(
         { id: Number(req.params.id), pharmacy_id: req.pharmacyId }
       );
       if (!order) throw new PosError('픽업 주문을 찾을 수 없습니다.', 404);
-      if (PICKUP_DONE_STATUSES.includes(order.order_status)) throw new PosError('이미 수령 완료되었거나 취소된 주문입니다.', 409);
+      if (!PICKUP_HANDOVER_STATUSES.includes(order.order_status)) {
+        throw new PosError('이미 수령 완료되었거나 취소·환불된 주문입니다.', 409);
+      }
 
       let counterPayment = null;
       if (order.payment_status !== 'PAID') {
@@ -1558,10 +1571,28 @@ router.post(
         `UPDATE orders
          SET order_status = 'PICKED_UP', delivery_status = 'PICKED_UP', picked_up_at = CURRENT_TIMESTAMP,
              picked_up_by = @user_id, updated_at = CURRENT_TIMESTAMP
-         WHERE id = @id AND order_status NOT IN ('${PICKUP_DONE_STATUSES.join("','")}')`,
-        { id: order.id, user_id: req.user.id }
+         WHERE id = @id AND order_status = @from`,
+        { id: order.id, user_id: req.user.id, from: order.order_status }
       );
       if (updated.changes === 0) throw new PosError('이미 수령 완료된 주문입니다.', 409);
+      if (counterPayment) {
+        recordHistory({
+          order,
+          action: 'PAYMENT_APPROVED',
+          from: order.order_status,
+          to: 'PAYMENT_COMPLETED',
+          amount: order.final_amount,
+          reason: '카운터 결제',
+          userId: req.user.id
+        });
+      }
+      recordHistory({
+        order,
+        action: 'COUNTER_PICKUP',
+        from: counterPayment ? 'PAYMENT_COMPLETED' : order.order_status,
+        to: 'PICKED_UP',
+        userId: req.user.id
+      });
 
       audit(
         req,
@@ -1608,6 +1639,7 @@ router.post(
     if (!COUNSEL_OPEN_STATUSES.includes(counsel.order_status)) throw new PosError('이미 완료된 상담입니다.', 409);
     transaction(() => {
       run("UPDATE orders SET order_status = 'COMPLETED', updated_at = CURRENT_TIMESTAMP WHERE id = @id", { id: counsel.id });
+      recordHistory({ order: counsel, action: 'TRANSITION', from: counsel.order_status, to: 'COMPLETED', reason: '구매 없이 상담 완료', userId: req.user.id });
       audit(req, 'POS_COUNSEL_COMPLETE', 'ORDER', counsel.id, `복약상담 완료 ${counsel.order_number} (구매 없음)`);
     })();
     return { ok: true };

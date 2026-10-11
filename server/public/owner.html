@@ -1927,7 +1927,9 @@
           HIDDEN: { text: '숨김', color: 'gray' }
         },
         orderStatus: {
+          PAYMENT_PENDING: { text: '결제대기', color: 'gray' },
           PAYMENT_COMPLETED: { text: '결제완료', color: 'blue' },
+          PREPARING: { text: '상품준비', color: 'orange' },
           SHIPPING: { text: '배송중', color: 'orange' },
           DELIVERED: { text: '배송완료', color: 'green' },
           RESERVED: { text: '예약접수', color: 'blue' },
@@ -1945,14 +1947,16 @@
           DELIVERED: { text: '배송완료', color: 'green' },
           READY_FOR_PICKUP: { text: '픽업대기', color: 'orange' },
           PICKED_UP: { text: '픽업완료', color: 'green' },
-          NOT_APPLICABLE: { text: '현장 수령', color: 'gray' }
+          NOT_APPLICABLE: { text: '현장 수령', color: 'gray' },
+          CANCELED: { text: '배송취소', color: 'gray' }
         },
         orderType: {
           DELIVERY: { text: '배송', color: 'blue' },
           PICKUP: { text: '픽업', color: 'green' },
           COUNSEL: { text: '상담', color: 'orange' },
           POS_SALE: { text: '현장 판매', color: 'blue' },
-          POS_REFUND: { text: '현장 반품', color: 'red' }
+          POS_REFUND: { text: '현장 반품', color: 'red' },
+          ONLINE_REFUND: { text: '온라인 취소·환불', color: 'red' }
         },
         paymentStatus: {
           PAID: { text: '결제완료', color: 'blue' },
@@ -3224,7 +3228,7 @@
               </thead>
               <tbody>
                 ${orders.map((order) => `
-                  <tr>
+                  <tr id="order-row-${Number(order.id)}">
                     <td>
                       <div class="list-title">${h(order.order_number)}</div>
                       <div class="list-meta">${h(formatDate(order.created_at))}</div>
@@ -3258,32 +3262,91 @@
         return `${order.customer_phone || ''} · ${order.address || ''}`.trim();
       }
 
+      const ORDER_NEXT_LABELS = {
+        PREPARING: '상품 준비 시작',
+        READY_FOR_PICKUP: '픽업 준비 완료',
+        PICKED_UP: '수령 완료',
+        SHIPPING: '배송 시작',
+        DELIVERED: '배송 완료',
+        CONFIRMED: '상담 확정',
+        COMPLETED: '상담 완료'
+      };
+
+      // 서버가 알려 준 다음 단계·취소·환불만 버튼으로 보여 준다. 전환 규칙은 서버에서 한 번 더 확인한다.
       function renderOrderActions(order) {
-        const type = order.order_type || 'DELIVERY';
-        if (type === 'PICKUP') {
-          return `
-            <div class="inline-actions">
-              <button class="btn btn-outline btn-sm" type="button" onclick="updateOrderStatus(${Number(order.id)}, 'READY_FOR_PICKUP', 'READY_FOR_PICKUP')">픽업준비</button>
-              <button class="btn btn-primary btn-sm" type="button" onclick="updateOrderStatus(${Number(order.id)}, 'PICKED_UP', 'PICKED_UP')">수령완료</button>
-            </div>
-          `;
+        const id = Number(order.id);
+        const next = order.next_statuses || [];
+        const buttons = next.map((status, index) =>
+          status === 'SHIPPING'
+            ? `<button class="btn btn-primary btn-sm" type="button" onclick="ship(${id})">${ORDER_NEXT_LABELS.SHIPPING}</button>`
+            : `<button class="btn ${index === 0 ? 'btn-primary' : 'btn-outline'} btn-sm" type="button" onclick="updateOrderStatus(${id}, '${status}')">${ORDER_NEXT_LABELS[status] || status}</button>`
+        );
+        if (order.can_cancel) buttons.push(`<button class="btn btn-danger btn-sm" type="button" onclick="cancelOnlineOrder(${id})">주문 취소</button>`);
+        if (order.can_refund) buttons.push(`<button class="btn btn-danger btn-sm" type="button" onclick="refundOnlineOrder(${id})">환불</button>`);
+        buttons.push(`<button class="btn btn-outline btn-sm" type="button" onclick="toggleOrderHistory(${id})">이력</button>`);
+        const shipInputs = next.includes('SHIPPING')
+          ? `<div class="ship-grid" style="margin-bottom: 6px;">
+              <input id="courier-${id}" class="form-control" placeholder="택배사" value="${h(order.courier || 'CJ대한통운')}" />
+              <input id="tracking-${id}" class="form-control" placeholder="송장번호" value="${h(order.tracking_number || '')}" />
+            </div>`
+          : order.tracking_number ? `<div class="list-meta" style="margin-bottom: 6px;">${h(order.courier || '')} ${h(order.tracking_number)}</div>` : '';
+        const closed = ['CANCELED', 'REFUNDED'].includes(order.order_status) && order.refund_reason
+          ? `<div class="list-meta" style="margin-bottom: 6px;">사유: ${h(order.refund_reason)}</div>`
+          : '';
+        return `${shipInputs}${closed}<div class="inline-actions">${buttons.join('')}</div>`;
+      }
+
+      async function toggleOrderHistory(id) {
+        const existing = document.getElementById(`order-history-${id}`);
+        if (existing) return existing.remove();
+        try {
+          const { history } = await api.request(`/orders/${id}`);
+          const row = document.getElementById(`order-row-${id}`);
+          if (!row) return;
+          const actor = { CUSTOMER: '고객', SYSTEM: '결제 시스템', STAFF: '약국' };
+          row.insertAdjacentHTML('afterend', `
+            <tr id="order-history-${id}">
+              <td colspan="6" style="background: var(--gray-50, #f9fafb);">
+                ${history.length === 0 ? '<span class="list-meta">기록된 이력이 없습니다. (이력 기록 전에 접수된 주문)</span>' : `
+                  <ol style="margin: 0; padding-left: 18px; display: grid; gap: 4px;">
+                    ${history.map((e) => `
+                      <li class="list-meta">
+                        <strong>${h(formatDate(e.created_at))}</strong> · ${h(e.action_label)}
+                        ${e.from_label ? `${h(e.from_label)} → ` : ''}${h(e.to_label)}
+                        · ${h(e.created_by_name || actor[e.actor_type] || '')}
+                        ${e.amount ? ` · ${money(e.amount)}` : ''}${e.reason ? ` · ${h(e.reason)}` : ''}
+                      </li>`).join('')}
+                  </ol>`}
+              </td>
+            </tr>`);
+        } catch (error) {
+          showToast(error.message);
         }
-        if (type === 'COUNSEL') {
-          return `
-            <div class="inline-actions">
-              <button class="btn btn-outline btn-sm" type="button" onclick="updateOrderStatus(${Number(order.id)}, 'CONFIRMED')">상담확정</button>
-              <button class="btn btn-primary btn-sm" type="button" onclick="updateOrderStatus(${Number(order.id)}, 'COMPLETED')">상담완료</button>
-            </div>
-          `;
+      }
+
+      async function cancelOnlineOrder(id) {
+        const reason = prompt('주문 취소 사유를 입력해 주세요.\n결제가 취소되고 차감했던 재고가 되돌아갑니다.');
+        if (reason === null) return;
+        try {
+          await api.request(`/orders/${id}/cancel`, { method: 'POST', body: { reason } });
+          showToast('주문을 취소했습니다. 결제 취소·재고 원복이 함께 처리되었습니다.');
+          loadOwner();
+        } catch (error) {
+          showToast(error.message);
         }
-        return `
-          <div class="ship-grid">
-            <input id="courier-${order.id}" class="form-control" placeholder="택배사" value="${h(order.courier || 'CJ대한통운')}" />
-            <input id="tracking-${order.id}" class="form-control" placeholder="송장번호" value="${h(order.tracking_number || '')}" />
-            <button class="btn btn-outline btn-sm" type="button" onclick="ship(${Number(order.id)})">배송중</button>
-            <button class="btn btn-primary btn-sm" type="button" onclick="deliver(${Number(order.id)})">배송완료</button>
-          </div>
-        `;
+      }
+
+      async function refundOnlineOrder(id) {
+        const reason = prompt('환불 사유를 입력해 주세요. (전액 환불)');
+        if (reason === null) return;
+        const restock = confirm('돌려받은 상품을 다시 판매할 수 있나요?\n확인: 재고에 다시 넣기 / 취소: 재고에 넣지 않기 (파손·개봉 등)');
+        try {
+          await api.request(`/orders/${id}/refund`, { method: 'POST', body: { reason, restock } });
+          showToast(`환불했습니다.${restock ? ' 재고에 다시 넣었습니다.' : ''}`);
+          loadOwner();
+        } catch (error) {
+          showToast(error.message);
+        }
       }
 
       const PRODUCT_PAGE_SIZE = 10;
@@ -3567,15 +3630,9 @@
         }
       }
 
-      async function updateOrderStatus(id, orderStatus, deliveryStatus) {
+      async function updateOrderStatus(id, orderStatus) {
         try {
-          await api.request(`/orders/${id}/status`, {
-            method: 'PATCH',
-            body: {
-              order_status: orderStatus,
-              delivery_status: deliveryStatus || undefined
-            }
-          });
+          await api.request(`/orders/${id}/status`, { method: 'PATCH', body: { order_status: orderStatus } });
           showToast('상태가 변경되었습니다.');
           loadOwner();
         } catch (error) {
@@ -3589,30 +3646,11 @@
             method: 'PATCH',
             body: {
               order_status: 'SHIPPING',
-              delivery_status: 'SHIPPING',
               courier: $(`#courier-${id}`).value,
               tracking_number: $(`#tracking-${id}`).value
             }
           });
           showToast('배송중으로 변경되었습니다.');
-          loadOwner();
-        } catch (error) {
-          showToast(error.message);
-        }
-      }
-
-      async function deliver(id) {
-        try {
-          await api.request(`/orders/${id}/status`, {
-            method: 'PATCH',
-            body: {
-              order_status: 'DELIVERED',
-              delivery_status: 'DELIVERED',
-              courier: $(`#courier-${id}`)?.value,
-              tracking_number: $(`#tracking-${id}`)?.value
-            }
-          });
-          showToast('배송완료로 변경되었습니다.');
           loadOwner();
         } catch (error) {
           showToast(error.message);
@@ -4093,7 +4131,7 @@
             <div class="report-metric"><span>객단가 ${c ? deltaHtml(t.avg_ticket, c.avg_ticket) : ''}</span><strong>${money(t.avg_ticket)}</strong><small>할인 ${money(t.discount_amount)}${vs(money(c ? c.avg_ticket : 0))}</small></div>
             <div class="report-metric"><span>과세 매출 (부가세 포함)</span><strong>${money(d.tax.taxable_amount)}</strong><small>공급가 ${money(d.tax.supply_amount)} · 부가세 ${money(d.tax.vat_amount)}</small></div>
             <div class="report-metric"><span>면세 매출</span><strong>${money(d.tax.exempt_amount)}</strong><small>면세 상품은 상품 관리에서 지정</small></div>
-            <div class="report-metric"><span>추정 매출총이익</span><strong>${d.margin.margin_amount == null ? '-' : money(d.margin.margin_amount)}</strong><small>이익률 ${pct(d.margin.margin_rate)} · 원가 등록 매출 ${pct(d.margin.coverage_rate)}</small></div>
+            <div class="report-metric"><span>매출총이익</span><strong>${d.margin.margin_amount == null ? '-' : money(d.margin.margin_amount)}</strong><small>이익률 ${pct(d.margin.margin_rate)} · 원가 기록 매출 ${pct(d.margin.coverage_rate)}${d.margin.estimated_net ? ' · 일부 추정' : ''}</small></div>
           </div>
           <div class="chart-box trend-box">
             <div class="trend-head">
@@ -4123,7 +4161,7 @@
           ${renderReportTable(d)}
           <p class="list-meta" style="margin: 12px 0 0;">
             반품·취소는 처리한 날짜의 매출에서 차감됩니다. 부가세는 과세 매출(부가세 포함가)의 1/11로 계산한 참고값이며, 신고는 세무 대리인과 확인해 주세요.
-            추정 이익은 상품에 등록된 현재 매입 원가 기준입니다.
+            매출총이익은 판매 순간에 기록한 원가(유통기한 로트별 입고 단가, 없으면 그때의 상품 원가) 기준이라 나중에 원가를 바꿔도 지난 이익이 달라지지 않습니다. 반품·취소분은 원가까지 함께 차감합니다.${d.margin.estimated_net ? ` 원가 기록을 시작하기 전 판매 ${money(d.margin.estimated_net)}는 기록 시작 시점 원가로 추정했습니다.` : ''}
           </p>
         `;
       }
@@ -4139,7 +4177,7 @@
         switch (report.tab) {
           case 'categories':
             return table(
-              [['카테고리'], ['상품 수', 1], ['순수량', 1], ['순매출', 1], ['비중', 1], ['추정 이익', 1], ['이익률', 1]],
+              [['카테고리'], ['상품 수', 1], ['순수량', 1], ['순매출', 1], ['비중', 1], ['매출총이익', 1], ['이익률', 1]],
               d.categories.map((c) => tr([[h(c.category_name)], [c.product_count, 1], [c.net_quantity, 1], [money(c.net_amount), 1, bold], [pct(c.share), 1], [c.margin_amount == null ? '-' : money(c.margin_amount), 1], [pct(c.margin_rate), 1]])),
               '판매 내역이 없습니다.'
             );
@@ -4213,7 +4251,7 @@
             );
           default:
             return table(
-              [['상품'], ['과세'], ['판매', 1], ['반품', 1], ['순매출', 1], ['비중', 1], ['원가', 1], ['추정 이익', 1], ['이익률', 1]],
+              [['상품'], ['과세'], ['판매', 1], ['반품', 1], ['순매출', 1], ['비중', 1], ['매출원가', 1], ['매출총이익', 1], ['이익률', 1]],
               d.products.map((p) => tr([
                 [`<div class="list-title">${h(p.product_name)}</div><div class="list-meta">${h(p.category_name)}${p.product_type && p.product_type !== 'GENERAL' ? ` · ${PRODUCT_TYPE_LABELS[p.product_type] || p.product_type}` : ''}</div>`],
                 [p.tax_type === 'EXEMPT' ? '<span class="badge green">면세</span>' : '<span class="badge gray">과세</span>'],
@@ -4221,7 +4259,7 @@
                 [p.refunded_quantity || '-', 1],
                 [money(p.net_amount), 1, bold],
                 [pct(p.share), 1],
-                [p.cost_price == null ? '<span class="list-meta">미등록</span>' : money(p.cost_price), 1],
+                [p.cost_lines ? money(p.cost_amount) : '<span class="list-meta">원가 미기록</span>', 1],
                 [p.margin_amount == null ? '-' : money(p.margin_amount), 1],
                 [pct(p.margin_rate), 1]
               ])),

@@ -5,6 +5,17 @@ const { requirePharmacyScope } = require('../middleware/scope');
 const { onlineOrderStatus } = require('../services/member-auth');
 const { onlineStockBuffer, onlineStockGate } = require('../services/product-import');
 const { isOnlineSellable, onlineBlockedMessage } = require('../services/product-kind');
+const { saleCost } = require('../services/order-cost');
+const {
+  OrderFlowError,
+  availableActions,
+  cancelOrder,
+  orderHistory,
+  recordCreatedAndPaid,
+  recordHistory,
+  refundOrder,
+  transition
+} = require('../services/order-flow');
 
 const router = express.Router();
 
@@ -42,8 +53,11 @@ function insertOrderItems(orderId, cartItems, pharmacyId, userId, buffer = 0) {
   for (const item of cartItems) {
     const price = Number(item.discount_price || item.price);
     run(
-      `INSERT INTO order_items (order_id, product_id, product_name, quantity, price, total_price, product_type, tax_type)
-       VALUES (@order_id, @product_id, @product_name, @quantity, @price, @total_price, @product_type, @tax_type)`,
+      `INSERT INTO order_items (
+        order_id, product_id, product_name, quantity, price, total_price, product_type, tax_type, unit_cost, cost_amount, cost_source
+      ) VALUES (
+        @order_id, @product_id, @product_name, @quantity, @price, @total_price, @product_type, @tax_type, @unit_cost, @cost_amount, @cost_source
+      )`,
       {
         order_id: orderId,
         product_id: item.id,
@@ -52,7 +66,8 @@ function insertOrderItems(orderId, cartItems, pharmacyId, userId, buffer = 0) {
         price,
         total_price: price * item.quantity,
         product_type: item.product_type || 'GENERAL',
-        tax_type: item.tax_type || 'TAXABLE'
+        tax_type: item.tax_type || 'TAXABLE',
+        ...saleCost(item.id, item.quantity)
       }
     );
 
@@ -100,18 +115,57 @@ router.get('/', requireRole('CUSTOMER', 'PHARMACY_OWNER', 'ADMIN'), requirePharm
        FROM orders o
        JOIN customers c ON c.id = o.customer_id
        LEFT JOIN deliveries d ON d.order_id = o.id
-       WHERE o.pharmacy_id = @pharmacy_id AND c.user_id = @user_id
+       WHERE o.pharmacy_id = @pharmacy_id AND c.user_id = @user_id AND o.order_type != 'ONLINE_REFUND'
        ORDER BY o.id DESC`
     : `SELECT o.*, c.name AS customer_name, c.phone AS customer_phone, d.receiver_name, d.address, d.courier, d.tracking_number
        FROM orders o
        LEFT JOIN customers c ON c.id = o.customer_id
        LEFT JOIN deliveries d ON d.order_id = o.id
-       WHERE o.pharmacy_id = @pharmacy_id AND COALESCE(o.sales_channel, 'ONLINE') != 'POS'
+       WHERE o.pharmacy_id = @pharmacy_id AND COALESCE(o.sales_channel, 'ONLINE') != 'POS' AND o.order_type != 'ONLINE_REFUND'
        ORDER BY o.id DESC`;
 
-  const orders = getAll(sql, { pharmacy_id: req.pharmacyId, user_id: req.user.id });
+  const orders = getAll(sql, { pharmacy_id: req.pharmacyId, user_id: req.user.id }).map((order) =>
+    ORDER_TYPES.has(order.order_type || 'DELIVERY') && order.sales_channel !== 'POS'
+      ? { ...order, ...availableActions(order, req.user.role) }
+      : order
+  );
   res.json({ orders });
 });
+
+function sendFlowError(res, error) {
+  if (error instanceof OrderFlowError) return res.status(error.status).json({ message: error.message, reason: error.reason });
+  return res.status(400).json({ message: error.message });
+}
+
+function findOrderFor(req) {
+  const order = getOne('SELECT * FROM orders WHERE id = @id AND pharmacy_id = @pharmacy_id', {
+    id: Number(req.params.id),
+    pharmacy_id: req.pharmacyId
+  });
+  if (!order) throw new OrderFlowError('주문을 찾을 수 없습니다.', 404, 'NOT_FOUND');
+  if (req.user.role === 'CUSTOMER') {
+    const customer = findMyCustomer(req);
+    if (!customer || customer.id !== order.customer_id) throw new OrderFlowError('본인 주문만 처리할 수 있습니다.', 403, 'NOT_OWNER');
+  }
+  return order;
+}
+
+function auditOrder(req, action, order, description) {
+  if (req.user.role === 'CUSTOMER') return;
+  run(
+    `INSERT INTO admin_logs (user_id, pharmacy_id, action, target_type, target_id, description)
+     VALUES (@user_id, @pharmacy_id, @action, 'ORDER', @target_id, @description)`,
+    { user_id: req.user.id, pharmacy_id: req.pharmacyId, action, target_id: order.id, description }
+  );
+}
+
+function withoutCost({ unit_cost, cost_amount, cost_source, ...item }) {
+  return item;
+}
+
+function cleanReason(value) {
+  return String(value || '').trim().slice(0, 200);
+}
 
 function findMyCustomer(req) {
   return getOne('SELECT * FROM customers WHERE user_id = @user_id AND pharmacy_id = @pharmacy_id', {
@@ -141,10 +195,20 @@ router.get('/:id', requireRole('CUSTOMER', 'PHARMACY_OWNER', 'ADMIN'), requirePh
     }
   }
 
-  const items = getAll('SELECT * FROM order_items WHERE order_id = @order_id', { order_id: order.id });
+  const items = getAll('SELECT * FROM order_items WHERE order_id = @order_id', { order_id: order.id }).map((item) =>
+    req.user.role === 'CUSTOMER' ? withoutCost(item) : item
+  );
   const payments = getAll('SELECT * FROM payments WHERE order_id = @order_id ORDER BY id ASC', { order_id: order.id });
   const delivery = getOne('SELECT * FROM deliveries WHERE order_id = @order_id', { order_id: order.id });
-  res.json({ order, items, payment: payments[0] || null, payments, delivery });
+  const online = ORDER_TYPES.has(order.order_type || 'DELIVERY') && order.sales_channel !== 'POS';
+  res.json({
+    order: online ? { ...order, ...availableActions(order, req.user.role) } : order,
+    items,
+    payment: payments[0] || null,
+    payments,
+    delivery,
+    history: orderHistory(order.id)
+  });
 });
 
 router.post('/', requireRole('CUSTOMER'), requirePharmacyScope, (req, res) => {
@@ -201,7 +265,9 @@ router.post('/', requireRole('CUSTOMER'), requirePharmacyScope, (req, res) => {
         { order_id: orderResult.lastInsertRowid }
       );
 
-      return getOne('SELECT * FROM orders WHERE id = @id', { id: orderResult.lastInsertRowid });
+      const counsel = getOne('SELECT * FROM orders WHERE id = @id', { id: orderResult.lastInsertRowid });
+      recordHistory({ order: counsel, action: 'CREATE', to: 'RESERVED', actorType: 'CUSTOMER', userId: req.user.id });
+      return counsel;
     }
 
     const cartItems = getCartItems(req.user.id, req.pharmacyId);
@@ -223,7 +289,7 @@ router.post('/', requireRole('CUSTOMER'), requirePharmacyScope, (req, res) => {
           preferred_at, memo, contact_name, contact_phone
         ) VALUES (
           @order_number, @pharmacy_id, @customer_id, 'PICKUP', @total_product_amount, 0,
-          0, @final_amount, 'PAID', 'RESERVED', 'READY_FOR_PICKUP',
+          0, @final_amount, 'READY', 'PAYMENT_PENDING', 'NOT_SHIPPED',
           @preferred_at, @memo, @contact_name, @contact_phone
         )`,
         {
@@ -240,16 +306,10 @@ router.post('/', requireRole('CUSTOMER'), requirePharmacyScope, (req, res) => {
       );
 
       insertOrderItems(orderResult.lastInsertRowid, cartItems, req.pharmacyId, req.user.id, buffer);
-
-      run(
-        `INSERT INTO payments (order_id, payment_method, payment_provider, payment_status, paid_amount, paid_at)
-         VALUES (@order_id, @payment_method, 'MOCK', 'PAID', @paid_amount, CURRENT_TIMESTAMP)`,
-        {
-          order_id: orderResult.lastInsertRowid,
-          payment_method: req.body.payment_method || 'MOCK_CARD',
-          paid_amount: total
-        }
-      );
+      recordCreatedAndPaid(getOne('SELECT * FROM orders WHERE id = @id', { id: orderResult.lastInsertRowid }), {
+        userId: req.user.id,
+        paymentMethod: req.body.payment_method || 'MOCK_CARD'
+      });
 
       clearCart(req.user.id, req.pharmacyId);
       return getOne('SELECT * FROM orders WHERE id = @id', { id: orderResult.lastInsertRowid });
@@ -269,7 +329,7 @@ router.post('/', requireRole('CUSTOMER'), requirePharmacyScope, (req, res) => {
         preferred_at, memo, contact_name, contact_phone
       ) VALUES (
         @order_number, @pharmacy_id, @customer_id, 'DELIVERY', @total_product_amount, @delivery_fee,
-        0, @final_amount, 'PAID', 'PAYMENT_COMPLETED', 'NOT_SHIPPED',
+        0, @final_amount, 'READY', 'PAYMENT_PENDING', 'NOT_SHIPPED',
         NULL, @memo, @contact_name, @contact_phone
       )`,
       {
@@ -288,16 +348,6 @@ router.post('/', requireRole('CUSTOMER'), requirePharmacyScope, (req, res) => {
     insertOrderItems(orderResult.lastInsertRowid, cartItems, req.pharmacyId, req.user.id, buffer);
 
     run(
-      `INSERT INTO payments (order_id, payment_method, payment_provider, payment_status, paid_amount, paid_at)
-       VALUES (@order_id, @payment_method, 'MOCK', 'PAID', @paid_amount, CURRENT_TIMESTAMP)`,
-      {
-        order_id: orderResult.lastInsertRowid,
-        payment_method: req.body.payment_method || 'MOCK_CARD',
-        paid_amount: finalAmount
-      }
-    );
-
-    run(
       `INSERT INTO deliveries (
         order_id, receiver_name, receiver_phone, zip_code, address, address_detail, delivery_status
       ) VALUES (
@@ -312,6 +362,10 @@ router.post('/', requireRole('CUSTOMER'), requirePharmacyScope, (req, res) => {
         address_detail: delivery.address_detail || ''
       }
     );
+    recordCreatedAndPaid(getOne('SELECT * FROM orders WHERE id = @id', { id: orderResult.lastInsertRowid }), {
+      userId: req.user.id,
+      paymentMethod: req.body.payment_method || 'MOCK_CARD'
+    });
 
     clearCart(req.user.id, req.pharmacyId);
     return getOne('SELECT * FROM orders WHERE id = @id', { id: orderResult.lastInsertRowid });
@@ -324,47 +378,66 @@ router.post('/', requireRole('CUSTOMER'), requirePharmacyScope, (req, res) => {
   }
 });
 
+// 정상 진행(상품 준비 → 픽업 대기/배송중 → 완료)만 바꾼다. 배송 상태는 주문 상태에서 정해지므로 따로 받지 않는다.
 router.patch('/:id/status', requireRole('PHARMACY_OWNER', 'ADMIN'), requirePharmacyScope, (req, res) => {
-  const { order_status, delivery_status, courier, tracking_number } = req.body;
-  const order = getOne('SELECT * FROM orders WHERE id = @id AND pharmacy_id = @pharmacy_id', {
-    id: Number(req.params.id),
-    pharmacy_id: req.pharmacyId
-  });
-  if (!order) return res.status(404).json({ message: '주문을 찾을 수 없습니다.' });
-
-  run(
-    `UPDATE orders
-     SET order_status = COALESCE(@order_status, order_status),
-         delivery_status = COALESCE(@delivery_status, delivery_status),
-         updated_at = CURRENT_TIMESTAMP
-     WHERE id = @id AND pharmacy_id = @pharmacy_id`,
-    {
-      id: order.id,
-      pharmacy_id: req.pharmacyId,
-      order_status: order_status || null,
-      delivery_status: delivery_status || null
-    }
-  );
-
-  if (order.order_type === 'DELIVERY' || !order.order_type) {
-    run(
-      `UPDATE deliveries
-       SET courier = COALESCE(@courier, courier),
-           tracking_number = COALESCE(@tracking_number, tracking_number),
-           delivery_status = COALESCE(@delivery_status, delivery_status),
-           shipped_at = CASE WHEN @delivery_status = 'SHIPPING' THEN CURRENT_TIMESTAMP ELSE shipped_at END,
-           delivered_at = CASE WHEN @delivery_status = 'DELIVERED' THEN CURRENT_TIMESTAMP ELSE delivered_at END
-       WHERE order_id = @order_id`,
-      {
-        order_id: order.id,
-        courier: courier || null,
-        tracking_number: tracking_number || null,
-        delivery_status: delivery_status || null
-      }
-    );
+  try {
+    const to = String(req.body.order_status || '').trim().toUpperCase();
+    if (!to) throw new OrderFlowError('바꿀 주문 상태를 지정해 주세요.', 400, 'STATUS_REQUIRED');
+    const result = transaction(() => {
+      const order = findOrderFor(req);
+      transition(order, to, {
+        userId: req.user.id,
+        reason: cleanReason(req.body.reason) || null,
+        extra: { courier: req.body.courier, tracking_number: req.body.tracking_number }
+      });
+      auditOrder(req, 'ORDER_STATUS', order, `${order.order_number} ${order.order_status} → ${to}`);
+      return getOne('SELECT * FROM orders WHERE id = @id', { id: order.id });
+    })();
+    res.json({ order: { ...result, ...availableActions(result, req.user.role) } });
+  } catch (error) {
+    sendFlowError(res, error);
   }
+});
 
-  res.json({ order: getOne('SELECT * FROM orders WHERE id = @id', { id: order.id }) });
+// 내보내기 전 주문 취소: 결제 취소 + 재고 원복 + 음수 매출 기록 + 이력. 고객은 상품 준비 전까지만 가능하다.
+router.post('/:id/cancel', requireRole('CUSTOMER', 'PHARMACY_OWNER', 'ADMIN'), requirePharmacyScope, (req, res) => {
+  try {
+    const customer = req.user.role === 'CUSTOMER';
+    const reason = cleanReason(req.body.reason) || (customer ? '고객 직접 취소' : '');
+    if (reason.length < 2) throw new OrderFlowError('취소 사유를 입력해 주세요.', 400, 'REASON_REQUIRED');
+    const result = transaction(() => {
+      const order = findOrderFor(req);
+      const outcome = cancelOrder(order, { reason, userId: req.user.id, actorType: customer ? 'CUSTOMER' : 'STAFF' });
+      auditOrder(req, 'ORDER_CANCEL', order, `${order.order_number} 취소 · ${order.final_amount.toLocaleString('ko-KR')}원 · 사유: ${reason}`);
+      return outcome;
+    })();
+    res.json(result);
+  } catch (error) {
+    sendFlowError(res, error);
+  }
+});
+
+// 수령·배송 완료 뒤 전액 환불. 돌려받은 상품을 다시 팔 수 있을 때만 restock으로 재고에 넣는다.
+router.post('/:id/refund', requireRole('PHARMACY_OWNER', 'ADMIN'), requirePharmacyScope, (req, res) => {
+  try {
+    const reason = cleanReason(req.body.reason);
+    if (reason.length < 2) throw new OrderFlowError('환불 사유를 입력해 주세요.', 400, 'REASON_REQUIRED');
+    const restock = req.body.restock === true || req.body.restock === 'true';
+    const result = transaction(() => {
+      const order = findOrderFor(req);
+      const outcome = refundOrder(order, { reason, restock, userId: req.user.id });
+      auditOrder(
+        req,
+        'ORDER_REFUND',
+        order,
+        `${order.order_number} 환불 · ${order.final_amount.toLocaleString('ko-KR')}원 · 사유: ${reason}${restock ? ' · 재입고' : ''}`
+      );
+      return outcome;
+    })();
+    res.json(result);
+  } catch (error) {
+    sendFlowError(res, error);
+  }
 });
 
 module.exports = router;

@@ -17,7 +17,7 @@ router.get('/summary', (req, res) => {
       (SELECT COUNT(*) FROM pharmacies) AS pharmacy_count,
       (SELECT COUNT(*) FROM pharmacies WHERE status = 'ACTIVE') AS active_pharmacy_count,
       (SELECT COUNT(*) FROM users WHERE role = 'CUSTOMER') AS customer_count,
-      (SELECT COUNT(*) FROM orders WHERE order_type != 'POS_REFUND') AS order_count,
+      (SELECT COUNT(*) FROM orders WHERE order_type NOT IN ('POS_REFUND', 'ONLINE_REFUND')) AS order_count,
       COALESCE((SELECT SUM(final_amount) FROM orders WHERE payment_status != 'UNPAID'), 0) AS total_sales`
   );
   const topPharmacies = getAll(

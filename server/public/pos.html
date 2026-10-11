@@ -3344,7 +3344,7 @@
                       <div class="muted" style="font-size: 13px; font-weight: 600; margin-top: 2px;">${h(o.order_number)} · 희망 ${h(o.preferred_at || '-')}</div>
                     </div>
                     <div style="text-align: right;">
-                      ${['PICKED_UP', 'COMPLETED'].includes(o.order_status) ? '<span class="badge green">수령 완료</span>' : o.order_status === 'CANCELED' ? '<span class="badge gray">취소</span>' : o.payment_status === 'PAID' ? '<span class="badge blue">결제완료</span>' : '<span class="badge orange">현장결제</span>'}
+                      ${['PICKED_UP', 'COMPLETED'].includes(o.order_status) ? '<span class="badge green">수령 완료</span>' : o.order_status === 'CANCELED' ? '<span class="badge gray">취소</span>' : o.order_status === 'REFUNDED' ? '<span class="badge gray">환불</span>' : o.payment_status === 'PAID' ? '<span class="badge blue">결제완료</span>' : '<span class="badge orange">현장결제</span>'}
                       <div style="font-weight: 800; margin-top: 4px;">${won(o.final_amount)}</div>
                     </div>
                   </button>
@@ -3364,7 +3364,7 @@
           const data = await api.request(`/pos/pickups/${id}`);
           state.pickup = data;
           const { order, items } = data;
-          const done = ['PICKED_UP', 'COMPLETED', 'CANCELED'].includes(order.order_status);
+          const done = ['PICKED_UP', 'COMPLETED', 'CANCELED', 'REFUNDED'].includes(order.order_status);
           document.getElementById('pickupDetail').innerHTML = `
             <div class="section-title">${h(order.order_number)}</div>
             <div class="kv"><span>수령인</span><span>${h(order.contact_name || order.customer_name || '-')}</span></div>
@@ -3376,7 +3376,7 @@
             ${items.map((i) => `<div class="kv"><span>${h(i.product_name)} × ${i.quantity}</span><span>${won(i.total_price)}</span></div>`).join('')}
             <div class="kv strong"><span>${order.payment_status === 'PAID' ? '결제 완료 금액' : '카운터 결제 금액'}</span><span>${won(order.final_amount)}</span></div>
             ${done
-              ? `<div class="notice" style="margin-top: 12px;">${order.order_status === 'CANCELED' ? '취소된 주문입니다.' : `수령 완료 · ${fmtDateTime(order.picked_up_at)}`}</div>`
+              ? `<div class="notice" style="margin-top: 12px;">${order.order_status === 'CANCELED' ? '취소된 주문입니다.' : order.order_status === 'REFUNDED' ? '환불된 주문입니다.' : `수령 완료 · ${fmtDateTime(order.picked_up_at)}`}</div>`
               : `
                 <label style="display: flex; gap: 8px; align-items: center; font-weight: 700; margin: 14px 0;">
                   <input id="pickupVerified" type="checkbox" /> 수령인 이름과 연락처 뒷자리를 확인했습니다

@@ -95,6 +95,7 @@
 
       $('#pickupForm').addEventListener('submit', async (event) => {
         event.preventDefault();
+        if (!onlineOrderReady()) return toast('주문 가능 여부를 확인한 뒤 예약할 수 있어요.');
         const form = serializeForm(event.target);
         try {
           await api.request('/orders', {

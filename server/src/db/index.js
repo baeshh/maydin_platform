@@ -16,8 +16,9 @@ db.pragma('foreign_keys = ON');
 
 function addColumnIfMissing(table, column, definition) {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all();
-  if (columns.some((col) => col.name === column)) return;
+  if (columns.some((col) => col.name === column)) return false;
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  return true;
 }
 
 function tableColumns(table) {
@@ -225,6 +226,28 @@ function migrateProductKinds() {
   `);
 }
 
+// 판매 시점 원가 기록. 열을 처음 만들 때 한 번만, 그때까지의 판매 줄을 당시 상품 원가로 고정한다(BACKFILL = 추정치).
+function migrateOrderFlow() {
+  addColumnIfMissing('order_items', 'unit_cost', 'REAL');
+  addColumnIfMissing('order_items', 'cost_amount', 'INTEGER');
+  const added = addColumnIfMissing('order_items', 'cost_source', 'TEXT');
+  if (added) {
+    db.exec(`
+      UPDATE order_items
+      SET unit_cost = (SELECT cost_price FROM products WHERE products.id = order_items.product_id),
+          cost_amount = (SELECT ROUND(order_items.quantity * cost_price) FROM products WHERE products.id = order_items.product_id),
+          cost_source = 'BACKFILL'
+      WHERE (SELECT cost_price FROM products WHERE products.id = order_items.product_id) IS NOT NULL;
+    `);
+  }
+  addColumnIfMissing('orders', 'canceled_at', 'TEXT');
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_order_status_history_order ON order_status_history(order_id, id);
+    UPDATE orders SET order_status = 'PAYMENT_COMPLETED'
+      WHERE order_type = 'PICKUP' AND order_status = 'RESERVED';
+  `);
+}
+
 function migratePos(schema) {
   if (needsUsersRebuild()) rebuildTable(schema, 'users');
   if (needsOrdersRebuild()) rebuildTable(schema, 'orders');
@@ -295,6 +318,7 @@ function migratePos(schema) {
   migrateCustomerData();
   migrateMemberAuth(schema);
   migrateProductImport();
+  migrateOrderFlow();
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_suppliers_pharmacy ON suppliers(pharmacy_id, status);
