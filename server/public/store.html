@@ -395,6 +395,17 @@
         padding: 11px 12px;
       }
 
+      .mall-notice {
+        margin: 12px 16px 0;
+        padding: 12px 14px;
+        border-radius: 12px;
+        background: #fff4e5;
+        color: #9a5b00;
+        font-size: 14px;
+        font-weight: 700;
+        line-height: 1.5;
+      }
+
       .add-btn.alert-btn {
         background: var(--toss-blue-light);
         color: var(--toss-blue);
@@ -643,6 +654,7 @@
     </header>
 
     <main>
+      <div id="mallNotice" class="mall-notice" role="status" style="display: none;"></div>
       <section class="hero-section">
         <div class="hero-banner">
           <span class="hero-tag" id="heroTag">약국 단독 혜택</span>
@@ -929,6 +941,8 @@
 
           const productData = await api.request(`/products/mall?pharmacyCode=${encodeURIComponent(pharmacyCode)}`);
           products = productData.products;
+          $('#mallNotice').textContent = productData.notice || '';
+          $('#mallNotice').style.display = productData.online_paused ? '' : 'none';
           renderCategories();
           renderBestProducts();
           renderProductGrid();

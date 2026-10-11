@@ -2,7 +2,7 @@ const express = require('express');
 const { getAll, getOne, run } = require('../db');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { requirePharmacyScope } = require('../middleware/scope');
-const { onlineStockBuffer } = require('../services/product-import');
+const { onlineStockGate } = require('../services/product-import');
 const { isOnlineSellable } = require('../services/product-kind');
 
 const router = express.Router();
@@ -19,8 +19,12 @@ router.get('/', (req, res) => {
      ORDER BY c.id DESC`,
     { user_id: req.user.id, pharmacy_id: req.pharmacyId }
   );
-  const buffer = onlineStockBuffer(req.pharmacyId);
-  res.json({ items: items.map((item) => ({ ...item, stock_quantity: Math.max(0, item.stock_quantity - buffer) })) });
+  const gate = onlineStockGate(req.pharmacyId);
+  res.json({
+    items: items.map((item) => ({ ...item, stock_quantity: gate.paused ? 0 : Math.max(0, item.stock_quantity - gate.buffer) })),
+    online_paused: gate.paused,
+    notice: gate.message
+  });
 });
 
 router.post('/', (req, res) => {
@@ -33,6 +37,8 @@ router.post('/', (req, res) => {
     return res.status(400).json({ message: '일반의약품은 온라인 결제가 불가합니다. 약국 방문 시 구매해 주세요.' });
   }
   if (!isOnlineSellable(product)) return res.status(404).json({ message: '상품을 찾을 수 없습니다.' });
+  const gate = onlineStockGate(req.pharmacyId);
+  if (gate.paused) return res.status(409).json({ message: gate.message, reason: 'STOCK_SYNC_PAUSED' });
   if (product.status !== 'ON_SALE') return res.status(400).json({ message: '판매중인 상품이 아닙니다.' });
 
   run(

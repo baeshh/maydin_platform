@@ -3,7 +3,7 @@ const { getAll, getOne, run, transaction } = require('../db');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { requirePharmacyScope } = require('../middleware/scope');
 const { onlineOrderStatus } = require('../services/member-auth');
-const { onlineStockBuffer } = require('../services/product-import');
+const { onlineStockBuffer, onlineStockGate } = require('../services/product-import');
 const { isOnlineSellable, onlineBlockedMessage } = require('../services/product-kind');
 
 const router = express.Router();
@@ -159,6 +159,10 @@ router.post('/', requireRole('CUSTOMER'), requirePharmacyScope, (req, res) => {
   const eligibility = onlineOrderStatus(customer);
   const blocked = orderType === 'COUNSEL' ? eligibility.reason === 'NOT_APPROVED' : !eligibility.allowed;
   if (blocked) return res.status(403).json({ message: eligibility.message, reason: eligibility.reason });
+  if (orderType !== 'COUNSEL') {
+    const gate = onlineStockGate(req.pharmacyId);
+    if (gate.paused) return res.status(409).json({ message: gate.message, reason: 'STOCK_SYNC_PAUSED' });
+  }
 
   const createOrder = transaction(() => {
     if (orderType === 'COUNSEL') {

@@ -120,7 +120,12 @@ function renderImportSetup() {
   const modes = Object.entries(IMPORT_MODES)
     .map(([key, mode]) => {
       const disabled = (key === 'SYNC' && !syncOn) || (key === 'MIGRATE' && syncOn);
-      const note = key === 'SYNC' && !syncOn ? '병행 모드를 켜야 쓸 수 있습니다.' : key === 'MIGRATE' && syncOn ? '병행 중에는 쓸 수 없습니다.' : mode.desc;
+      const note =
+        key === 'SYNC' && !syncOn
+          ? '"기존 POS와 병행" 탭에서 재고 기준을 기존 POS로 정해야 쓸 수 있습니다.'
+          : key === 'MIGRATE' && syncOn
+            ? '재고 기준이 기존 POS일 때는 쓸 수 없습니다.'
+            : mode.desc;
       return `<label class="imp-mode ${imp.mode === key ? 'active' : ''} ${disabled ? 'disabled' : ''}">
         <input type="radio" name="impMode" value="${key}" ${imp.mode === key ? 'checked' : ''} ${disabled ? 'disabled' : ''} onchange="setImportMode('${key}')" />
         <strong>${h(mode.label)}</strong><span>${h(note)}</span>
@@ -128,6 +133,7 @@ function renderImportSetup() {
     })
     .join('');
   return `
+    ${renderStockMasterLine()}
     <div class="imp-modes">${modes}</div>
     <div class="imp-drop">
       <div class="inline-actions" style="align-items: center;">
@@ -760,23 +766,60 @@ async function revertImport(id) {
 
 /* ---------- 기존 POS 병행 ---------- */
 
+const STOCK_MASTER_OPTIONS = {
+  MAYDIN: {
+    label: '메이딘 POS로 전환',
+    desc: '재고 기준은 MAYDIN입니다. 매장 판매·입고·폐기·실사를 모두 MAYDIN에서 하고, 온라인몰은 MAYDIN 재고를 그대로 씁니다.'
+  },
+  LEGACY_POS: {
+    label: '기존 POS 계속 사용 + 온라인몰만 연동',
+    desc: '재고 기준은 기존 POS입니다. 기존 POS 재고 파일로 MAYDIN 재고를 맞추고, MAYDIN에서 판 수량은 기존 POS에 입력합니다.'
+  }
+};
+
+function renderStockMasterLine() {
+  const s = imp.sync;
+  if (!s) return '';
+  const legacy = s.stock_master === 'LEGACY_POS';
+  const state = !legacy ? '' : s.online_paused ? ' · <b>온라인 주문 멈춤</b> (재고 파일이 늦었습니다)' : s.stale ? ' · 재고 파일이 늦었습니다' : '';
+  return `<div class="insight-box ${s.online_paused ? 'imp-warn' : ''}" style="margin-bottom: 12px;">재고 기준: <strong>${legacy ? '기존 POS' : 'MAYDIN'}</strong>${state}
+    <button class="muted-link" type="button" onclick="setImportTab('sync')">바꾸기</button></div>`;
+}
+
+function markStockMasterChoice(input) {
+  input.closest('.imp-modes').querySelectorAll('.imp-mode').forEach((label) => label.classList.toggle('active', label.contains(input)));
+}
+
 function renderImportSync() {
   const s = imp.sync;
   if (!s) return '';
   const outflow = imp.outflow;
   const totalOut = outflow ? outflow.items.reduce((sum, item) => sum + Math.max(0, item.quantity_out), 0) : 0;
+  const masters = Object.entries(STOCK_MASTER_OPTIONS)
+    .map(
+      ([key, option]) => `<label class="imp-mode ${s.stock_master === key ? 'active' : ''}">
+        <input type="radio" name="stock_master" value="${key}" ${s.stock_master === key ? 'checked' : ''} onchange="markStockMasterChoice(this)" />
+        <strong>${h(option.label)}</strong><span>${h(option.desc)}</span>
+      </label>`
+    )
+    .join('');
   return `
-    <div class="insight-box">
-      <strong>기존 POS를 계속 쓰면서 MAYDIN 온라인몰·POS를 함께 쓰는 방법</strong>
-      <ol class="imp-guide">
-        <li>기존 POS의 재고 파일을 정해진 주기마다 "파일로 등록 → 기존 POS와 병행"으로 올립니다. 파일을 내려받은 뒤 MAYDIN에서 판 수량은 자동으로 빼고 맞춥니다.</li>
-        <li>MAYDIN에서 판 수량(온라인 주문·픽업·MAYDIN POS)은 아래에서 내려받아 기존 POS에도 입력하고 "입력했어요"를 누릅니다.</li>
-        <li>입고·폐기·재고 실사는 기존 POS에서만 합니다. 병행 중에는 MAYDIN에서 막힙니다.</li>
-      </ol>
-    </div>
     <form class="form-grid" onsubmit="saveImportSync(event)">
       <div class="form-group full">
-        <label class="check-chip"><input type="checkbox" name="enabled" ${s.enabled ? 'checked' : ''} /> 기존 POS와 병행 모드 사용</label>
+        <span class="form-label">이 약국의 재고 기준</span>
+        <div class="imp-modes">${masters}</div>
+        <span class="list-meta">재고 기준은 한 곳만 둡니다. 두 시스템이 각자 재고를 바꾸면 같은 상품이 매장과 온라인에서 함께 팔릴 수 있습니다.</span>
+      </div>
+      <div class="form-group full">
+        <div class="insight-box">
+          <strong>기존 POS가 재고 기준일 때 중복 판매를 막는 방법</strong>
+          <ol class="imp-guide">
+            <li>기존 POS의 재고 파일을 정해진 주기마다 "파일로 등록 → 기존 POS와 병행"으로 올립니다. 파일을 내려받은 뒤 MAYDIN에서 판 수량은 자동으로 빼고 맞춥니다.</li>
+            <li>MAYDIN에서 판 수량(온라인 주문·픽업·MAYDIN POS)은 아래에서 내려받아 기존 POS에도 입력하고 "입력했어요"를 누릅니다.</li>
+            <li>입고·폐기·재고 실사는 기존 POS에서만 합니다. MAYDIN에서는 막힙니다.</li>
+            <li>온라인에는 재고에서 여유분을 뺀 만큼만 보이고, 재고 파일이 주기보다 늦으면 온라인 주문을 자동으로 멈춥니다.</li>
+          </ol>
+        </div>
       </div>
       <div class="form-group">
         <label class="form-label" for="syncBuffer">온라인 여유분 (개)</label>
@@ -786,15 +829,19 @@ function renderImportSync() {
       <div class="form-group">
         <label class="form-label" for="syncInterval">동기화 주기 (시간)</label>
         <input id="syncInterval" class="form-control" name="interval_hours" type="number" min="1" max="168" value="${s.interval_hours}" />
-        <span class="list-meta">이 시간이 지나도록 파일을 올리지 않으면 알려 드립니다.</span>
+        <span class="list-meta">이 시간이 지나도록 재고 파일을 올리지 않으면 알려 드립니다.</span>
+      </div>
+      <div class="form-group full">
+        <label class="check-chip"><input type="checkbox" name="pause_when_stale" ${s.pause_when_stale ? 'checked' : ''} /> 재고 파일이 주기보다 늦으면 온라인 주문 자동 멈춤 (권장)</label>
+        <span class="list-meta">멈춘 동안 온라인몰에는 모든 상품이 품절로 보이고, 새 재고 파일을 적용하면 바로 다시 열립니다.</span>
       </div>
       <div class="form-group full inline-actions"><button class="btn btn-primary" type="submit">저장</button></div>
     </form>
     ${s.enabled ? `
     <div class="imp-step">
       <h3>현재 상태</h3>
-      ${s.stale ? `<div class="insight-box imp-warn">${s.last_sync_at ? `마지막 동기화(${h(formatDate(s.last_sync_at))}) 뒤 ${s.interval_hours}시간이 지났습니다.` : '아직 동기화 파일을 올리지 않았습니다.'} 기존 POS 재고 파일을 올려 주세요.</div>` : ''}
-      <p class="list-meta">마지막 동기화 ${h(s.last_sync_at ? formatDate(s.last_sync_at) : '없음')} · MAYDIN 판매를 기존 POS에 입력한 시각 ${h(s.reflected_until ? formatDate(s.reflected_until) : '-')}</p>
+      ${s.stale ? `<div class="insight-box imp-warn">${s.last_sync_at ? `마지막 동기화(${h(formatDate(s.last_sync_at))}) 뒤 ${s.interval_hours}시간이 지났습니다.` : '재고 기준을 기존 POS로 바꾼 뒤 아직 재고 파일을 올리지 않았습니다.'} 기존 POS 재고 파일을 올려 주세요.${s.online_paused ? ' <b>그때까지 온라인 주문을 멈췄습니다.</b>' : ''}</div>` : ''}
+      <p class="list-meta">마지막 동기화 ${h(s.last_sync_at ? formatDate(s.last_sync_at) : '없음')}${s.next_sync_due ? ` · 다음 파일 기한 ${h(formatDate(s.next_sync_due))}` : ''} · MAYDIN 판매를 기존 POS에 입력한 시각 ${h(s.reflected_until ? formatDate(s.reflected_until) : '-')}</p>
       <div class="inline-actions" style="margin-top: 10px;">
         <button class="btn btn-primary btn-sm" type="button" onclick="imp.tab='file'; resetImport(); setImportMode('SYNC')">동기화 파일 올리기</button>
         <button class="btn btn-outline btn-sm" type="button" onclick="loadImportOutflow()">MAYDIN에서 판 수량 보기</button>
@@ -817,13 +864,24 @@ function renderImportSync() {
 async function saveImportSync(event) {
   event.preventDefault();
   const form = event.target;
-  const enabled = form.enabled.checked;
-  if (enabled && !imp.sync.enabled && !confirm('병행 모드를 켜면 MAYDIN에서 입고·폐기·재고 실사·재고 직접 수정이 막히고, 기존 POS 파일로만 재고를 맞춥니다. 켤까요?')) return;
-  if (!enabled && imp.sync.enabled && !confirm('병행 모드를 끄면 MAYDIN 재고만 기준이 됩니다. 기존 POS를 더 이상 쓰지 않을 때만 끄세요. 끌까요?')) return;
+  const stockMaster = form.stock_master.value;
+  const enabled = stockMaster === 'LEGACY_POS';
+  if (
+    enabled &&
+    !imp.sync.enabled &&
+    !confirm('재고 기준을 기존 POS로 바꾸면 MAYDIN에서 입고·폐기·재고 실사·재고 직접 수정이 막히고, 기존 POS 재고 파일로만 재고를 맞춥니다.\n첫 재고 파일을 올릴 때까지 온라인 주문은 멈춥니다. 바꿀까요?')
+  )
+    return;
+  if (!enabled && imp.sync.enabled && !confirm('재고 기준을 MAYDIN으로 바꾸면 기존 POS 파일로 더 이상 재고를 맞추지 않습니다. 기존 POS를 더 이상 쓰지 않을 때만 바꾸세요. 바꿀까요?')) return;
   try {
     imp.sync = await api.request('/product-import/sync', {
       method: 'PATCH',
-      body: { enabled, online_stock_buffer: Number(form.online_stock_buffer.value), interval_hours: Number(form.interval_hours.value) }
+      body: {
+        stock_master: stockMaster,
+        online_stock_buffer: Number(form.online_stock_buffer.value),
+        interval_hours: Number(form.interval_hours.value),
+        pause_when_stale: form.pause_when_stale.checked
+      }
     });
     imp.outflow = null;
     if (imp.sync.enabled && imp.mode === 'MIGRATE') setImportMode('SYNC');

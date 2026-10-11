@@ -181,6 +181,21 @@ let existing;
   db.prepare('UPDATE products SET online_visible = 0 WHERE id = ?').run(created.id);
 }
 
+console.log('[이미 있는 분류·거래처로 새 상품]');
+{
+  const supplierName = `기존거래처${process.pid}`;
+  db.prepare('INSERT INTO suppliers (pharmacy_id, name) VALUES (1, ?)').run(supplierName);
+  const supplierCount = () => db.prepare('SELECT COUNT(*) AS n FROM suppliers WHERE pharmacy_id = 1 AND name = ?').get(supplierName).n;
+  const codes = [barcode(), barcode()];
+  const res = await preview('ADD', codes.map((code, i) => ({ row_no: i + 2, product_name: `기존분류 신규 ${i}`, barcode: code, price: '1000', stock: '1', category: '건강기능식품', supplier: supplierName })));
+  const applied = await apply(res.data.batch_id);
+  check('기존 분류·거래처를 쓰는 새 상품도 적용', applied.status === 200 && applied.data.summary.create_count === 2, applied.data);
+  const category = db.prepare("SELECT id FROM categories WHERE pharmacy_id = 1 AND category_name = '건강기능식품'").get();
+  check('기존 분류에 연결', codes.every((code) => productBy(code)?.category_id === category.id));
+  check('거래처를 새로 만들지 않음', supplierCount() === 1, supplierCount());
+  check('되돌리기', (await revert(res.data.batch_id)).status === 200 && codes.every((code) => !productBy(code)));
+}
+
 console.log('[다시 올리기 — 코드로 찾기 · 연결 · 빼기 · 파일에 없는 상품]');
 {
   const res = await preview('MIGRATE', [
@@ -275,7 +290,17 @@ console.log('[기존 POS 병행 동기화]');
   check('병행 모드가 꺼져 있으면 동기화 불가(409)', res.status === 409, res.status);
   res = await setSync({ enabled: true, online_stock_buffer: 2, interval_hours: 24 });
   check('병행 모드 켜기', res.status === 200 && res.data.enabled && res.data.reflected_until, res.data);
+  check('재고 기준 = 기존 POS', res.data.stock_master === 'LEGACY_POS', res.data);
+  check('첫 재고 파일 전에는 온라인 주문 멈춤', res.data.stale && res.data.online_paused, res.data);
   const startedAt = res.data.reflected_until;
+  const shopper = await signupMember(db, {}, { keepOrder: true });
+  let paused = await api('/products/mall?pharmacyCode=A001', { token: shopper.data.token });
+  const pausedItem = paused.data.products.find((p) => p.id === Number(productId));
+  check('멈춘 동안 몰은 안내 + 모든 상품 품절', paused.data.online_paused && paused.data.notice && pausedItem?.stock_quantity === 0 && pausedItem.status === 'SOLD_OUT', paused.data.notice);
+  res = await api('/cart', { token: shopper.data.token, method: 'POST', body: { product_id: productId, quantity: 1 } });
+  check('멈춘 동안 장바구니 담기 막힘(409)', res.status === 409 && res.data.reason === 'STOCK_SYNC_PAUSED', res.data);
+  res = await setSync({ pause_when_stale: false });
+  check('자동 멈춤을 끄면 늦어도 계속 판매', res.status === 200 && res.data.stale && !res.data.online_paused, res.data);
 
   res = await preview('MIGRATE', [{ row_no: 2, barcode: code, stock: '1' }]);
   check('병행 중에는 이전 모드 불가(409)', res.status === 409, res.status);
@@ -316,6 +341,8 @@ console.log('[기존 POS 병행 동기화]');
   let rows = await rowsOf(res.data.batch_id);
   check('새 재고 = 파일 18 - MAYDIN 판매 3 = 15', rows[0].stock_after === 15, rows[0]);
   check('적용', (await apply(res.data.batch_id)).status === 200 && db.prepare('SELECT stock_quantity FROM products WHERE id = ?').get(productId).stock_quantity === 15);
+  res = await setSync({ pause_when_stale: true });
+  check('재고 파일을 적용하면 온라인 주문 재개', !res.data.stale && !res.data.online_paused && res.data.last_sync_at && res.data.next_sync_due, res.data);
 
   res = await api('/product-import/sync/reflected', { token: owner, method: 'POST', body: { until_log_id: 0 } });
   check('입력 표시는 뒤로 못 돌림', res.status === 400, res.data);
@@ -341,6 +368,18 @@ console.log('[기존 POS 병행 동기화]');
   const member = await signupMember(db, {}, { keepOrder: true });
   db.prepare('UPDATE products SET stock_quantity = 3 WHERE id = ?').run(productId);
   await api('/cart', { token: member.data.token, method: 'POST', body: { product_id: productId, quantity: 2 } });
+  const lastSync = db.prepare("SELECT id, applied_at FROM import_batches WHERE mode = 'SYNC' AND status = 'APPLIED' ORDER BY id DESC LIMIT 1").get();
+  db.prepare("UPDATE import_batches SET applied_at = datetime('now', '-25 hours') WHERE id = ?").run(lastSync.id);
+  check('주기(24시간)가 지나면 다시 멈춤', (await api('/product-import/sync', { token: owner })).data.online_paused === true);
+  res = await api('/orders', {
+    token: member.data.token,
+    method: 'POST',
+    body: { order_type: 'PICKUP', payment_method: 'MOCK_CARD', contact_name: '테스트', contact_phone: '01000000000', preferred_at: '2026-12-01T10:00' }
+  });
+  check('멈춘 동안 온라인 주문 막힘(409)', res.status === 409 && res.data.reason === 'STOCK_SYNC_PAUSED', res.data);
+  const cartView = await api('/cart', { token: member.data.token });
+  check('멈춘 동안 장바구니도 재고 0 + 안내', cartView.data.online_paused && cartView.data.items.every((item) => item.stock_quantity === 0), cartView.data);
+  db.prepare('UPDATE import_batches SET applied_at = ? WHERE id = ?').run(lastSync.applied_at, lastSync.id);
   res = await api('/orders', {
     token: member.data.token,
     method: 'POST',
@@ -348,8 +387,15 @@ console.log('[기존 POS 병행 동기화]');
   });
   check('여유분을 넘는 온라인 주문은 거절(재고 3, 여유분 2)', res.status === 400 && res.data.message.includes('재고'), res.data);
 
-  res = await setSync({ enabled: false });
-  check('병행 모드 끄기', res.status === 200 && res.data.enabled === false);
+  res = await setSync({ stock_master: 'MAYDIN' });
+  check('재고 기준을 MAYDIN으로 (병행 끄기)', res.status === 200 && res.data.enabled === false && res.data.stock_master === 'MAYDIN' && !res.data.online_paused, res.data);
+  res = await setSync({ stock_master: 'BOTH' });
+  check('없는 재고 기준은 거절', res.status === 400, res.data);
+  res = await setSync({ stock_master: 'LEGACY_POS' });
+  check('다시 기존 POS로 바꾸면 예전 재고 파일은 안 셈 → 멈춤', res.data.enabled && res.data.online_paused && !res.data.last_sync_at, res.data);
+  const audits = db.prepare("SELECT description FROM admin_logs WHERE action IN ('POS_SYNC_ON', 'POS_SYNC_OFF') ORDER BY id DESC LIMIT 2").all();
+  check('재고 기준 변경은 감사 기록', audits.length === 2 && audits[0].description.includes('기존 POS'), audits);
+  await setSync({ stock_master: 'MAYDIN' });
   res = await api('/pos/inventory/adjust', { token: owner, method: 'POST', body: { adjust_type: 'RECEIVE', product_id: productId, quantity: 1 } });
   check('끄면 MAYDIN 입고 다시 가능', res.status < 300 && res.data.product?.stock_quantity === 4, res.data);
   const mallOff = await api('/products/mall?pharmacyCode=A001', { token: owner });

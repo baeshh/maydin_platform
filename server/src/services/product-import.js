@@ -149,24 +149,44 @@ function toUtcTimestamp(value) {
 
 /* ---------- 약국 설정 ---------- */
 
+// 재고 기준: MAYDIN(메이딘 POS로 전환) 또는 LEGACY_POS(기존 POS를 계속 쓰고 온라인몰만 연동).
+const STOCK_MASTERS = { MAYDIN: 'MAYDIN', LEGACY_POS: 'LEGACY_POS' };
+
 function syncSettings(pharmacyId) {
   const row = getOne(
-    `SELECT pos_sync_enabled, pos_sync_reflected_until, pos_sync_reflected_log_id, online_stock_buffer, pos_sync_interval_hours
+    `SELECT pos_sync_enabled, pos_sync_reflected_until, pos_sync_reflected_log_id, online_stock_buffer, pos_sync_interval_hours,
+            pos_sync_pause_when_stale, pos_sync_started_batch_id
      FROM pharmacies WHERE id = @id`,
     { id: pharmacyId }
   );
+  const enabled = Number(row?.pos_sync_enabled || 0) === 1;
   return {
-    enabled: Number(row?.pos_sync_enabled || 0) === 1,
+    enabled,
+    stock_master: enabled ? STOCK_MASTERS.LEGACY_POS : STOCK_MASTERS.MAYDIN,
     reflected_until: row?.pos_sync_reflected_until || null,
     reflected_log_id: Number(row?.pos_sync_reflected_log_id || 0),
     online_stock_buffer: Number(row?.online_stock_buffer ?? 1),
-    interval_hours: Number(row?.pos_sync_interval_hours ?? 24)
+    interval_hours: Number(row?.pos_sync_interval_hours ?? 24),
+    pause_when_stale: Number(row?.pos_sync_pause_when_stale ?? 1) === 1,
+    started_batch_id: Number(row?.pos_sync_started_batch_id || 0)
   };
 }
 
 function onlineStockBuffer(pharmacyId) {
   const settings = syncSettings(pharmacyId);
   return settings.enabled ? settings.online_stock_buffer : 0;
+}
+
+const ONLINE_PAUSED_MESSAGE = '약국 재고를 맞추는 중이라 지금은 온라인 주문을 받을 수 없습니다. 잠시 뒤 다시 시도해 주세요.';
+
+// 기존 POS가 재고 기준인데 재고 파일이 주기 안에 안 올라왔으면 MAYDIN 재고를 믿을 수 없으므로 온라인 판매를 멈춘다.
+function onlineStockGate(pharmacyId) {
+  const status = syncStatus(pharmacyId);
+  return { buffer: status.enabled ? status.online_stock_buffer : 0, paused: status.online_paused, message: status.online_paused ? ONLINE_PAUSED_MESSAGE : null };
+}
+
+function assertOnlineOrderable(pharmacyId) {
+  if (onlineStockGate(pharmacyId).paused) throw new ImportError(ONLINE_PAUSED_MESSAGE, 409);
 }
 
 function assertNotSyncing(pharmacyId, action = '입고·폐기·실사') {
@@ -725,7 +745,10 @@ function logStock(pharmacyId, productId, before, after, changeType, reason, user
 function ensureCategory(pharmacyId, name, cache) {
   if (!name) return null;
   if (cache.has(name)) return cache.get(name);
-  const id = run('INSERT INTO categories (pharmacy_id, category_name) VALUES (@pharmacy_id, @name)', { pharmacy_id: pharmacyId, name }).lastInsertRowid;
+  const existing = getOne('SELECT id FROM categories WHERE pharmacy_id = @pharmacy_id AND category_name = @name', { pharmacy_id: pharmacyId, name });
+  const id = existing
+    ? existing.id
+    : run('INSERT INTO categories (pharmacy_id, category_name) VALUES (@pharmacy_id, @name)', { pharmacy_id: pharmacyId, name }).lastInsertRowid;
   cache.set(name, id);
   return id;
 }
@@ -733,7 +756,10 @@ function ensureCategory(pharmacyId, name, cache) {
 function ensureSupplier(pharmacyId, name, cache) {
   if (!name) return null;
   if (cache.has(name)) return cache.get(name);
-  const id = run('INSERT INTO suppliers (pharmacy_id, name) VALUES (@pharmacy_id, @name)', { pharmacy_id: pharmacyId, name }).lastInsertRowid;
+  const existing = getOne("SELECT id FROM suppliers WHERE pharmacy_id = @pharmacy_id AND name = @name AND status = 'ACTIVE'", { pharmacy_id: pharmacyId, name });
+  const id = existing
+    ? existing.id
+    : run('INSERT INTO suppliers (pharmacy_id, name) VALUES (@pharmacy_id, @name)', { pharmacy_id: pharmacyId, name }).lastInsertRowid;
   cache.set(name, id);
   return id;
 }
@@ -1053,33 +1079,76 @@ function batches(pharmacyId) {
 
 function syncStatus(pharmacyId) {
   const settings = syncSettings(pharmacyId);
-  const last = getOne(
-    "SELECT applied_at, snapshot_at FROM import_batches WHERE pharmacy_id = @pharmacy_id AND mode = 'SYNC' AND status = 'APPLIED' ORDER BY id DESC LIMIT 1",
-    { pharmacy_id: pharmacyId }
-  );
+  // 기존 POS를 재고 기준으로 바꾼 뒤 기존 POS 파일로 재고를 맞춘 마지막 시각
+  const last = settings.enabled
+    ? getOne(
+        `SELECT applied_at, snapshot_at FROM import_batches
+         WHERE pharmacy_id = @pharmacy_id AND mode = 'SYNC' AND status = 'APPLIED'
+           AND id > @started_batch_id
+         ORDER BY id DESC LIMIT 1`,
+        { pharmacy_id: pharmacyId, started_batch_id: settings.started_batch_id }
+      )
+    : null;
   const stale = settings.enabled
     ? !last || Boolean(getOne(`SELECT @at < datetime('now', '-' || @hours || ' hours') AS stale`, { at: last.applied_at, hours: settings.interval_hours }).stale)
     : false;
-  return { ...settings, last_sync_at: last?.applied_at || null, last_snapshot_at: last?.snapshot_at || null, stale };
+  const nextSyncDue = last ? getOne(`SELECT datetime(@at, '+' || @hours || ' hours') AS due`, { at: last.applied_at, hours: settings.interval_hours }).due : null;
+  return {
+    ...settings,
+    last_sync_at: last?.applied_at || null,
+    last_snapshot_at: last?.snapshot_at || null,
+    next_sync_due: nextSyncDue,
+    stale,
+    online_paused: stale && settings.pause_when_stale
+  };
+}
+
+function requestedSyncEnabled(body, current) {
+  if (body.stock_master !== undefined) {
+    if (!Object.values(STOCK_MASTERS).includes(body.stock_master)) throw new ImportError('재고 기준은 MAYDIN 또는 LEGACY_POS로 정해 주세요.');
+    return body.stock_master === STOCK_MASTERS.LEGACY_POS;
+  }
+  return body.enabled === undefined ? current.enabled : body.enabled === true;
 }
 
 function updateSync(pharmacyId, userId, body) {
   const current = syncSettings(pharmacyId);
-  const enabled = body.enabled === undefined ? current.enabled : body.enabled === true;
+  const enabled = requestedSyncEnabled(body, current);
   const buffer = body.online_stock_buffer === undefined ? current.online_stock_buffer : Number(body.online_stock_buffer);
   const hours = body.interval_hours === undefined ? current.interval_hours : Number(body.interval_hours);
+  const pause = body.pause_when_stale === undefined ? current.pause_when_stale : body.pause_when_stale === true;
   if (!Number.isInteger(buffer) || buffer < 0 || buffer > 100) throw new ImportError('온라인 여유분은 0~100개로 정해 주세요.');
   if (!Number.isInteger(hours) || hours < 1 || hours > 168) throw new ImportError('동기화 주기는 1~168시간으로 정해 주세요.');
   run(
     `UPDATE pharmacies
      SET pos_sync_enabled = @enabled, online_stock_buffer = @buffer, pos_sync_interval_hours = @hours,
+         pos_sync_pause_when_stale = @pause,
          pos_sync_reflected_until = CASE WHEN @turning_on = 1 THEN datetime('now') ELSE pos_sync_reflected_until END,
-         pos_sync_reflected_log_id = CASE WHEN @turning_on = 1 THEN @log_id ELSE pos_sync_reflected_log_id END
+         pos_sync_reflected_log_id = CASE WHEN @turning_on = 1 THEN @log_id ELSE pos_sync_reflected_log_id END,
+         pos_sync_started_batch_id = CASE WHEN @turning_on = 1 THEN @batch_id ELSE pos_sync_started_batch_id END
      WHERE id = @id`,
-    { id: pharmacyId, enabled: enabled ? 1 : 0, buffer, hours, turning_on: enabled && !current.enabled ? 1 : 0, log_id: lastLogId() }
+    {
+      id: pharmacyId,
+      enabled: enabled ? 1 : 0,
+      buffer,
+      hours,
+      pause: pause ? 1 : 0,
+      turning_on: enabled && !current.enabled ? 1 : 0,
+      log_id: lastLogId(),
+      batch_id: getOne("SELECT COALESCE(MAX(id), 0) AS id FROM import_batches").id
+    }
   );
   if (enabled !== current.enabled) {
-    audit(pharmacyId, userId, enabled ? 'POS_SYNC_ON' : 'POS_SYNC_OFF', null, enabled ? '기존 POS 병행 모드 켬' : '기존 POS 병행 모드 끔');
+    audit(
+      pharmacyId,
+      userId,
+      enabled ? 'POS_SYNC_ON' : 'POS_SYNC_OFF',
+      null,
+      enabled ? '재고 기준을 기존 POS로 바꿈 (온라인몰만 연동)' : '재고 기준을 MAYDIN으로 바꿈 (메이딘 POS 전환)'
+    );
+  }
+  if (pause !== current.pause_when_stale) {
+    audit(pharmacyId, userId, 'POS_SYNC_PAUSE_RULE', null, pause ? '동기화가 늦으면 온라인 주문 멈춤 켬' : '동기화가 늦어도 온라인 주문 계속');
   }
   return syncStatus(pharmacyId);
 }
@@ -1163,8 +1232,11 @@ module.exports = {
   normalizeBarcode,
   normalizeKind,
   normalizeDate,
+  STOCK_MASTERS,
   syncSettings,
   onlineStockBuffer,
+  onlineStockGate,
+  assertOnlineOrderable,
   assertNotSyncing,
   preview,
   apply,

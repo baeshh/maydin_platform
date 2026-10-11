@@ -196,6 +196,8 @@ function migrateProductImport() {
   addColumnIfMissing('import_batches', 'reflected_log_id', 'INTEGER');
   addColumnIfMissing('pharmacies', 'online_stock_buffer', 'INTEGER NOT NULL DEFAULT 1');
   addColumnIfMissing('pharmacies', 'pos_sync_interval_hours', 'INTEGER NOT NULL DEFAULT 24');
+  addColumnIfMissing('pharmacies', 'pos_sync_pause_when_stale', 'INTEGER NOT NULL DEFAULT 1');
+  addColumnIfMissing('pharmacies', 'pos_sync_started_batch_id', 'INTEGER NOT NULL DEFAULT 0');
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_products_pharmacy_external_code
       ON products(pharmacy_id, external_code) WHERE external_code IS NOT NULL AND external_code != '';

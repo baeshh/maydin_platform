@@ -1250,6 +1250,7 @@
             <span class="dot idle"></span><span id="terminalName">카운터</span> · <span id="vanModeLabel">카드 수동 승인</span>
           </button>
           <span class="status-chip" id="networkChip"><span class="dot"></span><span>온라인</span></span>
+          <span class="status-chip hide-md" id="stockMasterChip" style="display: none;"></span>
         </div>
         <div class="top-actions">
           <a class="btn btn-outline btn-sm" href="/owner.html">파트너센터</a>
@@ -1603,6 +1604,15 @@
           ? `VAN 자동 승인${van.van_company ? ` · ${h(van.van_company)}` : ''} <span class="demo-tag">데모</span>`
           : '카드 수동 승인';
         document.querySelector('#terminalChip .dot').className = `dot ${van.is_demo ? '' : 'idle'}`;
+        const sync = state.ctx.stock_sync || { stock_master: 'MAYDIN' };
+        const stockChip = document.getElementById('stockMasterChip');
+        stockChip.style.display = sync.stock_master === 'LEGACY_POS' ? '' : 'none';
+        stockChip.innerHTML = sync.online_paused
+          ? '<span class="dot idle"></span><span>재고 기준 기존 POS · 온라인 주문 멈춤</span>'
+          : '<span class="dot"></span><span>재고 기준 기존 POS</span>';
+        stockChip.title = sync.online_paused
+          ? '기존 POS 재고 파일이 늦어 온라인 주문을 멈췄습니다. 파트너센터에서 재고 파일을 올려 주세요.'
+          : '입고·폐기·재고 실사는 기존 POS에서 하고, 재고 파일로 MAYDIN 재고를 맞춥니다.';
         const chip = document.getElementById('sessionChip');
         chip.innerHTML = state.session
           ? `<span class="dot"></span><span>영업 중 · ${fmtTime(state.session.opened_at)} 시작</span>`

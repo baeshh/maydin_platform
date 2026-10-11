@@ -8,7 +8,7 @@ const { LotError, parseLotInput, insertLot, lotLabel } = require('../services/lo
 const { taxBreakdown } = require('../services/tax');
 const { CustomerError } = require('../services/customers');
 const { issueSignupCode, receiptSignupCode, readHealth } = require('../services/member-auth');
-const { ImportError, assertNotSyncing } = require('../services/product-import');
+const { ImportError, assertNotSyncing, syncStatus } = require('../services/product-import');
 const { ProductKindError, normalizeProductType, posSaleBlockReason, isPointEligible } = require('../services/product-kind');
 
 const router = express.Router();
@@ -76,6 +76,11 @@ function toInt(value, label, { min = 0, max = 100000000 } = {}) {
     throw new PosError(`${label}이(가) 올바르지 않습니다.`);
   }
   return number;
+}
+
+function stockSyncSummary(pharmacyId) {
+  const sync = syncStatus(pharmacyId);
+  return { stock_master: sync.stock_master, stale: sync.stale, online_paused: sync.online_paused, last_sync_at: sync.last_sync_at };
 }
 
 function isOwner(req) {
@@ -764,6 +769,7 @@ router.get(
       point_policy: pointPolicy(req.pharmacyId),
       hold_count: heldCount(req.pharmacyId),
       inventory_alerts: inventoryAlerts(req.pharmacyId),
+      stock_sync: stockSyncSummary(req.pharmacyId),
       permissions: {
         can_refund: isOwner(req),
         can_close: isOwner(req),

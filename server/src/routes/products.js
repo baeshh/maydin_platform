@@ -2,7 +2,7 @@ const express = require('express');
 const { getAll, getOne, run, transaction } = require('../db');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { requirePharmacyScope } = require('../middleware/scope');
-const { ImportError, assertNotSyncing, onlineStockBuffer } = require('../services/product-import');
+const { ImportError, assertNotSyncing, onlineStockGate } = require('../services/product-import');
 const { normalizeProductType, onlineSellableSql, resolveOnlineVisible } = require('../services/product-kind');
 
 const router = express.Router();
@@ -81,6 +81,11 @@ function publicProduct(
 
 const MALL_VISIBLE_SQL = onlineSellableSql('p');
 
+// 온라인 판매가 멈춘 동안에는 모든 상품을 품절로 보여 준다.
+function mallBuffer(gate) {
+  return gate.paused ? Infinity : gate.buffer;
+}
+
 function syncBlocked(res, error) {
   if (error instanceof ImportError) return res.status(error.status).json({ message: error.message });
   throw error;
@@ -126,8 +131,12 @@ router.get('/mall', authenticate, mallPharmacy, (req, res) => {
      ORDER BY p.id DESC`,
     { pharmacy_id: req.mallPharmacyId }
   );
-  const buffer = onlineStockBuffer(req.mallPharmacyId);
-  res.json({ products: products.map((product) => publicProduct(product, buffer)) });
+  const gate = onlineStockGate(req.mallPharmacyId);
+  res.json({
+    products: products.map((product) => publicProduct(product, mallBuffer(gate))),
+    online_paused: gate.paused,
+    notice: gate.message
+  });
 });
 
 router.get('/mall/:id', authenticate, mallPharmacy, (req, res) => {
@@ -140,7 +149,8 @@ router.get('/mall/:id', authenticate, mallPharmacy, (req, res) => {
     { id: Number(req.params.id), pharmacy_id: req.mallPharmacyId }
   );
   if (!product) return res.status(404).json({ message: '상품을 찾을 수 없습니다.' });
-  res.json({ product: publicProduct(product, onlineStockBuffer(req.mallPharmacyId)) });
+  const gate = onlineStockGate(req.mallPharmacyId);
+  res.json({ product: publicProduct(product, mallBuffer(gate)), online_paused: gate.paused, notice: gate.message });
 });
 
 router.use(authenticate, requireRole('PHARMACY_OWNER', 'ADMIN'), requirePharmacyScope);
