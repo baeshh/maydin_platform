@@ -188,7 +188,7 @@ function migrateMemberAuth(schema) {
 
 function migrateProductImport() {
   addColumnIfMissing('products', 'external_code', 'TEXT');
-  addColumnIfMissing('products', 'online_visible', 'INTEGER NOT NULL DEFAULT 1');
+  addColumnIfMissing('products', 'online_visible', 'INTEGER NOT NULL DEFAULT 0');
   addColumnIfMissing('products', 'needs_review', 'INTEGER NOT NULL DEFAULT 0');
   addColumnIfMissing('pharmacies', 'pos_sync_enabled', 'INTEGER NOT NULL DEFAULT 0');
   addColumnIfMissing('pharmacies', 'pos_sync_reflected_until', 'TEXT');
@@ -208,6 +208,19 @@ function migrateProductImport() {
     CREATE INDEX IF NOT EXISTS idx_carts_product ON carts(product_id);
     CREATE INDEX IF NOT EXISTS idx_product_images_product ON product_images(product_id);
   `);
+  migrateProductKinds();
+}
+
+// 예전 "구분 확인 필요" 표시는 "분류 전"으로 옮기고, 일반 상품이 아닌 상품은 온라인 판매를 끈다.
+function migrateProductKinds() {
+  db.exec(`
+    UPDATE products SET product_type = 'UNCLASSIFIED'
+      WHERE product_type IS NULL OR product_type NOT IN ('GENERAL', 'OTC', 'ETC', 'UNCLASSIFIED');
+    UPDATE products SET product_type = 'UNCLASSIFIED', online_visible = 0, needs_review = 0
+      WHERE needs_review = 1;
+    UPDATE products SET online_visible = 0
+      WHERE online_visible != 0 AND product_type != 'GENERAL';
+  `);
 }
 
 function migratePos(schema) {
@@ -217,7 +230,7 @@ function migratePos(schema) {
   if (needsPointLedgerRebuild()) rebuildTable(schema, 'point_ledger');
 
   addColumnIfMissing('products', 'barcode', 'TEXT');
-  addColumnIfMissing('products', 'product_type', "TEXT NOT NULL DEFAULT 'GENERAL'");
+  addColumnIfMissing('products', 'product_type', "TEXT NOT NULL DEFAULT 'UNCLASSIFIED'");
   addColumnIfMissing('products', 'safety_stock', 'INTEGER NOT NULL DEFAULT 0');
   addColumnIfMissing('products', 'cost_price', 'INTEGER');
   addColumnIfMissing('products', 'pos_sale_enabled', 'INTEGER NOT NULL DEFAULT 1');

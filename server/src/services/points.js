@@ -1,4 +1,5 @@
 const { getOne, getAll, run } = require('../db');
+const { isPointEligible } = require('./product-kind');
 
 const POINT_ENTRY_LABELS = {
   EARN: '적립',
@@ -60,10 +61,10 @@ function changePoints({ pharmacyId, customerId, orderId = null, entryType, point
   return balance;
 }
 
-// 일반의약품은 포인트 적립·사용 대상에서 제외한다.
+// 일반 상품만 포인트 적립·사용 대상이다. 일반의약품과 분류 전 상품은 뺀다.
 function pointEligibleAmount(items) {
   return items
-    .filter((item) => (item.product_type || 'GENERAL') !== 'OTC')
+    .filter((item) => isPointEligible(item.product_type))
     .reduce((sum, item) => sum + (item.total_price - (item.discount_amount || 0)), 0);
 }
 

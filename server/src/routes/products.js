@@ -1,22 +1,34 @@
 const express = require('express');
-const { getAll, getOne, run } = require('../db');
+const { getAll, getOne, run, transaction } = require('../db');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { requirePharmacyScope } = require('../middleware/scope');
 const { ImportError, assertNotSyncing, onlineStockBuffer } = require('../services/product-import');
+const { normalizeProductType, onlineSellableSql, resolveOnlineVisible } = require('../services/product-kind');
 
 const router = express.Router();
-
-const PRODUCT_TYPES = new Set(['GENERAL', 'OTC']);
 
 function normalizeBarcode(value) {
   const barcode = String(value ?? '').trim();
   return barcode || null;
 }
 
-function normalizeProductType(value) {
-  const type = String(value || 'GENERAL').toUpperCase();
-  if (!PRODUCT_TYPES.has(type)) throw new Error('상품 유형이 올바르지 않습니다.');
-  return type;
+function posSaleFlag(value, current = 1) {
+  if (value === undefined) return Number(current ?? 1) === 0 ? 0 : 1;
+  return value === false || value === 'false' || Number(value) === 0 ? 0 : 1;
+}
+
+function idList(value) {
+  const ids = [...new Set((Array.isArray(value) ? value : []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+  if (!ids.length) throw new Error('상품을 선택해 주세요.');
+  if (ids.length > 5000) throw new Error('한 번에 5,000개까지 바꿀 수 있습니다.');
+  return ids;
+}
+
+function idParams(ids, params) {
+  ids.forEach((id, index) => {
+    params[`id${index}`] = id;
+  });
+  return ids.map((_, index) => `@id${index}`).join(',');
 }
 
 function normalizeTaxType(value) {
@@ -67,7 +79,7 @@ function publicProduct(
   };
 }
 
-const MALL_VISIBLE_SQL = "p.status != 'HIDDEN' AND COALESCE(p.product_type, 'GENERAL') != 'OTC' AND COALESCE(p.online_visible, 1) = 1";
+const MALL_VISIBLE_SQL = onlineSellableSql('p');
 
 function syncBlocked(res, error) {
   if (error instanceof ImportError) return res.status(error.status).json({ message: error.message });
@@ -159,12 +171,14 @@ router.post('/', (req, res) => {
 
   let barcode;
   let productType;
+  let onlineVisible;
   let taxType;
   let brand;
   let supplyDays;
   try {
     barcode = normalizeBarcode(req.body.barcode);
     productType = normalizeProductType(req.body.product_type);
+    onlineVisible = resolveOnlineVisible(productType, req.body.online_visible, 0);
     taxType = normalizeTaxType(req.body.tax_type);
     brand = normalizeBrand(req.body.brand);
     supplyDays = normalizeSupplyDays(req.body.supply_days);
@@ -198,11 +212,11 @@ router.post('/', (req, res) => {
     `INSERT INTO products (
       pharmacy_id, category_id, product_name, description, price, discount_price,
       stock_quantity, status, thumbnail_url, barcode, product_type, tax_type, safety_stock, cost_price, pos_sale_enabled,
-      brand, supply_days
+      online_visible, brand, supply_days
     ) VALUES (
       @pharmacy_id, @category_id, @product_name, @description, @price, @discount_price,
       @stock_quantity, @status, @thumbnail_url, @barcode, @product_type, @tax_type, @safety_stock, @cost_price, @pos_sale_enabled,
-      @brand, @supply_days
+      @online_visible, @brand, @supply_days
     )`,
     {
       pharmacy_id: req.pharmacyId,
@@ -218,10 +232,11 @@ router.post('/', (req, res) => {
       thumbnail_url,
       barcode,
       product_type: productType,
+      online_visible: onlineVisible,
       tax_type: taxType,
       safety_stock: Math.max(0, optionalInt(req.body.safety_stock) || 0),
       cost_price: optionalInt(req.body.cost_price),
-      pos_sale_enabled: req.body.pos_sale_enabled === false || req.body.pos_sale_enabled === 0 ? 0 : 1
+      pos_sale_enabled: posSaleFlag(req.body.pos_sale_enabled)
     }
   );
 
@@ -238,12 +253,16 @@ router.patch('/:id', (req, res) => {
   const next = { ...product, ...req.body };
   let barcode;
   let productType;
+  let onlineVisible;
   let taxType;
   let brand;
   let supplyDays;
   try {
     barcode = normalizeBarcode(next.barcode);
-    productType = normalizeProductType(next.product_type);
+    productType = normalizeProductType(next.product_type, product.product_type);
+    // 구분이 바뀌면 온라인 판매는 약국이 다시 켜야 한다.
+    const currentOnline = productType === product.product_type ? product.online_visible : 0;
+    onlineVisible = resolveOnlineVisible(productType, req.body.online_visible, currentOnline);
     taxType = normalizeTaxType(next.tax_type);
     brand = normalizeBrand(next.brand);
     supplyDays = normalizeSupplyDays(next.supply_days);
@@ -263,14 +282,6 @@ router.patch('/:id', (req, res) => {
       return syncBlocked(res, error);
     }
   }
-  const onlineVisible = Number(next.online_visible) === 0 || next.online_visible === false ? 0 : 1;
-  const needsReview =
-    req.body.needs_review !== undefined
-      ? Number(Boolean(Number(req.body.needs_review)))
-      : onlineVisible && !Number(product.online_visible ?? 1)
-        ? 0
-        : Number(product.needs_review || 0);
-
   run(
     `UPDATE products
      SET product_name = @product_name,
@@ -289,14 +300,12 @@ router.patch('/:id', (req, res) => {
          brand = @brand,
          supply_days = @supply_days,
          online_visible = @online_visible,
-         needs_review = @needs_review,
          updated_at = CURRENT_TIMESTAMP
      WHERE id = @id AND pharmacy_id = @pharmacy_id`,
     {
       id: product.id,
       pharmacy_id: req.pharmacyId,
       online_visible: onlineVisible,
-      needs_review: needsReview,
       brand,
       supply_days: supplyDays,
       product_name: next.product_name,
@@ -311,11 +320,11 @@ router.patch('/:id', (req, res) => {
       tax_type: taxType,
       safety_stock: Math.max(0, optionalInt(next.safety_stock) || 0),
       cost_price: optionalInt(next.cost_price),
-      pos_sale_enabled: next.pos_sale_enabled === false || Number(next.pos_sale_enabled) === 0 ? 0 : 1
+      pos_sale_enabled: posSaleFlag(req.body.pos_sale_enabled, product.pos_sale_enabled)
     }
   );
 
-  if (productType === 'OTC' && product.product_type !== 'OTC') {
+  if (productType !== 'GENERAL' && product.product_type === 'GENERAL') {
     run('DELETE FROM carts WHERE product_id = @product_id', { product_id: product.id });
   }
 
@@ -340,26 +349,68 @@ router.patch('/:id', (req, res) => {
   res.json({ product: getOne('SELECT * FROM products WHERE id = @id', { id: product.id }) });
 });
 
-// 일괄 등록으로 들어온 상품을 확인한 뒤 온라인에 한꺼번에 공개하거나 내린다. 공개하면 구분 확인도 끝난 것으로 본다.
+// 온라인 판매를 한꺼번에 켜거나 끈다. 일반 상품으로 분류된 상품만 켤 수 있다.
 router.post('/bulk-visibility', (req, res) => {
-  const ids = [...new Set((Array.isArray(req.body.ids) ? req.body.ids : []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
-  if (!ids.length) return res.status(400).json({ message: '상품을 선택해 주세요.' });
-  if (ids.length > 5000) return res.status(400).json({ message: '한 번에 5,000개까지 바꿀 수 있습니다.' });
+  let ids;
+  try {
+    ids = idList(req.body.ids);
+  } catch (error) {
+    return res.status(400).json({ message: error.message });
+  }
   const visible = req.body.online_visible === true || Number(req.body.online_visible) === 1 ? 1 : 0;
-  const placeholders = ids.map((_, index) => `@id${index}`).join(',');
   const params = { pharmacy_id: req.pharmacyId, visible };
-  ids.forEach((id, index) => {
-    params[`id${index}`] = id;
-  });
+  const placeholders = idParams(ids, params);
   const result = run(
     `UPDATE products
      SET online_visible = @visible,
-         needs_review = CASE WHEN @visible = 1 THEN 0 ELSE needs_review END,
          updated_at = CURRENT_TIMESTAMP
-     WHERE pharmacy_id = @pharmacy_id AND id IN (${placeholders})`,
+     WHERE pharmacy_id = @pharmacy_id AND id IN (${placeholders})
+       AND (@visible = 0 OR product_type = 'GENERAL')`,
     params
   );
-  res.json({ updated: result.changes });
+  const skipped = visible
+    ? getOne(
+        `SELECT COUNT(*) AS count FROM products
+         WHERE pharmacy_id = @pharmacy_id AND id IN (${placeholders}) AND product_type != 'GENERAL'`,
+        params
+      ).count
+    : 0;
+  res.json({ updated: result.changes, skipped });
+});
+
+// 분류 전 상품을 한꺼번에 분류한다. 분류가 바뀐 상품은 온라인 판매를 끄고, 약국이 확인한 뒤 따로 켠다.
+router.post('/bulk-type', (req, res) => {
+  let ids;
+  let productType;
+  try {
+    ids = idList(req.body.ids);
+    productType = normalizeProductType(req.body.product_type, null);
+    if (!productType) throw new Error('바꿀 구분을 골라 주세요.');
+  } catch (error) {
+    return res.status(400).json({ message: error.message });
+  }
+  const params = { pharmacy_id: req.pharmacyId, product_type: productType };
+  const placeholders = idParams(ids, params);
+  const updated = transaction(() => {
+    const result = run(
+      `UPDATE products
+       SET product_type = @product_type,
+           online_visible = 0,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE pharmacy_id = @pharmacy_id AND id IN (${placeholders}) AND product_type != @product_type`,
+      params
+    );
+    if (productType !== 'GENERAL') {
+      run(
+        `DELETE FROM carts WHERE product_id IN (
+           SELECT id FROM products WHERE pharmacy_id = @pharmacy_id AND id IN (${placeholders})
+         )`,
+        params
+      );
+    }
+    return result.changes;
+  })();
+  res.json({ updated });
 });
 
 router.delete('/:id', (req, res) => {

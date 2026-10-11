@@ -19,7 +19,7 @@ const db = new Database(process.env.DB_PATH);
 const owner = await login('owner@apharmacy.kr', 'owner1234');
 db.prepare('UPDATE pharmacies SET point_enabled = 1, point_earn_rate = 1, point_min_use = 1000 WHERE id = 1').run();
 const productId = db
-  .prepare("INSERT INTO products (pharmacy_id, product_name, price, stock_quantity, status) VALUES (1, '가입인증 테스트 영양제', 10000, 500, 'ON_SALE')")
+  .prepare("INSERT INTO products (pharmacy_id, product_name, price, stock_quantity, status, product_type, online_visible) VALUES (1, '가입인증 테스트 영양제', 10000, 500, 'ON_SALE', 'GENERAL', 1)")
   .run().lastInsertRowid;
 let session = (await api('/pos/sessions/current', { token: owner })).data.session;
 if (!session) session = (await api('/pos/sessions/open', { token: owner, method: 'POST', body: { opening_cash: 0 } })).data.session;
@@ -387,7 +387,7 @@ console.log('[폐쇄몰 — 로그인한 회원만 접속]');
   res = await api(`/products/mall?pharmacyCode=${code}`, { token: member.data.token });
   check('다른 약국 회원은 403', res.status === 403, res.data);
   const otherProduct = db
-    .prepare("INSERT INTO products (pharmacy_id, product_name, price, stock_quantity, status) VALUES ((SELECT id FROM pharmacies WHERE pharmacy_code = ?), '다른약국 상품', 1000, 5, 'ON_SALE')")
+    .prepare("INSERT INTO products (pharmacy_id, product_name, price, stock_quantity, status, product_type, online_visible) VALUES ((SELECT id FROM pharmacies WHERE pharmacy_code = ?), '다른약국 상품', 1000, 5, 'ON_SALE', 'GENERAL', 1)")
     .run(code).lastInsertRowid;
   res = await api(`/products/mall/${otherProduct}`, { token: member.data.token });
   check('다른 약국 상품 상세 404', res.status === 404, res.data);

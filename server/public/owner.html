@@ -1600,7 +1600,7 @@
                 <input id="pointMinUse" class="form-control" name="min_use" type="number" min="0" max="100000" step="100" />
               </div>
               <p class="list-meta full" style="grid-column: 1 / -1; margin: 0;">
-                매장 POS 결제 금액 중 일반의약품을 뺀 금액에 적립되고, 1P = 1원으로 사용합니다. 일반의약품은 적립·사용 대상이 아닙니다.
+                매장 POS 결제 금액 중 일반 상품 금액에 적립되고, 1P = 1원으로 사용합니다. 일반의약품과 분류 전 상품은 적립·사용 대상이 아닙니다.
               </p>
               <div class="form-group full inline-actions">
                 <button class="btn btn-primary" type="submit">저장</button>
@@ -1815,11 +1815,22 @@
                 <input id="stockQuantity" class="form-control" name="stock_quantity" type="number" min="0" value="10" />
               </div>
               <div class="form-group">
-                <label class="form-label" for="productType">상품 유형</label>
-                <select id="productType" class="form-control" name="product_type">
-                  <option value="GENERAL">일반 상품 (온라인·현장 판매)</option>
-                  <option value="OTC">일반의약품 (현장 판매 전용)</option>
+                <label class="form-label" for="productType">상품 구분</label>
+                <select id="productType" class="form-control" name="product_type" required onchange="syncProductFormChannels()">
+                  <option value="">구분을 골라 주세요</option>
+                  <option value="GENERAL">일반 상품 (온라인·현장 판매 가능)</option>
+                  <option value="OTC">일반의약품 (현장 판매 · 약사만)</option>
+                  <option value="ETC">전문의약품 (판매 불가 · 재고 기록만)</option>
+                  <option value="UNCLASSIFIED">분류 전 (나중에 확인 · 현장 판매는 약사만)</option>
                 </select>
+              </div>
+              <div class="form-group">
+                <span class="form-label">판매 채널</span>
+                <div class="inline-actions" style="flex-wrap: wrap;">
+                  <label class="check-chip"><input id="productPosSale" type="checkbox" checked /> POS(현장) 판매</label>
+                  <label class="check-chip"><input id="productOnlineSale" type="checkbox" disabled /> 온라인몰 판매</label>
+                </div>
+                <span id="productChannelHint" class="list-meta">일반 상품으로 분류해야 온라인몰에서 팔 수 있습니다.</span>
               </div>
               <div class="form-group">
                 <label class="form-label" for="taxType">과세 구분</label>
@@ -2909,7 +2920,7 @@
               </div>`).join('')}
             <p class="list-meta" style="margin: 0 0 12px;">
               신규: 첫 구매 후 정한 기간 이내 · 이탈 위험: 평소 구매 간격의 정한 배수가 지나도록 구매 없음 · 휴면: 정한 일수 이상 구매 없음.
-              생일 달에는 POS 적립 포인트에 배수가 적용되고, 추천 보상은 추천받아 가입한 회원의 첫 구매 후 두 사람에게 지급됩니다. 일반의약품은 적립 대상이 아닙니다.
+              생일 달에는 POS 적립 포인트에 배수가 적용되고, 추천 보상은 추천받아 가입한 회원의 첫 구매 후 두 사람에게 지급됩니다. 일반의약품과 분류 전 상품은 적립 대상이 아닙니다.
             </p>
             <div class="inline-actions">
               <button class="btn btn-primary btn-sm" type="submit">저장</button>
@@ -3277,11 +3288,40 @@
 
       const PRODUCT_PAGE_SIZE = 10;
       const productState = { all: [], source: [], query: '', page: 1, filter: 'all' };
+      const PRODUCT_TYPE_LABELS = { GENERAL: '일반 상품', OTC: '일반의약품', ETC: '전문의약품', UNCLASSIFIED: '분류 전' };
+      const PRODUCT_TYPE_BADGES = {
+        OTC: '<span class="badge orange">일반의약품 · 현장 판매 전용</span>',
+        ETC: '<span class="badge red">전문의약품 · 판매 불가</span>',
+        UNCLASSIFIED: '<span class="badge orange">분류 전 · 온라인 판매 불가</span>'
+      };
       const PRODUCT_FILTERS = {
         all: { label: '전체', match: () => true },
-        offline: { label: '온라인 비공개', match: (p) => p.status !== 'HIDDEN' && p.product_type !== 'OTC' && !Number(p.online_visible ?? 1) },
-        review: { label: '구분 확인 필요', match: (p) => p.status !== 'HIDDEN' && Number(p.needs_review) === 1 }
+        unclassified: { label: '분류 전', match: (p) => p.status !== 'HIDDEN' && p.product_type === 'UNCLASSIFIED' },
+        offline: { label: '온라인 판매 꺼짐', match: (p) => p.status !== 'HIDDEN' && p.product_type === 'GENERAL' && !Number(p.online_visible) },
+        posOff: { label: 'POS 판매 중지', match: (p) => p.status !== 'HIDDEN' && p.product_type !== 'ETC' && !Number(p.pos_sale_enabled ?? 1) }
       };
+
+      function syncProductFormChannels() {
+        const type = $('#productType').value;
+        const online = $('#productOnlineSale');
+        online.disabled = type !== 'GENERAL';
+        online.checked = type === 'GENERAL';
+        $('#productPosSale').disabled = type === 'ETC';
+        $('#productChannelHint').textContent = {
+          GENERAL: '온라인몰과 POS에서 모두 팔 수 있습니다. 필요 없는 채널은 꺼 두세요.',
+          OTC: '일반의약품은 온라인에서 팔 수 없고, POS에서는 약사(관리자) 계정으로만 판매합니다.',
+          ETC: '전문의약품은 MAYDIN에서 판매하지 않습니다. 재고 기록용으로만 등록됩니다.',
+          UNCLASSIFIED: '분류 전 상품은 온라인에서 팔 수 없고, POS에서는 약사(관리자) 계정으로만 판매합니다.'
+        }[type] || '일반 상품으로 분류해야 온라인몰에서 팔 수 있습니다.';
+      }
+
+      function syncRowChannels(id) {
+        const type = $(`#type-${id}`).value;
+        const online = $(`#online-${id}`);
+        online.disabled = type !== 'GENERAL';
+        if (type !== 'GENERAL') online.checked = false;
+        $(`#pos-${id}`).disabled = type === 'ETC';
+      }
 
       function renderProducts(products) {
         productState.source = products;
@@ -3302,10 +3342,12 @@
 
       async function setProductsOnline(ids, visible) {
         if (!ids.length) return;
-        if (visible && !confirm(`${ids.length.toLocaleString()}개 상품을 온라인몰에 공개할까요? 가격·구분·설명을 확인한 뒤 공개해 주세요.`)) return;
+        if (visible && !confirm(`${ids.length.toLocaleString()}개 상품의 온라인 판매를 켤까요? 가격·구분·설명을 확인한 뒤 켜 주세요.`)) return;
         try {
-          const { updated } = await api.request('/products/bulk-visibility', { method: 'POST', body: { ids, online_visible: visible } });
-          showToast(`${updated.toLocaleString()}개 상품을 온라인에 ${visible ? '공개했습니다' : '내렸습니다'}.`);
+          const { updated, skipped } = await api.request('/products/bulk-visibility', { method: 'POST', body: { ids, online_visible: visible } });
+          showToast(
+            `${updated.toLocaleString()}개 상품의 온라인 판매를 ${visible ? '켰습니다' : '껐습니다'}.${skipped ? ` 일반 상품이 아닌 ${skipped.toLocaleString()}개는 건너뛰었습니다.` : ''}`
+          );
           loadOwner();
         } catch (error) {
           showToast(error.message);
@@ -3314,7 +3356,23 @@
 
       function publishFilteredProducts() {
         const { items } = paginate(productState, productMatches, PRODUCT_PAGE_SIZE);
-        setProductsOnline(items.filter((p) => p.product_type !== 'OTC').map((p) => p.id), true);
+        setProductsOnline(items.filter((p) => p.product_type === 'GENERAL').map((p) => p.id), true);
+      }
+
+      async function classifyFilteredProducts() {
+        const type = $('#bulkProductType').value;
+        if (!type) return showToast('바꿀 구분을 골라 주세요.');
+        const { items } = paginate(productState, productMatches, PRODUCT_PAGE_SIZE);
+        if (!items.length) return;
+        const warning = type === 'GENERAL' ? ' 일반의약품·전문의약품이 섞여 있지 않은지 꼭 확인해 주세요.' : '';
+        if (!confirm(`${items.length.toLocaleString()}개 상품을 "${PRODUCT_TYPE_LABELS[type]}"(으)로 분류할까요?${warning} 온라인 판매는 분류한 뒤 따로 켭니다.`)) return;
+        try {
+          const { updated } = await api.request('/products/bulk-type', { method: 'POST', body: { ids: items.map((p) => p.id), product_type: type } });
+          showToast(`${updated.toLocaleString()}개 상품을 ${PRODUCT_TYPE_LABELS[type]}(으)로 분류했습니다.`);
+          loadOwner();
+        } catch (error) {
+          showToast(error.message);
+        }
       }
 
       function productMatches(p, q) {
@@ -3327,10 +3385,19 @@
           .filter(([key]) => key === 'all' || counts[key] || productState.filter === key)
           .map(([key, f]) => `<button class="tab-btn ${productState.filter === key ? 'active' : ''}" type="button" onclick="showProductFilter('${key}')">${f.label} ${counts[key].toLocaleString()}</button>`)
           .join('');
-        const bulk =
-          productState.filter !== 'all' && productState.all.length
-            ? `<button class="btn btn-primary btn-sm" type="button" onclick="publishFilteredProducts()">이 목록 모두 온라인 공개</button>`
-            : '';
+        const bulkActions = {
+          offline: `<button class="btn btn-primary btn-sm" type="button" onclick="publishFilteredProducts()">이 목록 모두 온라인 판매 켜기</button>`,
+          unclassified: `<span class="inline-actions">
+              <select id="bulkProductType" class="form-control" style="width: 130px; padding: 7px 8px;">
+                <option value="">구분 선택</option>
+                <option value="GENERAL">일반 상품</option>
+                <option value="OTC">일반의약품</option>
+                <option value="ETC">전문의약품</option>
+              </select>
+              <button class="btn btn-primary btn-sm" type="button" onclick="classifyFilteredProducts()">이 목록 모두 분류</button>
+            </span>`
+        };
+        const bulk = productState.all.length ? bulkActions[productState.filter] || '' : '';
         return `<div class="tab-bar" style="align-items: center;">${chips}<span style="flex: 1;"></span>${bulk}</div>`;
       }
 
@@ -3386,9 +3453,9 @@
                       <div class="list-title">${h(product.product_name)}</div>
                       ${product.brand ? `<div class="list-meta">${h(product.brand)}</div>` : ''}
                       <span class="badge gray">${h(product.category_name || '미분류')}</span>
-                      ${product.product_type === 'OTC' ? '<span class="badge orange">일반의약품 · 현장 판매 전용</span>' : ''}
-                      ${product.product_type !== 'OTC' && !Number(product.online_visible ?? 1) ? '<span class="badge gray">온라인 비공개</span>' : ''}
-                      ${Number(product.needs_review) ? '<span class="badge orange">구분 확인 필요</span>' : ''}
+                      ${PRODUCT_TYPE_BADGES[product.product_type] || ''}
+                      ${product.product_type === 'GENERAL' && !Number(product.online_visible) ? '<span class="badge gray">온라인 판매 꺼짐</span>' : ''}
+                      ${product.product_type !== 'ETC' && !Number(product.pos_sale_enabled ?? 1) ? '<span class="badge gray">POS 판매 중지</span>' : ''}
                       <div class="list-meta">${product.barcode ? `바코드 ${h(product.barcode)}` : '바코드 미등록'}${product.external_code ? ` · 기존 코드 ${h(product.external_code)}` : ''}</div>
                     </td>
                     <td>
@@ -3407,9 +3474,10 @@
                       </div>
                       <div class="inline-actions" style="margin-top: 6px;">
                         <input id="barcode-${product.id}" class="form-control barcode-input" style="width: 150px; padding: 7px 8px;" placeholder="바코드" value="${h(product.barcode || '')}" />
-                        <select id="type-${product.id}" class="form-control" style="width: 118px; padding: 7px 8px;">
-                          <option value="GENERAL" ${product.product_type !== 'OTC' ? 'selected' : ''}>일반 상품</option>
-                          <option value="OTC" ${product.product_type === 'OTC' ? 'selected' : ''}>일반의약품</option>
+                        <select id="type-${product.id}" class="form-control" style="width: 118px; padding: 7px 8px;" onchange="syncRowChannels(${Number(product.id)})">
+                          ${Object.entries(PRODUCT_TYPE_LABELS)
+                            .map(([value, label]) => `<option value="${value}" ${product.product_type === value ? 'selected' : ''}>${label}</option>`)
+                            .join('')}
                         </select>
                       </div>
                       <div class="inline-actions" style="margin-top: 6px;">
@@ -3429,11 +3497,10 @@
                         <button class="btn btn-outline btn-sm" type="button" onclick="updateProduct(${Number(product.id)})">저장</button>
                         <button class="btn btn-danger btn-sm" type="button" onclick="hideProduct(${Number(product.id)})">숨김</button>
                       </div>
-                      ${product.product_type === 'OTC' || product.status === 'HIDDEN'
-                        ? ''
-                        : `<div class="inline-actions" style="margin-top: 6px;">
-                            <button class="muted-link" type="button" onclick="setProductsOnline([${Number(product.id)}], ${Number(product.online_visible ?? 1) ? 'false' : 'true'})">${Number(product.online_visible ?? 1) ? '온라인에서 내리기' : '온라인 공개'}</button>
-                          </div>`}
+                      <div class="inline-actions" style="margin-top: 6px; flex-wrap: wrap;">
+                        <label class="check-chip" title="현장(POS) 판매"><input id="pos-${product.id}" type="checkbox" ${Number(product.pos_sale_enabled ?? 1) ? 'checked' : ''} ${product.product_type === 'ETC' ? 'disabled' : ''} /> POS 판매</label>
+                        <label class="check-chip" title="일반 상품만 온라인에서 팔 수 있습니다"><input id="online-${product.id}" type="checkbox" ${product.product_type === 'GENERAL' && Number(product.online_visible) ? 'checked' : ''} ${product.product_type !== 'GENERAL' ? 'disabled' : ''} /> 온라인 판매</label>
+                      </div>
                     </td>
                   </tr>
                 `).join('')}
@@ -3474,6 +3541,8 @@
               status: $(`#status-${id}`).value,
               barcode: $(`#barcode-${id}`).value,
               product_type: $(`#type-${id}`).value,
+              pos_sale_enabled: $(`#pos-${id}`).checked,
+              online_visible: $(`#type-${id}`).value === 'GENERAL' && $(`#online-${id}`).checked,
               tax_type: $(`#tax-${id}`).value,
               cost_price: $(`#cost-${id}`).value,
               brand: $(`#brand-${id}`).value,
@@ -4146,7 +4215,7 @@
             return table(
               [['상품'], ['과세'], ['판매', 1], ['반품', 1], ['순매출', 1], ['비중', 1], ['원가', 1], ['추정 이익', 1], ['이익률', 1]],
               d.products.map((p) => tr([
-                [`<div class="list-title">${h(p.product_name)}</div><div class="list-meta">${h(p.category_name)}${p.product_type === 'OTC' ? ' · 일반의약품' : ''}</div>`],
+                [`<div class="list-title">${h(p.product_name)}</div><div class="list-meta">${h(p.category_name)}${p.product_type && p.product_type !== 'GENERAL' ? ` · ${PRODUCT_TYPE_LABELS[p.product_type] || p.product_type}` : ''}</div>`],
                 [p.tax_type === 'EXEMPT' ? '<span class="badge green">면세</span>' : '<span class="badge gray">과세</span>'],
                 [p.sold_quantity, 1],
                 [p.refunded_quantity || '-', 1],
@@ -4582,7 +4651,7 @@
             <tbody>
               ${po.suggestions.map((s) => `<tr>
                 <td><input type="checkbox" checked data-sug-check="${s.product_id}" /></td>
-                <td><div class="list-title">${h(s.product_name)}</div><div class="list-meta">${h(s.barcode || '')}${s.product_type === 'OTC' ? ' · 일반의약품' : ''}</div></td>
+                <td><div class="list-title">${h(s.product_name)}</div><div class="list-meta">${h(s.barcode || '')}${s.product_type && s.product_type !== 'GENERAL' ? ` · ${PRODUCT_TYPE_LABELS[s.product_type] || s.product_type}` : ''}</div></td>
                 <td>${s.stock_quantity <= 0 ? '<span class="badge red">품절</span>' : s.stock_quantity} / ${s.safety_stock || '-'}</td>
                 <td>${s.incoming ? `${s.incoming}개` : '-'}</td>
                 <td><select class="form-control" style="padding: 7px 8px; min-width: 130px;" data-sug-supplier="${s.product_id}">${supplierOptions(s.supplier_id)}</select></td>
@@ -4756,13 +4825,16 @@
           if (!body.discount_price) delete body.discount_price;
           if (!body.thumbnail_url) delete body.thumbnail_url;
           if (!body.supply_days) delete body.supply_days;
+          body.pos_sale_enabled = $('#productPosSale').checked;
+          body.online_visible = body.product_type === 'GENERAL' && $('#productOnlineSale').checked;
           await api.request('/products', { method: 'POST', body });
           event.target.reset();
           event.target.category_name.value = '건강기능식품';
           event.target.stock_quantity.value = '10';
           event.target.status.value = 'ON_SALE';
-          event.target.product_type.value = 'GENERAL';
+          event.target.product_type.value = '';
           event.target.tax_type.value = 'TAXABLE';
+          syncProductFormChannels();
           closeProductModal();
           showToast('상품이 등록되었습니다.');
           loadOwner();

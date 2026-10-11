@@ -1458,6 +1458,25 @@
         return !!state.ctx?.permissions?.[permission];
       }
 
+      const TYPE_BADGES = {
+        OTC: '<span class="badge orange">일반의약품</span>',
+        ETC: '<span class="badge red">전문의약품</span>',
+        UNCLASSIFIED: '<span class="badge orange">분류 전</span>'
+      };
+
+      function typeBadge(product) {
+        return TYPE_BADGES[product.product_type] || '';
+      }
+
+      // 서버와 같은 기준으로 현장 판매를 막는다.
+      function posBlockMessage(product) {
+        if (product.product_type === 'ETC') return '전문의약품은 POS에서 판매할 수 없습니다. 처방 조제 프로그램에서 처리해 주세요.';
+        if (can('can_sell_otc')) return '';
+        if (product.product_type === 'OTC') return '일반의약품은 약사(관리자) 계정으로만 판매할 수 있습니다.';
+        if (product.product_type === 'UNCLASSIFIED') return '분류 전 상품은 약사(관리자) 계정으로만 판매할 수 있습니다. 파트너센터에서 구분을 정해 주세요.';
+        return '';
+      }
+
       let toastTimer;
       function toast(text, type = '') {
         const el = document.getElementById('toast');
@@ -1723,12 +1742,12 @@
         grid.innerHTML = state.products
           .map((p) => {
             const soldOut = p.status !== 'ON_SALE' || p.stock_quantity <= 0;
-            const blockedOtc = p.product_type === 'OTC' && !can('can_sell_otc');
+            const blockedOtc = Boolean(posBlockMessage(p));
             const low = !soldOut && p.stock_quantity <= Math.max(p.safety_stock || 0, 3);
             return `
               <button class="tile ${soldOut || blockedOtc ? 'disabled' : ''}" type="button" onclick="addToCart(${Number(p.id)})">
                 <div class="chips">
-                  ${p.product_type === 'OTC' ? '<span class="badge orange">일반의약품</span>' : ''}
+                  ${typeBadge(p)}
                   ${soldOut ? '<span class="badge red">품절</span>' : ''}
                 </div>
                 <div class="tile-name">${h(p.product_name)}</div>
@@ -1850,8 +1869,8 @@
                 <div class="field"><label class="label" for="newPrice">판매가 (필수)</label><input id="newPrice" class="input" type="number" min="0" step="10" /></div>
                 <div class="field"><label class="label" for="newStock">현재 재고</label><input id="newStock" class="input" type="number" min="0" value="1" /></div>
                 <div class="field"><label class="label" for="newSafety">안전재고</label><input id="newSafety" class="input" type="number" min="0" value="0" /></div>
-                <div class="field"><label class="label" for="newType">상품 유형</label>
-                  <select id="newType" class="input"><option value="GENERAL">일반 상품</option><option value="OTC">일반의약품 (현장 판매 전용)</option></select></div>
+                <div class="field"><label class="label" for="newType">상품 구분</label>
+                  <select id="newType" class="input"><option value="UNCLASSIFIED">분류 전 (나중에 확인)</option><option value="GENERAL">일반 상품</option><option value="OTC">일반의약품 (현장 판매 전용)</option></select></div>
                 <div class="field" style="grid-column: 1 / -1;"><label class="label" for="newCategory">카테고리</label>
                   <select id="newCategory" class="input"><option value="">선택 안 함</option>${categories.map((c) => `<option value="${c.id}">${h(c.category_name)}</option>`).join('')}</select></div>
               </div>
@@ -1912,7 +1931,7 @@
                   (p) => `
                   <button class="list-item" type="button" onclick="${linking ? `linkBarcode(${p.id})` : `sellWithoutBarcode(${p.id})`}">
                     <div>
-                      <div style="font-weight: 800;">${h(p.product_name)} ${p.product_type === 'OTC' ? '<span class="badge orange">일반의약품</span>' : ''}</div>
+                      <div style="font-weight: 800;">${h(p.product_name)} ${typeBadge(p)}</div>
                       <div class="muted" style="font-size: 13px; font-weight: 600;">${p.barcode ? `현재 바코드 ${h(p.barcode)}` : '바코드 없음'} · 재고 ${p.stock_quantity}</div>
                     </div>
                     <div style="text-align: right;"><strong>${won(p.sale_price)}</strong><div class="muted" style="font-size: 12px; font-weight: 700;">${linking ? '이 상품에 연결' : '담기'}</div></div>
@@ -1986,9 +2005,8 @@
         if (!requireSession()) return;
         const product = findProduct(productId);
         if (!product) return;
-        if (product.product_type === 'OTC' && !can('can_sell_otc')) {
-          return toast('일반의약품은 약사(관리자) 계정으로만 판매할 수 있습니다.', 'error');
-        }
+        const blocked = posBlockMessage(product);
+        if (blocked) return toast(blocked, 'error');
         if (product.status !== 'ON_SALE' || product.stock_quantity <= 0) {
           return toast(`${product.product_name}은(는) 품절 상품입니다.`, 'error');
         }
@@ -2061,11 +2079,11 @@
         return !!state.ctx?.point_policy?.enabled;
       }
 
-      // 서버와 같은 기준: 일반의약품을 뺀 금액(할인 비례 차감)까지만 포인트로 결제할 수 있다.
+      // 서버와 같은 기준: 일반 상품 금액(할인 비례 차감)까지만 포인트로 결제할 수 있다.
       function pointEligibleAmount() {
         const t = totals();
         const general = state.cart
-          .filter((line) => line.product.product_type !== 'OTC')
+          .filter((line) => (line.product.product_type || 'GENERAL') === 'GENERAL')
           .reduce((sum, line) => sum + line.product.sale_price * line.quantity, 0);
         if (t.subtotal === 0) return 0;
         return Math.max(0, general - Math.ceil((t.discount * general) / t.subtotal));
@@ -2087,7 +2105,7 @@
               ({ product, quantity }) => `
               <div class="line">
                 <div>
-                  <div class="line-name">${h(product.product_name)} ${product.product_type === 'OTC' ? '<span class="badge orange">일반의약품</span>' : ''}</div>
+                  <div class="line-name">${h(product.product_name)} ${typeBadge(product)}</div>
                   <div class="line-unit">${won(product.sale_price)} · 재고 ${product.stock_quantity}</div>
                 </div>
                 <div class="line-total">${won(product.sale_price * quantity)}</div>
@@ -2302,7 +2320,7 @@
               <div class="pay-total">
                 <span class="muted" style="font-weight: 700;">보유 포인트</span>
                 <div class="amount">${Number(data.customer.point_balance).toLocaleString()}P</div>
-                <div class="muted" style="font-size: 13px; font-weight: 600;">기본 적립 ${policy.earn_rate}% (등급·생일 달 추가) · ${Number(policy.min_use).toLocaleString()}P 이상부터 1P = 1원으로 사용 · 일반의약품은 적립·사용 제외</div>
+                <div class="muted" style="font-size: 13px; font-weight: 600;">기본 적립 ${policy.earn_rate}% (등급·생일 달 추가) · ${Number(policy.min_use).toLocaleString()}P 이상부터 1P = 1원으로 사용 · 일반의약품·분류 전 상품은 적립·사용 제외</div>
               </div>
               <table class="table">
                 <thead><tr><th>일시</th><th>구분</th><th class="num">포인트</th><th class="num">잔액</th></tr></thead>
@@ -2407,7 +2425,7 @@
           return toast(`보유 포인트가 ${Number(policy.min_use).toLocaleString()}P 미만이라 사용할 수 없습니다.`, 'error');
         }
         const usable = Math.min(state.customer.point_balance, pointEligibleAmount(), payTarget());
-        if (usable < policy.min_use) return toast('포인트로 결제할 수 있는 금액이 부족합니다. (일반의약품 제외)', 'error');
+        if (usable < policy.min_use) return toast('포인트로 결제할 수 있는 금액이 부족합니다. (일반의약품·분류 전 상품 제외)', 'error');
 
         let excess = paidSum() + usable - payTarget();
         for (const row of state.payRows) {
@@ -2430,7 +2448,7 @@
 
       function pointRowHtml(row, index) {
         const policy = state.ctx.point_policy;
-        return `<div class="notice">보유 <b>${Number(state.customer?.point_balance || 0).toLocaleString()}P</b> · 이번 결제 최대 <b>${maxUsablePoints().toLocaleString()}P</b> · ${Number(policy.min_use).toLocaleString()}P 이상부터 사용 · 일반의약품 금액은 포인트 결제 불가 <button class="discount-link" type="button" onclick="useMaxPoints(${index})">최대 사용</button></div><div class="notice" id="point-warn-${index}" style="display: none;"></div>`;
+        return `<div class="notice">보유 <b>${Number(state.customer?.point_balance || 0).toLocaleString()}P</b> · 이번 결제 최대 <b>${maxUsablePoints().toLocaleString()}P</b> · ${Number(policy.min_use).toLocaleString()}P 이상부터 사용 · 일반의약품·분류 전 상품 금액은 포인트 결제 불가 <button class="discount-link" type="button" onclick="useMaxPoints(${index})">최대 사용</button></div><div class="notice" id="point-warn-${index}" style="display: none;"></div>`;
       }
 
       function addPayRow(method, fillRemaining = true) {
@@ -2720,7 +2738,7 @@
             amount > (state.customer?.point_balance || 0)
               ? '보유 포인트보다 많이 사용할 수 없습니다.'
               : amount > pointEligibleAmount()
-                ? '일반의약품을 뺀 금액까지만 포인트로 결제할 수 있습니다.'
+                ? '일반 상품 금액까지만 포인트로 결제할 수 있습니다.'
                 : amount < policy.min_use
                   ? `${Number(policy.min_use).toLocaleString()}P 이상부터 사용할 수 있습니다.`
                   : '';
@@ -3657,7 +3675,7 @@
                   .map(
                     (p) => `
                     <tr class="clickable" onclick="selectInventoryProduct(${p.id})" style="${state.inventory.selectedId === p.id ? 'background: var(--blue-soft);' : ''}">
-                      <td><div style="font-weight: 700;">${h(p.product_name)} ${p.product_type === 'OTC' ? '<span class="badge orange">일반의약품</span>' : ''}</div><div class="muted" style="font-size: 12px;">${p.barcode ? h(p.barcode) : '바코드 없음'}${p.nearest_expiry ? ` · ${expiryBadge(p.nearest_expiry, data.alerts.expiry_alert_days)}` : ''}</div></td>
+                      <td><div style="font-weight: 700;">${h(p.product_name)} ${typeBadge(p)}</div><div class="muted" style="font-size: 12px;">${p.barcode ? h(p.barcode) : '바코드 없음'}${p.nearest_expiry ? ` · ${expiryBadge(p.nearest_expiry, data.alerts.expiry_alert_days)}` : ''}</div></td>
                       <td class="num" style="font-weight: 900; ${p.is_low ? 'color: var(--danger);' : ''}">${p.stock_quantity}</td>
                       <td class="num">${p.safety_stock || '-'}</td>
                       <td>${p.stock_quantity <= 0 ? '<span class="badge red">품절</span>' : p.has_expired ? '<span class="badge red">기한 경과</span>' : p.is_low ? '<span class="badge orange">부족</span>' : '<span class="badge green">정상</span>'}</td>
@@ -4115,7 +4133,7 @@
                   <div>
                     <div class="section-title">POS 상품 판매 순위</div>
                     <table><thead><tr><th>상품</th><th class="num">수량</th><th class="num">순매출</th></tr></thead>
-                    <tbody>${data.products.map((p) => `<tr><td>${h(p.product_name)} ${p.product_type === 'OTC' ? '<span class="badge orange">일반의약품</span>' : ''}</td><td class="num">${p.net_quantity}</td><td class="num" style="font-weight: 800;">${signedWon(p.net_amount)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">판매 없음</td></tr>'}</tbody></table>
+                    <tbody>${data.products.map((p) => `<tr><td>${h(p.product_name)} ${typeBadge(p)}</td><td class="num">${p.net_quantity}</td><td class="num" style="font-weight: 800;">${signedWon(p.net_amount)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">판매 없음</td></tr>'}</tbody></table>
                     <div class="section-title">영업 · 마감 기록</div>
                     <table><thead><tr><th>영업일</th><th>상태</th><th class="num">예상</th><th class="num">실제</th><th class="num">차액</th></tr></thead>
                     <tbody>${data.sessions.map((s) => `<tr><td>${h(s.business_date)}<div class="muted" style="font-size: 12px;">${fmtTime(s.opened_at)}~${s.closed_at ? fmtTime(s.closed_at) : ''} · ${h(s.opened_by_name || '')}</div></td><td>${s.status === 'OPEN' ? '<span class="badge green">영업 중</span>' : '<span class="badge gray">마감</span>'}</td><td class="num">${s.expected_cash == null ? '-' : won(s.expected_cash)}</td><td class="num">${s.actual_cash == null ? '-' : won(s.actual_cash)}</td><td class="num" style="${s.cash_difference ? 'color: var(--danger); font-weight: 800;' : ''}">${s.cash_difference == null ? '-' : signedWon(s.cash_difference)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">기록 없음</td></tr>'}</tbody></table>

@@ -100,9 +100,11 @@ function seedProducts(pharmacyId) {
   for (const [product_name, description, price, discount_price, stock_quantity] of items) {
     run(
       `INSERT INTO products (
-        pharmacy_id, category_id, product_name, description, price, discount_price, stock_quantity, thumbnail_url
+        pharmacy_id, category_id, product_name, description, price, discount_price, stock_quantity, thumbnail_url,
+        product_type, online_visible
       ) VALUES (
-        @pharmacy_id, @category_id, @product_name, @description, @price, @discount_price, @stock_quantity, @thumbnail_url
+        @pharmacy_id, @category_id, @product_name, @description, @price, @discount_price, @stock_quantity, @thumbnail_url,
+        'GENERAL', 1
       )`,
       {
         pharmacy_id: pharmacyId,

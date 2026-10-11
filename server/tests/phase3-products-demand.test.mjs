@@ -14,7 +14,7 @@ async function signup(name) {
 }
 
 async function product(body) {
-  const res = await api('/products', { token: owner, method: 'POST', body: { price: 10000, stock_quantity: 10, category_name: '건강기능식품', ...body } });
+  const res = await api('/products', { token: owner, method: 'POST', body: { price: 10000, stock_quantity: 10, category_name: '건강기능식품', product_type: 'GENERAL', online_visible: (body.product_type || 'GENERAL') === 'GENERAL', ...body } });
   if (res.status !== 201) throw new Error(JSON.stringify(res.data));
   return res.data.product;
 }

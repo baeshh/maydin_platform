@@ -62,7 +62,7 @@ function importBadge(action) {
 function importValue(field, value) {
   if (value === null || value === undefined || value === '') return '없음';
   if (['price', 'discount_price', 'cost_price'].includes(field)) return money(value);
-  if (field === 'product_type') return { GENERAL: '일반 상품', OTC: '일반의약품' }[value] || value;
+  if (field === 'product_type') return PRODUCT_TYPE_LABELS[value] || value;
   if (field === 'tax_type') return { TAXABLE: '과세', EXEMPT: '면세' }[value] || value;
   if (['pos_sale_enabled', 'online_visible', 'needs_review'].includes(field)) return Number(value) ? '예' : '아니오';
   return String(value);
@@ -400,7 +400,7 @@ function renderImportOptions() {
       <div class="form-group full">
         <span class="form-label">이미 있는 상품에서 바꿀 항목</span>
         <div class="inline-actions" style="flex-wrap: wrap;">${fields}</div>
-        <span class="list-meta">새 상품은 파일의 모든 값으로 만들고, 온라인에는 공개하지 않은 상태로 등록합니다.</span>
+        <span class="list-meta">새 상품은 파일의 모든 값으로 만들고, 온라인 판매는 꺼 둔 채 등록합니다. 구분을 알 수 없는 상품은 "분류 전"으로 들어갑니다.</span>
       </div>
       ${missing}
       <div class="form-group">
@@ -560,10 +560,10 @@ function renderImportChanges(row) {
       `재고 ${Number(c.stock_quantity || 0).toLocaleString()}`,
       `판매가 ${money(c.price)}`,
       c.cost_price !== null && c.cost_price !== undefined ? `매입가 ${money(c.cost_price)}` : '',
-      c.product_type === 'OTC' ? '일반의약품' : '',
+      PRODUCT_TYPE_LABELS[c.product_type] || '',
       c.tax_type === 'EXEMPT' ? '면세' : '',
       c._category_name ? `분류 ${c._category_name}` : '',
-      '온라인 비공개'
+      '온라인 판매 꺼짐'
     ].filter(Boolean);
     return `<div class="list-meta">${h(parts.join(' · '))}</div>`;
   }
@@ -689,9 +689,10 @@ function renderImportResult() {
       <h3>적용했습니다</h3>
       <p>신규 ${summary.create_count.toLocaleString()}개 · 수정 ${summary.update_count.toLocaleString()}개 · 변화 없음 ${summary.unchanged_count.toLocaleString()}개 · 건너뜀·오류 ${(summary.skip_count + summary.error_count).toLocaleString()}개</p>
       ${recalculated ? `<p class="list-meta">미리보기 뒤 재고가 바뀐 ${recalculated}개 상품은 적용 시점 기준으로 다시 계산했습니다.</p>` : ''}
-      ${summary.create_count ? '<p class="list-meta">새 상품은 온라인에 공개하지 않은 상태입니다. 상품 정보를 확인한 뒤 공개해 주세요.</p>' : ''}
+      ${summary.create_count ? '<p class="list-meta">새 상품은 온라인 판매가 꺼져 있습니다. 분류 전 상품은 먼저 분류하고, 일반 상품은 확인한 뒤 온라인 판매를 켜 주세요.</p>' : ''}
       <div class="inline-actions" style="margin-top: 10px;">
-        ${summary.create_count ? `<button class="btn btn-primary btn-sm" type="button" onclick="showProductFilter('offline')">온라인 비공개 상품 보기</button>` : ''}
+        ${summary.create_count ? `<button class="btn btn-primary btn-sm" type="button" onclick="showProductFilter('unclassified')">분류 전 상품 보기</button>` : ''}
+        ${summary.create_count ? `<button class="btn btn-outline btn-sm" type="button" onclick="showProductFilter('offline')">온라인 판매 꺼진 상품 보기</button>` : ''}
         <button class="btn btn-outline btn-sm" type="button" onclick="revertImport(${imp.result.batch_id})">되돌리기</button>
         <button class="btn btn-outline btn-sm" type="button" onclick="resetImport()">새 파일 올리기</button>
       </div>

@@ -4,6 +4,7 @@ const { authenticate, requireRole } = require('../middleware/auth');
 const { requirePharmacyScope } = require('../middleware/scope');
 const { onlineOrderStatus } = require('../services/member-auth');
 const { onlineStockBuffer } = require('../services/product-import');
+const { isOnlineSellable, onlineBlockedMessage } = require('../services/product-kind');
 
 const router = express.Router();
 
@@ -29,10 +30,8 @@ function assertCartReady(cartItems, buffer = 0) {
 
   let total = 0;
   for (const item of cartItems) {
-    if (item.product_type === 'OTC') {
-      throw new Error(`${item.product_name} 상품은 일반의약품으로 온라인 결제가 불가합니다. 약국 방문 시 구매해 주세요.`);
-    }
-    if (item.status !== 'ON_SALE' || !Number(item.online_visible ?? 1)) throw new Error(`${item.product_name} 상품은 판매중이 아닙니다.`);
+    if (item.product_type !== 'GENERAL') throw new Error(onlineBlockedMessage(item));
+    if (item.status !== 'ON_SALE' || !isOnlineSellable(item)) throw new Error(`${item.product_name} 상품은 판매중이 아닙니다.`);
     if (item.stock_quantity - buffer < item.quantity) throw new Error(`${item.product_name} 재고가 부족합니다.`);
     total += Number(item.discount_price || item.price) * item.quantity;
   }

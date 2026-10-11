@@ -123,7 +123,7 @@ console.log('[행 검증]');
   check('음수 재고는 0으로 넣고 경고', byRow[6].action === 'CREATE' && byRow[6].stock_after === 0 && byRow[6].messages.some((m) => m.level === 'warning'), byRow[6]);
   check('소수 재고는 오류', byRow[7].action === 'ERROR', byRow[7]);
   check('새 상품인데 판매가 없으면 오류', byRow[8].action === 'ERROR', byRow[8]);
-  check('구분을 모르면 신규 + 구분 확인 필요', byRow[9].action === 'CREATE' && byRow[9].created.needs_review === 1 && byRow[9].created.product_type === 'GENERAL', byRow[9].created);
+  check('구분을 모르면 신규 + 분류 전', byRow[9].action === 'CREATE' && byRow[9].created.product_type === 'UNCLASSIFIED' && byRow[9].created.online_visible === 0, byRow[9].created);
   check('체크 숫자 틀린 바코드는 경고만', byRow[10].action === 'CREATE' && byRow[10].messages.some((m) => m.level === 'warning'), byRow[10]);
   check('요약 개수', res.data.summary.error_count === 5 && res.data.summary.skip_count === 1 && res.data.summary.create_count === 3, res.data.summary);
   const addRes = await preview('ADD', [{ row_no: 2, product_name: '더하기 음수', barcode: barcode(), price: '1000', stock: '-1' }]);
@@ -139,7 +139,7 @@ const codeB = barcode();
 let existing;
 {
   existing = db
-    .prepare("INSERT INTO products (pharmacy_id, product_name, price, stock_quantity, status, barcode, cost_price) VALUES (1, '기존 영양제', 20000, 5, 'ON_SALE', ?, 10000)")
+    .prepare("INSERT INTO products (pharmacy_id, product_name, price, stock_quantity, status, barcode, cost_price, product_type, online_visible) VALUES (1, '기존 영양제', 20000, 5, 'ON_SALE', ?, 10000, 'GENERAL', 1)")
     .run(codeB).lastInsertRowid;
   const res = await preview('MIGRATE', [
     { row_no: 2, product_name: '이전 신규 비타민', barcode: codeA, external_code: `EX-${process.pid}-1`, price: '12,000원', cost_price: '6000', stock: '30', category: `이전분류${process.pid}`, product_kind: '건강기능식품', expiry_date: '2027.06.30', lot_number: 'L-1' },
@@ -268,7 +268,7 @@ console.log('[기존 POS 병행 동기화]');
 {
   const code = barcode();
   const productId = db
-    .prepare("INSERT INTO products (pharmacy_id, product_name, price, stock_quantity, status, barcode) VALUES (1, '병행 테스트 상품', 5000, 20, 'ON_SALE', ?)")
+    .prepare("INSERT INTO products (pharmacy_id, product_name, price, stock_quantity, status, barcode, product_type, online_visible) VALUES (1, '병행 테스트 상품', 5000, 20, 'ON_SALE', ?, 'GENERAL', 1)")
     .run(code).lastInsertRowid;
 
   let res = await preview('SYNC', [{ row_no: 2, barcode: code, stock: '20' }]);

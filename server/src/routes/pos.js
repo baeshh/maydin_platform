@@ -9,6 +9,7 @@ const { taxBreakdown } = require('../services/tax');
 const { CustomerError } = require('../services/customers');
 const { issueSignupCode, receiptSignupCode, readHealth } = require('../services/member-auth');
 const { ImportError, assertNotSyncing } = require('../services/product-import');
+const { ProductKindError, normalizeProductType, posSaleBlockReason, isPointEligible } = require('../services/product-kind');
 
 const router = express.Router();
 
@@ -626,7 +627,7 @@ function reverseEarnedPoints(req, original, refundOrderId, lines, { full }) {
     });
     const eligibleTotal = pointEligibleAmount(items);
     const eligibleRefund = lines
-      .filter((line) => (line.item.product_type || 'GENERAL') !== 'OTC')
+      .filter((line) => isPointEligible(line.item.product_type))
       .reduce((sum, line) => sum + line.amount, 0);
     target = eligibleTotal > 0 ? Math.min(remaining, Math.floor((earned * eligibleRefund) / eligibleTotal)) : 0;
   }
@@ -1034,10 +1035,8 @@ router.post(
           pharmacy_id: req.pharmacyId
         });
         if (!product || product.status === 'HIDDEN') throw new PosError('판매할 수 없는 상품이 포함되어 있습니다.');
-        if (Number(product.pos_sale_enabled ?? 1) === 0) throw new PosError(`${product.product_name}은(는) POS 판매가 중지된 상품입니다.`);
-        if (product.product_type === 'OTC' && !isOwner(req)) {
-          throw new PosError(`${product.product_name}은(는) 일반의약품이라 약사(관리자) 계정으로만 판매할 수 있습니다.`, 403);
-        }
+        const blocked = posSaleBlockReason(product, { isPharmacist: isOwner(req) });
+        if (blocked) throw new PosError(blocked.message, blocked.status);
         if (product.status !== 'ON_SALE' || product.stock_quantity <= 0) {
           throw new PosError(`${product.product_name}은(는) 품절 상품입니다.`);
         }
@@ -1160,7 +1159,7 @@ router.post(
         if (!policy.enabled) throw new PosError('이 약국은 포인트 사용을 중지했습니다.');
         if (pointsUsed < policy.min_use) throw new PosError(`포인트는 ${policy.min_use.toLocaleString('ko-KR')}P 이상부터 사용할 수 있습니다.`);
         if (pointsUsed > eligible) {
-          throw new PosError(`일반의약품 금액은 포인트로 결제할 수 없습니다. (포인트 사용 가능 ${won(eligible)})`);
+          throw new PosError(`일반의약품·분류 전 상품 금액은 포인트로 결제할 수 없습니다. (포인트 사용 가능 ${won(eligible)})`);
         }
       }
 
@@ -1780,8 +1779,13 @@ router.post(
     const stock = toInt(req.body.stock_quantity ?? 0, '재고', { min: 0, max: 100000 });
     const safetyStock = toInt(req.body.safety_stock ?? 0, '안전재고', { min: 0, max: 100000 });
     if (stock > 0) assertNotSyncing(req.pharmacyId, '초기 재고 입력');
-    const productType = String(req.body.product_type || 'GENERAL').toUpperCase();
-    if (!['GENERAL', 'OTC'].includes(productType)) throw new PosError('상품 유형이 올바르지 않습니다.');
+    let productType;
+    try {
+      productType = normalizeProductType(req.body.product_type);
+    } catch (error) {
+      if (error instanceof ProductKindError) throw new PosError(error.message);
+      throw error;
+    }
     const taxType = String(req.body.tax_type || 'TAXABLE').toUpperCase();
     if (!['TAXABLE', 'EXEMPT'].includes(taxType)) throw new PosError('과세 구분이 올바르지 않습니다.');
     const barcode = normalizeBarcode(req.body.barcode);
@@ -1800,9 +1804,10 @@ router.post(
       }
       const result = run(
         `INSERT INTO products (
-          pharmacy_id, category_id, product_name, price, stock_quantity, status, barcode, product_type, tax_type, safety_stock, pos_sale_enabled
+          pharmacy_id, category_id, product_name, price, stock_quantity, status, barcode, product_type, tax_type, safety_stock,
+          pos_sale_enabled, online_visible
         ) VALUES (
-          @pharmacy_id, @category_id, @product_name, @price, @stock, @status, @barcode, @product_type, @tax_type, @safety_stock, 1
+          @pharmacy_id, @category_id, @product_name, @price, @stock, @status, @barcode, @product_type, @tax_type, @safety_stock, 1, 0
         )`,
         {
           pharmacy_id: req.pharmacyId,

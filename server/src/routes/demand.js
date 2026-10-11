@@ -1,6 +1,7 @@
 const express = require('express');
 const { getAll, getOne, run } = require('../db');
 const { authenticate, requireRole } = require('../middleware/auth');
+const { isOnlineSellable } = require('../services/product-kind');
 
 const router = express.Router();
 
@@ -94,7 +95,7 @@ customerRouter.post('/restock-alerts', (req, res) => {
     "SELECT * FROM products WHERE id = @id AND pharmacy_id = @pharmacy_id AND status != 'HIDDEN'",
     { id: Number(req.body.product_id), pharmacy_id: req.customer.pharmacy_id }
   );
-  if (!product || product.product_type === 'OTC' || !Number(product.online_visible ?? 1)) {
+  if (!isOnlineSellable(product)) {
     return res.status(404).json({ message: '상품을 찾을 수 없습니다.' });
   }
   if (isAvailable(product)) return res.status(400).json({ message: '지금 구매할 수 있는 상품입니다.' });

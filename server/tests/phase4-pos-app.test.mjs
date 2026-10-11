@@ -12,7 +12,7 @@ const otherMonth = (thisMonth % 12) + 1;
 db.prepare('UPDATE pharmacies SET point_enabled = 1, point_earn_rate = 1, point_min_use = 1000 WHERE id = 1').run();
 db.prepare('DELETE FROM member_policies WHERE pharmacy_id = 1').run();
 const productId = db
-  .prepare("INSERT INTO products (pharmacy_id, product_name, price, stock_quantity, status) VALUES (1, '4단계 테스트 영양제', 10000, 500, 'ON_SALE')")
+  .prepare("INSERT INTO products (pharmacy_id, product_name, price, stock_quantity, status, product_type, online_visible) VALUES (1, '4단계 테스트 영양제', 10000, 500, 'ON_SALE', 'GENERAL', 1)")
   .run().lastInsertRowid;
 
 let session = (await api('/pos/sessions/current', { token: owner })).data.session;

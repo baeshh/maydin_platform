@@ -3,6 +3,7 @@ const { getAll, getOne } = require('../db');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { TAX_TYPE_LABELS, splitVat } = require('../services/tax');
 const { csvCell } = require('../services/csv');
+const { PRODUCT_TYPE_LABELS } = require('../services/product-kind');
 
 const router = express.Router();
 
@@ -583,7 +584,7 @@ const CSV_TABLES = {
         p.product_name,
         p.barcode,
         p.category_name,
-        p.product_type === 'OTC' ? '일반의약품' : '일반',
+        PRODUCT_TYPE_LABELS[p.product_type] || PRODUCT_TYPE_LABELS.GENERAL,
         TAX_TYPE_LABELS[p.tax_type] || p.tax_type,
         p.sold_quantity,
         p.refunded_quantity,

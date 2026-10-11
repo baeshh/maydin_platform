@@ -50,7 +50,7 @@ const FIELD_LABELS = {
   barcode: '바코드',
   external_code: '기존 POS 상품코드',
   pos_sale_enabled: 'POS 판매',
-  online_visible: '온라인 공개',
+  online_visible: '온라인 판매',
   needs_review: '구분 확인 필요'
 };
 
@@ -486,12 +486,9 @@ function evaluateUpdate(ctx, mode, options, values, product, result, net, newCat
     if (values.kind === 'UNKNOWN') result.warnings.push('구분 값을 알 수 없어 기존 구분을 그대로 둡니다.');
     else if (values.kind !== product.product_type) {
       set('product_type', values.kind);
-      if (values.kind === 'OTC') result.warnings.push('일반의약품으로 바뀝니다. 온라인 몰과 장바구니에서 빠집니다.');
-      else {
-        result.warnings.push('일반의약품에서 일반 상품으로 바뀝니다. 온라인에는 약국이 확인한 뒤 공개됩니다.');
-        set('online_visible', 0);
-        set('needs_review', 1);
-      }
+      if (Number(product.online_visible)) set('online_visible', 0);
+      if (values.kind === 'OTC') result.warnings.push('일반의약품으로 바뀝니다. 온라인 판매가 꺼지고 장바구니에서 빠집니다.');
+      else result.warnings.push('일반 상품으로 분류됩니다. 온라인 판매는 약국이 확인한 뒤 켜 주세요.');
     }
   }
   if (values.external_code && !product.external_code && !ctx.byCode.has(values.external_code)) set('external_code', values.external_code);
@@ -538,7 +535,7 @@ function evaluateCreate(ctx, mode, options, values, result, net, newCategories, 
   if (result.errors.length) return;
 
   const kindKnown = values.kind === 'OTC' || values.kind === 'GENERAL';
-  if (!kindKnown && values.kind) result.warnings.push('구분(일반의약품 여부)을 알 수 없어 "구분 확인 필요"로 표시합니다.');
+  if (!kindKnown && values.kind) result.warnings.push('구분(일반의약품 여부)을 알 수 없어 "분류 전"으로 넣습니다.');
   const sameName = ctx.byName.get(values.product_name.toLowerCase()) || [];
   if (sameName.length) {
     result.name_matches = sameName.slice(0, 5).map((p) => ({ id: p.id, product_name: p.product_name, barcode: p.barcode }));
@@ -567,9 +564,8 @@ function evaluateCreate(ctx, mode, options, values, result, net, newCategories, 
     stock_quantity: stock,
     safety_stock: values.safety_stock ?? 0,
     brand: values.brand,
-    product_type: kindKnown ? values.kind : 'GENERAL',
+    product_type: kindKnown ? values.kind : 'UNCLASSIFIED',
     tax_type: taxType,
-    needs_review: kindKnown ? 0 : 1,
     online_visible: 0,
     _category_name: values.category,
     _supplier_name: values.supplier
@@ -667,9 +663,13 @@ function preview({ pharmacyId, userId, mode, rows, options: rawOptions = {}, fil
   }
 
   const { results, newCategories, newSuppliers } = evaluate(pharmacyId, mode, inputRows, options);
-  const unknownKind = results.filter((r) => r.action === 'CREATE' && r.after?.needs_review && !text(r.input.product_kind, 40)).length;
+  const unknownKind = results.filter(
+    (r) => r.action === 'CREATE' && r.after?.product_type === 'UNCLASSIFIED' && !text(r.input.product_kind, 40)
+  ).length;
   if (unknownKind) {
-    batchWarnings.push(`구분(일반의약품 여부)이 비어 있는 새 상품 ${unknownKind.toLocaleString()}개는 "구분 확인 필요"로 표시합니다. 상품 관리에서 확인한 뒤 온라인에 공개하세요.`);
+    batchWarnings.push(
+      `구분(일반의약품 여부)이 비어 있는 새 상품 ${unknownKind.toLocaleString()}개는 "분류 전"으로 넣습니다. 분류 전 상품은 온라인에서 팔 수 없고 POS에서는 약사만 판매할 수 있습니다. 상품 관리에서 분류해 주세요.`
+    );
   }
   const summary = summarize(results);
 
@@ -762,10 +762,10 @@ function applyResult(pharmacyId, userId, batchId, mode, r, categoryCache, suppli
     const productId = run(
       `INSERT INTO products (
         pharmacy_id, category_id, product_name, price, discount_price, cost_price, stock_quantity, status,
-        barcode, external_code, product_type, tax_type, safety_stock, brand, supplier_id, online_visible, needs_review
+        barcode, external_code, product_type, tax_type, safety_stock, brand, supplier_id, online_visible
       ) VALUES (
         @pharmacy_id, @category_id, @product_name, @price, @discount_price, @cost_price, @stock_quantity, @status,
-        @barcode, @external_code, @product_type, @tax_type, @safety_stock, @brand, @supplier_id, 0, @needs_review
+        @barcode, @external_code, @product_type, @tax_type, @safety_stock, @brand, @supplier_id, 0
       )`,
       {
         pharmacy_id: pharmacyId,
@@ -782,8 +782,7 @@ function applyResult(pharmacyId, userId, batchId, mode, r, categoryCache, suppli
         product_type: a.product_type,
         tax_type: a.tax_type,
         safety_stock: a.safety_stock,
-        brand: a.brand,
-        needs_review: a.needs_review
+        brand: a.brand
       }
     ).lastInsertRowid;
     r.product_id = productId;
@@ -807,7 +806,7 @@ function applyResult(pharmacyId, userId, batchId, mode, r, categoryCache, suppli
        WHERE id = @id AND pharmacy_id = @pharmacy_id`,
       { id: r.product_id, pharmacy_id: pharmacyId, ...Object.fromEntries(columns.map((c) => [c, after[c]])) }
     );
-    if (after.product_type === 'OTC') run('DELETE FROM carts WHERE product_id = @id', { id: r.product_id });
+    if (after.product_type && after.product_type !== 'GENERAL') run('DELETE FROM carts WHERE product_id = @id', { id: r.product_id });
   }
   if ('stock_quantity' in after) {
     const current = getOne('SELECT status FROM products WHERE id = @id', { id: r.product_id });
