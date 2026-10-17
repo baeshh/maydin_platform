@@ -10,7 +10,7 @@
 - 일반의약품은 대면 현장 판매 기록만 처리한다. 온라인 결제·배송에는 쓰지 않는다.
 - 브라우저가 보낸 "승인됨" 문자열만으로 결제를 인정하지 않는다. 서버가 VAN사에서 직접 받았거나, Bridge 서명을 확인했거나, 관리자가 영수증을 보고 정한 것만 인정한다.
 - 결과가 불확실한 승인은 `UNKNOWN` → 조회(대사)로만 정한다. 자동 재승인 금지(이중 결제 위험).
-- 데모 VAN·데모 Bridge 결제는 화면·영수증에 "(데모)"를 붙인다.
+- 데모 VAN·데모 Bridge 결제는 화면·영수증에 "(데모)"를 붙인다. 운영 서버는 데모·테스트 결제를 받지 않는다([payment-test-policy.md](payment-test-policy.md)).
 
 ## 2. 파일 배치
 
@@ -20,9 +20,10 @@
 | --- | --- |
 | `index.js` | `/api/pos` 라우터. 로그인·역할(약국 관리자·POS 직원) 확인 뒤 `req.pos = resolveTerminal(req)`로 카운터를 정한다 |
 | `common.js` | `PosError(message, status, reason, extra)`, `handle()`(오류를 `{message, reason, ...extra}`로 응답), 감사 기록 등 공용 도구 |
-| `routes/` | 화면 단위 API: `context`, `catalog`, `customers`, `sessions`, `sales`, `payments`, `pickups`, `refunds`, `recovery`, `holds`, `inventory`, `counsels`, `reports`, `terminals` |
-| `services/` | 판매·결제·환불·영업 세션·카운터·보류·재고 처리. 라우트는 얇게, 규칙은 여기 |
-| `integrations/` | VAN 어댑터. `van-adapter.js`(공통 규격) · `manual-adapter.js` · `demo-adapter.js` · `bridge-adapter.js` · `bridge-protocol.js`(서명 규격) · `nice-adapter.js`·`kis-adapter.js`(계약 전 뼈대) |
+| `routes/` | 화면 단위 API: `context`, `catalog`, `customers`, `sessions`, `sales`, `payments`, `pickups`, `refunds`, `recovery`, `holds`, `inventory`, `counsels`, `reports`, `terminals`, `printing` |
+| `services/` | 판매·결제·환불·영업 세션·카운터·보류·재고 처리. 현금영수증(`cash-receipt-service.js`)·영수증 출력 작업(`print-service.js`)도 여기. 라우트는 얇게, 규칙은 여기 |
+| `integrations/` | VAN 어댑터. `van-adapter.js`(공통 규격) · `manual-adapter.js` · `demo-adapter.js` · `bridge-adapter.js` · `bridge-protocol.js`(서명 규격) · `cash-identity.js`(현금영수증 식별번호 판별·가림) · `nice-adapter.js`·`kis-adapter.js`(계약 전 뼈대) |
+| `printing/` | 영수증 문서(`receipt-document.js`, 서버가 만들고 해시로 확인), ESC/POS 변환(`escpos.js`, CP949·절단·돈통·바코드·QR), 프린터 전송(`printer-transport.js`, TCP 9100 상태 조회·장치·파일). Bridge가 같은 코드를 쓴다 |
 
 ### 카운터 화면 `server/public/pos/`
 
@@ -40,6 +41,7 @@
 | `payment.js` | 결제 창: prepare → approve → confirm, 승인 결과 조회·취소 |
 | `approvals.js` | 결과 미확정 승인 관리, 수동 승인 대조 |
 | `receipt.js` · `refund.js` · `pickup.js` · `hold.js` | 영수증, 취소·반품(Bridge 취소 포함), 픽업 수령, 보류 |
+| `printer.js` · `cash-receipt.js` | 영수증 프린터 출력·실패 대응·미출력 목록·프린터 설정, 현금영수증 선택·발급·재발급 |
 | `inventory.js` · `terminal.js` · `counter.js` · `report.js` | 재고, 카드 결제 방식 설정, 카운터 등록·관리, 리포트 |
 | `main.js` | 키보드 단축키·시작 |
 
@@ -119,7 +121,7 @@
 | 모드 | 종류 | 설명 |
 | --- | --- | --- |
 | `MANUAL` | 수동 | 기존 단말기에서 단독 승인 → 승인번호만 입력. `UNVERIFIED`로 남아 마감 때 대조 |
-| `DEMO` | 서버 | VAN 자동 승인 (데모). 실제 돈이 움직이지 않음. 응답 끊김·거절을 흉내 낼 수 있음 |
+| `DEMO` | 서버 | VAN 자동 승인 (데모). 실제 돈이 움직이지 않음. 응답 끊김·거절을 흉내 낼 수 있음. 개발·스테이징 서버 전용 |
 | `BRIDGE` | Bridge | 카운터 PC의 MAYDIN Bridge가 단말기와 통신, 서버는 서명만 확인 |
 | `NICE` · `KIS` | Bridge + 서버 조회 | 계약 전 뼈대. 가맹점 번호·TID·API 키 환경변수가 없으면 고를 수 없음 |
 
@@ -138,3 +140,4 @@
 - `phase14-pos-terminals` — 카운터 등록·기기 토큰·카운터별 권한
 - `phase15-van` — prepare/approve/confirm, 멱등·잠금, UNKNOWN 대사, 관리자 확인, 수동 대조, 마감 막기, Bridge 서명·재전송·취소, 픽업
 - `phase16-pos-offline` — 서비스 워커 파일 목록, 이 기기 보관소(최소 정보·삭제·약국별 분리)
+- `phase19-printing-cash-receipt` — ESC/POS 변환, 가짜 TCP 프린터(용지 없음·덮개 열림·응답 없음)로 출력·재시도·중복 출력 방지·재출력·브라우저 대체, 현금영수증 발급·응답 끊김 조회·반품 취소·재발급

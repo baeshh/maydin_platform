@@ -114,10 +114,13 @@ async function openClose() {
   const owner = can('can_close');
   const holdCount = Number(document.getElementById('holdCount').textContent) || 0;
   const approvals = await refreshPendingApprovals();
+  await reportQueue();
+  const queued = saleQueue().length;
   openModal(
     `
     ${modalHead('일마감')}
     <div class="modal-body">
+      ${queued ? `<div class="notice danger" style="margin-bottom: 14px;">이 PC에 서버로 보내지 않은 장애 중 거래가 ${queued}건 있어 마감할 수 없습니다. 보내지 않으면 그 매출·현금이 이 영업에 빠집니다. <button class="discount-link" type="button" onclick="openRecovery()">장애 · 복구</button></div>` : ''}
       ${approvals.length ? `<div class="notice danger" style="margin-bottom: 14px;">정리되지 않은 카드 승인이 ${approvals.length}건 있어 마감할 수 없습니다. <button class="discount-link" type="button" onclick="openApprovalManager()">승인 정리</button></div>` : ''}
       ${summary.unverified_count ? `<div class="notice danger" style="margin-bottom: 14px;">단말기 영수증과 대조하지 않은 수동 승인이 ${summary.unverified_count}건 있어 마감할 수 없습니다.${owner ? ' <button class="discount-link" type="button" onclick="openUnverifiedPayments()">수동 승인 대조</button>' : ' 약국 관리자가 대조해야 합니다.'}</div>` : ''}
       ${holdCount ? `<div class="notice warn" style="margin-bottom: 14px;">보류 중인 판매가 ${holdCount}건 있습니다. 마감해도 보류는 남지만, 결제하지 않은 보류는 매출에 포함되지 않습니다. <button class="discount-link" type="button" onclick="openHolds()">보류 목록 보기</button></div>` : ''}
@@ -194,6 +197,7 @@ function confirmClose() {
     } catch (error) {
       if (error.reason === 'VAN_APPROVALS_OPEN') openApprovalManager();
       if (error.reason === 'MANUAL_APPROVALS_UNCHECKED') openUnverifiedPayments();
+      if (error.reason === 'OFFLINE_QUEUE_PENDING') openRecovery();
       throw error;
     }
     const closed = data.session;

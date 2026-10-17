@@ -499,8 +499,8 @@
         <h1>플랫폼 Admin</h1>
         <p class="desc">약국 입점, 운영 현황, 문의 관리를 한곳에서 확인합니다.</p>
         <form id="loginForm">
-          <label>이메일 <input name="email" value="admin@maydin.kr" /></label>
-          <label>비밀번호 <input name="password" type="password" value="admin1234" /></label>
+          <label>이메일 <input name="email" type="email" autocomplete="username" /></label>
+          <label>비밀번호 <input name="password" type="password" autocomplete="current-password" /></label>
           <button class="btn" style="width: 100%; margin-top: 6px;">로그인</button>
         </form>
       </div>
@@ -579,9 +579,9 @@
                 <label>주소 <input name="address" value="서울시 테스트구 2" /></label>
                 <label>쇼핑몰 Slug <input name="store_slug" value="b-pharmacy" required /></label>
                 <label>수수료율 <input name="commission_rate" type="number" value="5" /></label>
-                <label>운영자 이메일 <input name="owner_email" value="owner@bpharmacy.kr" required /></label>
+                <label>운영자 이메일 <input name="owner_email" type="email" required /></label>
                 <label>운영자 휴대폰 <input name="owner_phone" value="010-2222-3333" /></label>
-                <label class="full">임시 비밀번호 <input name="owner_password" value="owner1234" /></label>
+                <label class="full">임시 비밀번호 (영문·숫자 8자 이상) <input name="owner_password" type="password" autocomplete="new-password" minlength="8" required /></label>
                 <label class="full"><button class="btn" type="submit" style="width: 100%;">약국 생성하기</button></label>
               </form>
             </div>

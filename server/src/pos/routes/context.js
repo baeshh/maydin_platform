@@ -4,6 +4,7 @@ const { pointPolicy } = require('../../services/points');
 const { PAYMENT_METHODS, handle, isOwner, localToday, stockSyncSummary } = require('../common');
 const { heldCount } = require('../services/hold-service');
 const { inventoryAlerts } = require('../services/inventory-service');
+const { ensureSealKey } = require('../services/offline-service');
 const { findOpenSession, withSummary } = require('../services/session-service');
 const { DEVICE_STATES, listTerminals, publicTerminal, vanInfo } = require('../services/terminal-service');
 
@@ -32,6 +33,7 @@ router.get(
       device: { state: device, label: DEVICE_STATES[device] },
       terminals: isOwner(req) ? listTerminals(req.pharmacyId) : undefined,
       van: terminal ? vanInfo(terminal) : null,
+      offline_key: terminal ? ensureSealKey(terminal) : null,
       session: terminal ? withSummary(findOpenSession(terminal.id)) : null,
       today: localToday(),
       categories,

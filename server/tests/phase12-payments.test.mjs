@@ -58,6 +58,9 @@ console.log('[결제 설정 — 운영에서는 실제 결제가 확실할 때�
     '운영 서버에 테스트 키는 닫힘',
     paymentConfig({ NODE_ENV: 'production', PG_PROVIDER: 'TOSS', TOSS_SECRET_KEY: 'test_sk_x', TOSS_CLIENT_KEY: 'test_ck_x' }).enabled === false
   );
+  const testKeys = { NODE_ENV: 'production', PG_PROVIDER: 'TOSS', TOSS_SECRET_KEY: 'test_sk_x', TOSS_CLIENT_KEY: 'test_ck_x' };
+  check('예전 허용 변수(ALLOW_*)로는 운영에서 안 열림', paymentConfig({ ...testKeys, ALLOW_TEST_PAYMENTS: 'true' }).enabled === false && paymentConfig({ NODE_ENV: 'production', PG_PROVIDER: 'DEMO', ALLOW_DEMO_PAYMENTS: 'true' }).enabled === false);
+  check('스테이징 서버만 테스트 키·데모 허용', paymentConfig({ ...testKeys, MAYDIN_STAGING: 'true' }).mode === 'TEST' && paymentConfig({ NODE_ENV: 'production', PG_PROVIDER: 'DEMO', MAYDIN_STAGING: 'true' }).mode === 'DEMO');
   check('개발 서버 테스트 키는 (테스트) 표시', paymentConfig({ PG_PROVIDER: 'TOSS', TOSS_SECRET_KEY: 'test_sk_x', TOSS_CLIENT_KEY: 'test_ck_x' }).mode === 'TEST');
   check('알 수 없는 결제사는 닫힘', paymentConfig({ PG_PROVIDER: 'MOCK' }).enabled === false);
 }

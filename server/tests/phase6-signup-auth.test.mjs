@@ -382,7 +382,7 @@ console.log('[폐쇄몰 — 로그인한 회원만 접속]');
   await api('/admin/pharmacies', {
     token: admin,
     method: 'POST',
-    body: { pharmacy_code: code, pharmacy_name: '다른약국', owner_name: '이약사', store_slug: `mall-${code.toLowerCase()}`, owner_email: `${code.toLowerCase()}@mall.kr`, owner_password: 'owner1234' }
+    body: { pharmacy_code: code, pharmacy_name: '다른약국', owner_name: '이약사', store_slug: `mall-${code.toLowerCase()}`, owner_email: `${code.toLowerCase()}@mall.kr`, owner_password: 'mallOwner2026' }
   });
   res = await api(`/products/mall?pharmacyCode=${code}`, { token: member.data.token });
   check('다른 약국 회원은 403', res.status === 403, res.data);

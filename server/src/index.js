@@ -1,5 +1,15 @@
 require('dotenv').config();
 
+const { SecretConfigError, assertSecrets } = require('./services/secrets');
+
+try {
+  assertSecrets();
+} catch (error) {
+  if (!(error instanceof SecretConfigError)) throw error;
+  console.error(`[보안] ${error.message}`);
+  process.exit(1);
+}
+
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
@@ -7,6 +17,8 @@ const { db, getOne, migrate } = require('./db');
 const { startSchedule: startBackupSchedule } = require('./services/backup');
 const { startRetentionSchedule } = require('./services/privacy');
 const { startPaymentSchedule } = require('./services/online-payments');
+const { markDataEnvironment } = require('./services/payment-policy');
+const { startupProblems } = require('./services/startup-checks');
 
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
@@ -32,7 +44,18 @@ const paymentRoutes = require('./routes/payments');
 const app = express();
 const port = Number(process.env.PORT || 3001);
 
+{
+  const { errors, warnings } = startupProblems();
+  for (const warning of warnings) console.warn(`[보안] ${warning}`);
+  if (errors.length) {
+    for (const error of errors) console.error(`[보안] ${error}`);
+    console.error('[보안] 위 문제 때문에 서버를 시작하지 않습니다.');
+    process.exit(1);
+  }
+}
+
 migrate();
+markDataEnvironment(db);
 
 // 같은 서버의 리버스 프록시(nginx 등)를 거칠 때만 X-Forwarded-For를 믿는다. 가입·로그인 실패 제한이 IP 기준이다.
 app.set('trust proxy', 'loopback');

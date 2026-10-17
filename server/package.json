@@ -14,7 +14,8 @@
     "backup:drill": "node scripts/backup.js drill",
     "backup:restore": "node scripts/backup.js restore",
     "retention": "node scripts/retention.js",
-    "bridge:demo": "node scripts/demo-bridge.js"
+    "bridge:demo": "node scripts/demo-bridge.js",
+    "security:check": "node scripts/security-check.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -23,6 +24,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "html5-qrcode": "^2.3.8",
+    "iconv-lite": "^0.4.24",
     "jsbarcode": "^3.12.3",
     "jsonwebtoken": "^9.0.2",
     "pdfjs-dist": "^4.10.38",

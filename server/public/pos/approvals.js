@@ -28,10 +28,10 @@ async function openApprovalManager() {
     const owner = isOwner();
     openModal(
       `
-      ${modalHead('카드 승인 정리')}
+      ${modalHead('승인 정리 (카드 · 현금영수증)')}
       <div class="modal-body">
         <div class="notice" style="margin-bottom: 12px; line-height: 1.6;">
-          결과를 모르는 승인은 <b>다시 승인하지 말고</b> 「결과 조회」로 확인하세요. 판매에 안 쓴 승인은 고객에게 돈이 빠져나간 상태이므로 취소해야 합니다.
+          결과를 모르는 승인·현금영수증 발급은 <b>다시 요청하지 말고</b> 「결과 조회」로 확인하세요. 판매에 안 쓴 승인은 고객에게 돈이 빠져나간 상태이므로 취소해야 합니다.
           모두 정리해야 일마감할 수 있습니다.
         </div>
         ${approvals.length
@@ -41,7 +41,7 @@ async function openApprovalManager() {
                 const pending = PENDING_VAN.includes(tx.status);
                 return `<tr>
                   <td>${fmtTime(tx.created_at)}</td>
-                  <td>${METHOD_LABELS[tx.payment_method] || h(tx.payment_method)}${demoTag(tx)}${tx.approval_number ? `<div class="muted" style="font-size: 12px;">승인번호 ${h(tx.approval_number)}${tx.card_company ? ` · ${h(tx.card_company)}` : ''}</div>` : ''}</td>
+                  <td>${tx.transaction_type === 'CASH_RECEIPT' ? '현금영수증 발급' : METHOD_LABELS[tx.payment_method] || h(tx.payment_method)}${demoTag(tx)}${tx.approval_number ? `<div class="muted" style="font-size: 12px;">승인번호 ${h(tx.approval_number)}${tx.card_company ? ` · ${h(tx.card_company)}` : ''}</div>` : ''}</td>
                   <td class="num">${won(tx.amount)}</td>
                   <td><span class="badge ${color}">${label}</span>${tx.message ? `<div class="muted" style="font-size: 12px;">${h(tx.message)}</div>` : ''}</td>
                   <td style="min-width: 220px;">${pending
@@ -80,19 +80,33 @@ function checkApproval(id) {
     try {
       const tx = await findPendingApproval(id);
       const body = { van_transaction_id: id };
+      const cashReceipt = tx.transaction_type === 'CASH_RECEIPT';
       if (tx.source === 'BRIDGE') {
         body.bridge_result = await VanBridge.inquire({
           protocol: 'maydin-bridge/1',
           terminal_id: state.ctx.terminal.id,
           request_id: tx.request_id,
-          transaction_type: 'APPROVE',
+          transaction_type: cashReceipt ? 'CASH_RECEIPT' : 'APPROVE',
           method: tx.payment_method,
-          amount: tx.amount
+          amount: tx.amount,
+          ...(cashReceipt ? { purpose: tx.cash_receipt_purpose } : {})
         });
       }
       const data = await api.request('/pos/payments/reconcile', { method: 'POST', body });
       const status = data.van_transaction.status;
-      toast(status === 'APPROVED' ? '승인된 것으로 확인했습니다. 판매에 쓰지 않으면 취소해 주세요.' : status === 'NOT_FOUND' ? '승인되지 않은 것으로 확인했습니다.' : '아직 결과를 모릅니다.');
+      toast(
+        cashReceipt
+          ? status === 'USED'
+            ? '발급된 것으로 확인해 판매에 연결했습니다.'
+            : status === 'NOT_FOUND'
+              ? '발급되지 않았습니다. 거래내역에서 다시 발급할 수 있습니다.'
+              : '아직 결과를 모릅니다.'
+          : status === 'APPROVED'
+            ? '승인된 것으로 확인했습니다. 판매에 쓰지 않으면 취소해 주세요.'
+            : status === 'NOT_FOUND'
+              ? '승인되지 않은 것으로 확인했습니다.'
+              : '아직 결과를 모릅니다.'
+      );
     } finally {
       await openApprovalManager();
     }

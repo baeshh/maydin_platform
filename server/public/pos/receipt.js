@@ -43,7 +43,19 @@ function receiptHtml(r, { reprint = false } = {}) {
           ${p.payment_method === 'CARD' && p.paid_amount > 0 && p.installment_months != null ? `<div class="row"><span>  할부</span><span>${p.installment_months ? `${p.installment_months}개월` : '일시불'}</span></div>` : ''}
           ${p.approval_number ? `<div class="row"><span>  ${p.paid_amount < 0 ? '취소 승인번호' : '승인번호'}</span><span>${h(p.approval_number)}</span></div>` : ''}
           ${p.received_amount ? `<div class="row"><span>  받은 금액</span><span>${won(p.received_amount)}</span></div><div class="row"><span>  거스름돈</span><span>${won(p.change_amount)}</span></div>` : ''}
-          ${p.cash_receipt_number ? `<div class="row"><span>  현금영수증</span><span>${h(p.cash_receipt_number)}</span></div>` : ''}
+          ${p.cash_receipt_number && !r.cash_receipts?.length ? `<div class="row"><span>  현금영수증</span><span>${h(p.cash_receipt_number)}</span></div>` : ''}
+        `
+        )
+        .join('')}
+      ${(r.cash_receipts || [])
+        .map(
+          (cr) => `
+          <div class="hr"></div>
+          <div class="bold">${cr.kind === 'CANCEL' ? '현금영수증 취소' : `현금영수증 (${cr.purpose === 'EXPENSE' ? '지출증빙' : '소득공제'})`}${cr.is_demo ? ' [데모]' : ''}</div>
+          <div class="row"><span>  승인번호</span><span>${h(cr.approval_number === '-' ? '단말기에서 취소' : cr.approval_number)}</span></div>
+          ${cr.kind === 'CANCEL' ? `<div class="row"><span>  원승인번호</span><span>${h(cr.original_approval_number || '-')}</span></div>` : ''}
+          ${cr.masked_identity ? `<div class="row"><span>  식별번호</span><span>${h(cr.masked_identity)}</span></div>` : ''}
+          <div class="row"><span>  금액</span><span>${won(cr.amount)}</span></div>
         `
         )
         .join('')}
@@ -73,6 +85,7 @@ function receiptHtml(r, { reprint = false } = {}) {
   `;
 }
 
+// 브라우저 인쇄(window.print). 프린터 직접 출력을 쓰지 않는 카운터와, 프린터 실패 때 대신 뽑을 때 쓴다.
 async function printReceipt(r, options = {}) {
   const area = document.getElementById('printArea');
   area.innerHTML = receiptHtml(r, options);
@@ -80,9 +93,15 @@ async function printReceipt(r, options = {}) {
   setTimeout(() => window.print(), 50);
 }
 
+// 출력 작업을 서버에 남기고(재출력 표시·미출력 목록) 카운터 설정대로 프린터 직접 출력 또는 브라우저 인쇄.
+function printFromModal(orderId) {
+  withBusy(() => printOrder(orderId));
+}
+
 function showReceipt(r, { fresh = false } = {}) {
   window.__lastReceipt = r;
   const changeRow = r.payments.find((p) => p.change_amount);
+  const autoPrint = fresh && printerSettings().auto_print && !r.duplicate;
   openModal(`
     ${modalHead(fresh ? '결제 완료' : '영수증')}
     <div class="modal-body" style="background: var(--bg-canvas);">
@@ -90,8 +109,10 @@ function showReceipt(r, { fresh = false } = {}) {
       ${receiptHtml(r)}
     </div>
     <div class="modal-foot">
-      <button class="btn btn-outline" type="button" onclick="printReceipt(window.__lastReceipt)">영수증 인쇄</button>
+      ${fresh && r.permissions?.can_issue_cash_receipt ? `<button class="btn btn-outline" type="button" onclick="openCashReceiptModal(${Number(r.order.id)})">현금영수증</button>` : ''}
+      <button class="btn btn-outline" type="button" onclick="printFromModal(${Number(r.order.id)})">${printsDirect() ? '영수증 출력' : '영수증 인쇄'}</button>
       <button class="btn btn-primary" type="button" onclick="closeModal()" data-autofocus>${fresh ? '다음 판매 (Enter)' : '닫기'}</button>
     </div>
   `);
+  if (autoPrint) printOrder(r.order.id).catch((error) => toast(`영수증 출력: ${error.message}`, 'error'));
 }

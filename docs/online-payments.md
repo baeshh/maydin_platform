@@ -59,8 +59,7 @@
 | `PG_PROVIDER` | `DEMO`(기본) · `TOSS` · `NONE` |
 | `TOSS_CLIENT_KEY` / `TOSS_SECRET_KEY` | 토스페이먼츠 키. `test_`는 테스트, `live_`는 실결제. 두 키 종류가 다르면 결제가 닫힌다 |
 | `PG_LIVE_ENABLED=true` | 실결제 키로 운영을 시작할 때만 켠다. 없으면 실결제 키가 있어도 결제를 막는다 |
-| `ALLOW_TEST_PAYMENTS=true` | 운영 모드(스테이징)에서 테스트 키를 허용. 실제 청구가 없으니 상품을 내보내면 안 된다 |
-| `ALLOW_DEMO_PAYMENTS=true` | 운영 모드에서 데모 결제 허용. 위와 같음 |
+| `MAYDIN_STAGING=true` | 스테이징 서버(운영과 다른 DB)에서만 테스트 키·데모 결제 허용. 운영 DB에는 켤 수 없다([payment-test-policy.md](payment-test-policy.md)). 예전 `ALLOW_TEST_PAYMENTS`·`ALLOW_DEMO_PAYMENTS`는 더 이상 쓰지 않는다 |
 | `TOSS_API_BASE` | 결제사 API 주소(테스트용 가짜 서버 지정) |
 | `PG_TIMEOUT_MS` | 결제사 응답 대기(기본 15000) |
 | `PAYMENT_CHECKOUT_TTL_MINUTES` · `PAYMENT_STALE_SECONDS` · `PAYMENT_RECONCILE_INTERVAL_SECONDS` | 결제 시간 · 멈춤 판정 · 정산 주기 |
@@ -77,7 +76,7 @@
 - [ ] 결제사 관리 화면에서 직접 취소 → 웹훅으로 주문 자동 취소 확인
 - [ ] 고객 취소 · 약국 취소 · 수령 후 환불이 결제사 취소 내역과 금액이 맞는지 확인
 - [ ] 결제사 응답 지연(타임아웃) 상황에서 정산 작업이 승인·취소를 마무리하는지 확인
-- [ ] 운영 서버 `NODE_ENV=production`, `ALLOW_DEMO_PAYMENTS`·`ALLOW_TEST_PAYMENTS` 미설정 확인
+- [ ] 운영 서버 `NODE_ENV=production`, `MAYDIN_STAGING` 미설정, `npm run security:check`에 데모·테스트 결제 없음 확인
 - [ ] 시크릿 키는 서버 환경변수로만 두고 저장소·클라이언트에 노출하지 않기
 - [ ] 정산(입금) 대사: 결제사 정산 내역과 주문·환불 금액 일치 확인 절차 마련
 - [ ] 위가 끝나면 실결제 키 + `PG_LIVE_ENABLED=true`

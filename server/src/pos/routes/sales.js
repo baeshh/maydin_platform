@@ -1,9 +1,9 @@
 const express = require('express');
 const { getAll, getOne, run, transaction } = require('../../db');
 const { issueSignupCode } = require('../../services/member-auth');
-const { assertOutageOpen, parseClientSaleId, parseRecovery, saleFingerprint } = require('../../services/pos-recovery');
 const { PHONE_DIGITS_SQL, PosError, assertDate, audit, digits, handle, localToday, requireOwner } = require('../common');
 const { createPosSale, deserializeRequest, parseSaleRequest, priceSale, requestHash, serializeRequest } = require('../services/checkout-service');
+const { orderByClientId, saveDirectSale } = require('../services/direct-sale-service');
 const { assertDraftPayable, closeDraft, findDraft, publicDraft, requireClientSaleId, requireOpenDraft } = require('../services/draft-service');
 const { PENDING_STATUSES, draftApprovals, publicVan } = require('../services/payment-service');
 const { buildReceipt, getPosOrder } = require('../services/sale-service');
@@ -14,52 +14,11 @@ const router = express.Router();
 
 const LIVE_APPROVAL_STATUSES = [...PENDING_STATUSES, 'APPROVED'];
 
-function orderByClientId(pharmacyId, clientSaleId) {
-  return getOne('SELECT id, client_sale_hash FROM orders WHERE pharmacy_id = @pharmacy_id AND client_sale_id = @id', {
-    pharmacy_id: pharmacyId,
-    id: clientSaleId
-  });
-}
-
 // 현금·계좌이체·수동 승인번호 판매와 장애 복구 판매. 카드 승인을 서버·Bridge로 받는 판매는 prepare → confirm 으로 저장한다.
 router.post(
   '/sales',
   handle((req, res) => {
-    const { terminal, session } = requireOpenSession(req);
-    const clientSaleId = parseClientSaleId(req.body.client_sale_id);
-    const recovery = parseRecovery(req.body.recovery, req.pharmacyId);
-    if (recovery) {
-      if (!clientSaleId) throw new PosError('장애 복구 거래에는 거래 고유번호가 필요합니다.');
-      if (recovery.source === 'MANUAL') requireOwner(req, '수기 거래 복구');
-    }
-    const request = parseSaleRequest(req.body, { recovery });
-    const fingerprint = clientSaleId
-      ? saleFingerprint({
-          items: request.items,
-          discountAmount: request.discountAmount,
-          payments: req.body.payments,
-          customerId: request.customerId,
-          occurredAt: recovery?.occurredAt
-        })
-      : null;
-
-    const receipt = transaction(() => {
-      if (clientSaleId) {
-        const existing = orderByClientId(req.pharmacyId, clientSaleId);
-        if (existing) {
-          if (existing.client_sale_hash !== fingerprint) {
-            throw new PosError('같은 거래 고유번호로 내용이 다른 거래가 이미 저장되어 있습니다. 판매 내역을 확인해 주세요.', 409);
-          }
-          return { ...buildReceipt(req, existing.id), duplicate: true };
-        }
-        if (findDraft(req.pharmacyId, clientSaleId)) {
-          throw new PosError('결제를 준비한 판매는 결제 완료로 저장해 주세요.', 409, 'DRAFT_EXISTS');
-        }
-      }
-      if (recovery) assertOutageOpen(recovery.outage);
-      return createPosSale(req, { terminal, session, request, payments: req.body.payments, clientSaleId, fingerprint, recovery }).receipt;
-    })();
-
+    const receipt = saveDirectSale(req, req.body);
     res.status(receipt.duplicate ? 200 : 201);
     return receipt;
   })

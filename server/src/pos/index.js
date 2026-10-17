@@ -16,6 +16,8 @@ const holdsRoutes = require('./routes/holds');
 const inventoryRoutes = require('./routes/inventory');
 const terminalsRoutes = require('./routes/terminals');
 const paymentsRoutes = require('./routes/payments');
+const printingRoutes = require('./routes/printing');
+const offlineRoutes = require('./routes/offline');
 
 const router = express.Router();
 
@@ -40,5 +42,7 @@ router.use(holdsRoutes);
 router.use(inventoryRoutes);
 router.use(terminalsRoutes);
 router.use(paymentsRoutes);
+router.use(printingRoutes);
+router.use(offlineRoutes);
 
 module.exports = router;

@@ -119,7 +119,9 @@ async function openSaleDetail(id) {
           <div>
             <div class="section-title">처리</div>
             <div class="list">
-              <button class="btn btn-outline btn-block" type="button" onclick="reprint(${order.id})">영수증 재출력</button>
+              <button class="btn btn-outline btn-block" type="button" onclick="reprint(${order.id})">영수증 ${printsDirect() ? '출력' : '인쇄'}</button>
+              ${permissions.can_issue_cash_receipt ? `<button class="btn btn-outline btn-block" type="button" onclick="openCashReceiptModal(${order.id})">현금영수증 발급 (${won(r.cash_receipt_amount)})</button>` : ''}
+              ${r.cash_receipt_pending ? '<div class="notice danger">결과를 모르는 현금영수증 발급이 있습니다. 다시 발급하지 말고 <button class="discount-link" type="button" onclick="openApprovalManager()">승인 정리</button>에서 조회해 주세요.</div>' : ''}
               ${permissions.can_issue_signup_code ? `<button class="btn btn-outline btn-block" type="button" onclick="reissueSignupCode(${order.id}, ${Boolean(r.signup_code)})">${r.signup_code ? '가입 코드 재발급' : '가입 코드 발급'}</button>` : ''}
               ${permissions.can_cancel ? `<button class="btn btn-danger-soft btn-block" type="button" onclick="openCancel()">당일 전체 취소</button>` : ''}
               ${permissions.can_refund ? `<button class="btn btn-soft btn-block" type="button" onclick="openRefund()">부분 반품</button>` : ''}
@@ -162,17 +164,21 @@ function reissueSignupCode(id, hasCode) {
 }
 
 function reprint(id) {
-  withBusy(async () => {
-    const r = await api.request(`/pos/sales/${id}/reprint`, { method: 'POST' });
-    printReceipt(r, { reprint: true });
-    toast('영수증을 재출력합니다.');
-  });
+  withBusy(() => printOrder(id));
 }
 
 function reasonChips(targetId, reasons) {
   return `<div class="chips" style="margin-bottom: 14px;">${reasons
     .map((r) => `<button class="chip" type="button" onclick="document.getElementById('${targetId}').value='${r}'">${r}</button>`)
     .join('')}</div>`;
+}
+
+function cashReceiptNotice(r) {
+  const issued = (r.cash_receipts || []).filter((cr) => cr.kind === 'ISSUE');
+  if (!issued.length) return '';
+  return `<div class="notice" style="margin: 10px 0;">현금영수증(승인 ${issued.map((cr) => h(cr.approval_number)).join(', ')})이 발급된 거래입니다. 현금·계좌이체를 돌려주면 ${
+    issued.some((cr) => cr.source === 'BRIDGE') ? '<b>카드 단말기에서 현금영수증을 먼저 취소</b>하고' : '현금영수증을 취소하고'
+  }, 남은 금액이 있으면 다시 발급합니다.</div>`;
 }
 
 function openCancel() {
@@ -192,6 +198,7 @@ function openCancel() {
         <div class="field"><label class="label" for="cancelApproval">카드 취소 승인번호 (선택)</label><input id="cancelApproval" class="input" placeholder="단말기 취소 영수증의 승인번호" /></div>` : ''}
       ${hasVanDemo ? '<div class="notice" style="margin: 10px 0; background: #f3e8ff; color: #6d28d9;">VAN 자동 승인(데모) 결제분은 확정 시 <b>VAN 자동 취소 (데모)</b>로 취소 승인번호가 발급됩니다.</div>' : ''}
       ${hasBridge ? '<div class="notice" style="margin: 10px 0;">카드 단말기 연동 결제분은 확정하면 <b>이 카운터의 카드 단말기에서 승인 취소</b>를 진행합니다. 고객 카드를 준비해 주세요.</div>' : ''}
+      ${cashReceiptNotice(r)}
       <div class="field" style="margin-top: 12px;"><label class="label" for="cancelReason">취소 사유 (필수)</label><input id="cancelReason" class="input" data-autofocus /></div>
       ${reasonChips('cancelReason', ['고객 변심', '결제 수단 변경', '금액 입력 오류', '상품 불량'])}
       <label style="display: flex; gap: 8px; align-items: center; font-weight: 700;"><input id="cancelRestock" type="checkbox" checked /> 상품을 재고로 되돌리기 (재입고)</label>
@@ -203,31 +210,55 @@ function openCancel() {
   `);
 }
 
-// 카드 단말기(Bridge)로 승인한 결제는 단말기에서 먼저 취소하고, 서명된 취소 결과를 붙여 다시 보낸다.
+// 카드 단말기(Bridge)로 승인한 결제·발급한 현금영수증은 단말기에서 먼저 취소하고, 서명된 취소 결과를 붙여 다시 보낸다.
 // 취소 요청 번호를 남겨 두어, 서버 저장이 실패해 다시 보내도 단말기에서 두 번 취소하지 않는다.
+function cancelsFor(store, path) {
+  return Object.values(store).filter((c) => c.path === path).map(({ path: _p, ...c }) => c);
+}
+
 async function postWithVanCancels(path, body) {
   const cancels = (state.vanCancelResults ||= {});
-  for (let round = 0; round < 2; round += 1) {
+  const receiptCancels = (state.cashReceiptCancelResults ||= {});
+  const requestIds = (state.vanCancelRequestIds ||= {});
+  for (let round = 0; round < 4; round += 1) {
     try {
-      return await api.request(path, { method: 'POST', body: { ...body, van_cancels: Object.values(cancels).filter((c) => c.path === path).map(({ path: _p, ...c }) => c) } });
+      return await api.request(path, {
+        method: 'POST',
+        body: { ...body, van_cancels: cancelsFor(cancels, path), cash_receipt_cancels: cancelsFor(receiptCancels, path) }
+      });
     } catch (error) {
-      if (error.reason !== 'VAN_CANCEL_REQUIRED' || !error.data?.cancels?.length || round > 0) throw error;
-      for (const request of error.data.cancels) {
-        const key = `${path}:${request.original_approval_number}`;
-        if (cancels[key]) continue;
-        const requestIds = (state.vanCancelRequestIds ||= {});
-        requestIds[key] ||= newSaleId();
-        toast(`카드 단말기에서 ${won(request.amount)} 승인 취소 중… 고객 카드를 단말기에 꽂아 주세요.`);
-        const result = await VanBridge.cancel({ ...request, request_id: requestIds[key] });
-        cancels[key] = { path, original_approval_number: request.original_approval_number, bridge_result: result };
+      if (error.reason === 'VAN_CANCEL_REQUIRED' && error.data?.cancels?.length) {
+        for (const request of error.data.cancels) {
+          const key = `${path}:${request.original_approval_number}`;
+          if (cancels[key]) continue;
+          requestIds[key] ||= newSaleId();
+          toast(`카드 단말기에서 ${won(request.amount)} 승인 취소 중… 고객 카드를 단말기에 꽂아 주세요.`);
+          const result = await VanBridge.cancel({ ...request, request_id: requestIds[key] });
+          cancels[key] = { path, original_approval_number: request.original_approval_number, bridge_result: result };
+        }
+        continue;
       }
+      if (error.reason === 'CASH_RECEIPT_CANCEL_REQUIRED' && error.data?.cash_receipt_cancels?.length) {
+        for (const request of error.data.cash_receipt_cancels) {
+          const key = `${path}:CR:${request.original_approval_number}`;
+          if (receiptCancels[key]) continue;
+          requestIds[key] ||= newSaleId();
+          toast(`카드 단말기에서 현금영수증 ${won(request.amount)} 취소 중…`);
+          const result = await VanBridge.cashReceipt({ ...request, request_id: requestIds[key] });
+          receiptCancels[key] = { path, original_approval_number: request.original_approval_number, bridge_result: result };
+        }
+        continue;
+      }
+      throw error;
     }
   }
-  return null;
+  throw new Error('단말기 취소를 반영하지 못했습니다. 다시 시도해 주세요.');
 }
 
 function forgetVanCancels(path) {
-  for (const [key, value] of Object.entries(state.vanCancelResults || {})) if (value.path === path) delete state.vanCancelResults[key];
+  for (const store of [state.vanCancelResults || {}, state.cashReceiptCancelResults || {}]) {
+    for (const [key, value] of Object.entries(store)) if (value.path === path) delete store[key];
+  }
   for (const key of Object.keys(state.vanCancelRequestIds || {})) if (key.startsWith(`${path}:`)) delete state.vanCancelRequestIds[key];
 }
 
@@ -246,6 +277,7 @@ function confirmCancel() {
     await Promise.all([refreshSession(), loadProducts()]);
     toast(`전체 취소 완료 · ${won(-data.refund.order.final_amount)} 환불`);
     showReceipt(data.refund);
+    handleCashReceiptAftermath(data);
   });
 }
 
@@ -303,6 +335,7 @@ function openRefund() {
                   : ''
             }</div>`
           : ''}
+      ${cashReceiptNotice(r)}
       <div class="field"><label class="label" for="refundReason">반품 사유 (필수)</label><input id="refundReason" class="input" /></div>
       ${reasonChips('refundReason', ['상품 불량', '고객 변심', '유통기한 문제', '오판매'])}
       <label style="display: flex; gap: 8px; align-items: center; font-weight: 700;"><input id="refundRestock" type="checkbox" checked /> 반품 상품을 재고로 되돌리기 (재입고)</label>
@@ -378,5 +411,6 @@ function confirmRefund() {
     await Promise.all([refreshSession(), loadProducts()]);
     toast(`반품 완료 · ${won(-data.refund.order.final_amount)} 환불`);
     showReceipt(data.refund);
+    handleCashReceiptAftermath(data);
   });
 }

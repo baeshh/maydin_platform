@@ -66,9 +66,14 @@ async function boot() {
   if (!offlineBoot) {
     refreshBadges();
     refreshPendingApprovals();
+    refreshPrintJobs();
     refreshCatalog();
     setInterval(refreshCatalog, 10 * 60 * 1000);
-    if (saleQueue().length) syncQueue({ auto: true });
+    await sealPlainQueue().catch(() => {});
+    // 서버가 PC마다 남은 장애 중 거래를 알 수 있게 켤 때와 5분마다 알린다(마감·재고 대사·PC 교체 때 확인).
+    if (saleQueue().length && state.session) syncQueue({ auto: true });
+    else reportQueue();
+    setInterval(reportQueue, 5 * 60 * 1000);
   }
   if (!state.ctx.terminal) openCounterRequired();
   else if (!state.session) openSessionStart();

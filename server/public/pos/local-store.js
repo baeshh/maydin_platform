@@ -1,7 +1,8 @@
 // MAYDIN POS · 이 기기 보관소 (IndexedDB)
 /* 장애 중 판매·장애 시작 시각·장애 대비 상품 목록만 이 기기에 둔다. 약국별로 나눠 보관한다.
    화면은 메모리 사본을 바로 읽고, 쓰기는 사본을 먼저 바꾼 뒤 IndexedDB에 저장한다.
-   IndexedDB를 쓸 수 없는 브라우저에서는 localStorage에 둔다. 서버로 보낸 거래는 바로 지운다. */
+   IndexedDB를 쓸 수 없는 브라우저에서는 localStorage에 둔다. 서버로 보낸 거래는 바로 지운다.
+   장애 중 판매는 offline-seal.js로 잠가 둔다. 브라우저 저장소 자체는 암호화되지 않으므로 잠그지 못한 거래는 평문으로 표시한다. */
 
 const LOCAL_DB = 'maydin_pos';
 const LOCAL_STORE = 'kv';
@@ -124,7 +125,12 @@ const LocalStore = {
 };
 
 // 기기에 남기는 판매는 서버에 다시 보낼 때 필요한 것만 둔다. 고객 이름 등은 남기지 않는다.
+// 잠근 거래는 금액·건수·결제 방법 요약만 평문이다.
 function minimizeQueued(entry) {
+  if (entry.sealed) {
+    const { client_sale_id, occurred_at, status, error, outage_id, imported, sealed, summary = {} } = entry;
+    return { client_sale_id, occurred_at, status, error, outage_id, imported, sealed, summary: { total: summary.total, count: summary.count, methods: summary.methods } };
+  }
   const { summary = {}, ...rest } = entry;
   return {
     ...rest,

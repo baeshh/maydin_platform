@@ -15,6 +15,7 @@ console.log('[POS 화면 파일 — 장애 중 다시 열기]');
   check('pos.html이 읽는 파일을 모두 보관', assets.length > 10 && missing.length === 0, missing);
   check('API 경로는 보관하지 않음', shell.every((path) => !path.startsWith('/api/')), shell);
   check('보관소 파일이 대기열 파일보다 먼저 읽힘', assets.indexOf('/pos/local-store.js') >= 0 && assets.indexOf('/pos/local-store.js') < assets.indexOf('/pos/recovery.js'));
+  check('잠금 파일이 대기열 파일보다 먼저 읽힘', assets.indexOf('/pos/offline-seal.js') >= 0 && assets.indexOf('/pos/offline-seal.js') < assets.indexOf('/pos/recovery.js'));
 }
 
 function fakeLocalStorage(initial = {}) {
@@ -81,12 +82,32 @@ console.log('[이 기기 보관소 — IndexedDB가 없을 때 localStorage]');
   check('같은 약국으로 돌아오면 다시 보임', LocalStore.get('outage')?.started_at === '2026-01-01T00:00:00Z');
 }
 
+console.log('[잠긴 보관 거래 — 요약만 평문]');
+{
+  const { minimizeQueued } = loadStore(fakeLocalStorage());
+  const sealed = { alg: 'RSA-OAEP-256/A256GCM', key_id: 'k1', wrapped_key: 'AA==', iv: 'AA==', ciphertext: 'AA==' };
+  const kept = minimizeQueued({
+    client_sale_id: 'sale-s',
+    occurred_at: '2026-01-01T00:00:00Z',
+    status: 'PENDING',
+    error: null,
+    sealed,
+    cashier: '홍길동',
+    body: { payments: [{ method: 'CARD', approval_number: '12345678' }] },
+    summary: { total: 3000, count: 2, methods: ['CARD'], lines: [{ name: '테스트 약' }] }
+  });
+  check('잠긴 내용은 그대로', JSON.stringify(kept.sealed) === JSON.stringify(sealed));
+  check('평문은 금액·건수·결제 방법만', JSON.stringify(kept.summary) === JSON.stringify({ total: 3000, count: 2, methods: ['CARD'] }), kept.summary);
+  check('판매자·승인번호·상품명은 남기지 않음', !/홍길동|12345678|테스트 약/.test(JSON.stringify(kept)) && !('body' in kept), kept);
+}
+
 console.log('[새로 보관하는 판매 — 최소 정보]');
 {
   const src = read('pos/recovery.js');
   const start = src.indexOf('async function queueSale');
   const queueSale = src.slice(start, src.indexOf('const queue = saleQueue();', start));
   check('장애 중 판매에 고객 이름을 남기지 않음', start >= 0 && !/state\.customer\.name/.test(queueSale));
+  check('기기에 넣기 전에 잠금', /queue\.push\(await storedEntry\(entry\)\)/.test(src));
 }
 
 done();

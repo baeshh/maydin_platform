@@ -24,6 +24,7 @@ function openPayment(mode = 'sale') {
   state.payMode = mode;
   state.payRows = [];
   state.payDraft = null;
+  state.cashReceiptChoice = null;
   renderPayment();
 }
 
@@ -102,8 +103,6 @@ function addPayRow(method, fillRemaining = true) {
     cash_receipt_number: '',
     installment_months: 0,
     easy_barcode: '',
-    receipt_identity: '',
-    receipt_purpose: 'INCOME',
     resolve_number: '',
     van: null,
     request_id: null,
@@ -166,10 +165,11 @@ function postApproval(body) {
 // 서버가 알려 준 승인 결과를 결제 줄에 반영한다.
 function applyApproval(row, tx) {
   row.lost = false;
-  if (tx.status === 'NOT_FOUND') {
+  if (['NOT_FOUND', 'DECLINED', 'VOIDED'].includes(tx.status)) {
     row.van = null;
     row.request_id = null;
-    toast('승인되지 않은 것으로 확인했습니다. 다시 승인할 수 있습니다.');
+    const reason = tx.status === 'NOT_FOUND' ? '승인되지 않은 것으로 확인했습니다.' : tx.status === 'VOIDED' ? '이미 취소한 승인입니다.' : `승인이 거절됐습니다.${tx.message ? ` (${tx.message})` : ''}`;
+    toast(`${reason} 다시 승인할 수 있습니다.`, tx.status === 'DECLINED' ? 'error' : undefined);
     return;
   }
   row.van = tx;
@@ -356,23 +356,6 @@ function scanEasyPayWithCamera(index) {
   });
 }
 
-function issueCashReceipt(index) {
-  const row = state.payRows[index];
-  const amount = Number(row.amount);
-  if (!Number.isInteger(amount) || amount <= 0) return toast('현금 금액을 먼저 입력해 주세요.', 'error');
-  withBusy(async () => {
-    const data = await api.request('/pos/van/cash-receipt', {
-      method: 'POST',
-      body: { amount, identity: row.receipt_identity, purpose: row.receipt_purpose }
-    });
-    row.cash_receipt_number = data.van_transaction.approval_number;
-    row.receipt_masked = data.van_transaction.masked_identity;
-    row.receipt_identity = '';
-    renderPayment();
-    toast(`현금영수증 발급 완료 (데모) · ${row.cash_receipt_number}`);
-  });
-}
-
 function updatePayRow(input) {
   const row = state.payRows[Number(input.dataset.row)];
   row[input.dataset.field] = input.value;
@@ -466,14 +449,10 @@ function easyPayRowHtml(row, index, common) {
 }
 
 function cashRowHtml(row, index, common) {
-  const receipt = row.cash_receipt_number
-    ? `<div class="van-ok">현금영수증 ${vanDemo() ? '<span class="demo-tag">데모</span> ' : ''}· 승인번호 <b>${h(row.cash_receipt_number)}</b>${row.receipt_masked ? ` · ${h(row.receipt_masked)}` : ''}</div>`
-    : vanDemo()
-      ? `<div class="pay-row-grid">
-          <div><label class="label">현금영수증 (선택)</label><input class="input" ${common} data-field="receipt_identity" value="${h(row.receipt_identity)}" placeholder="휴대폰번호 또는 사업자번호" inputmode="numeric" /></div>
-          <div><label class="label">용도</label><select class="input" ${common.replace('oninput', 'onchange')} data-field="receipt_purpose"><option value="INCOME" ${row.receipt_purpose === 'INCOME' ? 'selected' : ''}>소득공제</option><option value="EXPENSE" ${row.receipt_purpose === 'EXPENSE' ? 'selected' : ''}>지출증빙</option></select></div>
-        </div>
-        <button class="btn btn-soft btn-sm" type="button" onclick="issueCashReceipt(${index})">현금영수증 발급 (데모)</button>`
+  // 서버에 바로 저장하는 판매는 저장 뒤 현금영수증을 발급한다(아래 현금영수증 칸). 장애 중·수기 복구 판매만 단말기 승인번호를 적는다.
+  const receipt =
+    state.payContext === 'normal' && state.payMode === 'sale'
+      ? ''
       : `<div><label class="label">현금영수증 승인번호</label><input class="input" ${common} data-field="cash_receipt_number" value="${h(row.cash_receipt_number)}" placeholder="단말기에서 발급한 경우 (선택)" /></div>`;
   return `
     <div><label class="label">받은 금액</label><input class="input" type="number" min="0" step="100" ${common} data-field="received_amount" value="${h(row.received_amount)}" placeholder="선택" /></div>
@@ -531,7 +510,8 @@ function renderPayment() {
       ${vanBridge() && state.ctx.van.bridge_paired === false ? '<div class="notice danger" style="margin-bottom: 10px;">이 카운터에 연결된 Bridge가 없습니다. 단말기 설정에서 Bridge를 연결하거나, 승인번호 직접 입력으로 받아 주세요.</div>' : ''}
       ${state.payContext === 'offline' ? '<div class="notice danger" style="margin-bottom: 10px;"><b>장애 중 판매</b> · 이 기기에 보관했다가 복구되면 서버로 보냅니다. 카드·간편결제는 단말기에서 단독 승인한 뒤 승인번호를 입력하세요. 포인트는 쓸 수 없습니다.</div>' : ''}
       ${state.payContext === 'manual' ? `<div class="notice" style="margin-bottom: 10px; background: #f3e8ff; color: #6d28d9;"><b>수기 거래 복구</b> · 장애 #${Number(state.manual.outage_id)}에 묶어 실제 판매 시각으로 저장합니다.
-        <div style="margin-top: 6px;"><label class="label" for="manualOccurredPay">실제 판매 시각</label><input id="manualOccurredPay" class="input" type="datetime-local" value="${toLocalInput(new Date(state.manual.occurred_at))}" onchange="setManualOccurred(this.value)" /></div></div>` : ''}
+        <div style="margin-top: 6px; display: flex; gap: 8px;"><div style="flex: 1;"><label class="label" for="manualOccurredPay">실제 판매 시각</label><input id="manualOccurredPay" class="input" type="datetime-local" value="${toLocalInput(new Date(state.manual.occurred_at))}" onchange="setManualOccurred(this.value)" /></div>
+        <div style="width: 150px;"><label class="label" for="manualRefPay">임시번호 (있으면)</label><input id="manualRefPay" class="input" maxlength="8" placeholder="8자리" value="${h((state.manual.ref || '').toUpperCase())}" style="text-transform: uppercase;" onchange="setManualRef(this.value)" /></div></div></div>` : ''}
       <label class="label">결제수단 추가 (여러 개 선택하면 복합결제)</label>
       <div class="method-grid">
         ${['CARD', 'CASH', 'TRANSFER', 'EASY_PAY', ...(state.payMode === 'sale' && state.payContext === 'normal' && state.customer && pointsEnabled() ? ['POINT'] : [])]
@@ -539,6 +519,7 @@ function renderPayment() {
           .join('')}
       </div>
       ${rowsHtml || '<div class="notice">결제수단을 선택하세요.</div>'}
+      ${cashReceiptPanelHtml()}
       <div class="remain" id="payRemain"></div>
       <div id="payRetry"></div>
     </div>
@@ -601,8 +582,9 @@ function renderPaymentStatus() {
       warn.textContent = message;
     }
   });
+  const receiptMissing = Boolean(document.querySelector('.modal [data-cash-receipt-panel]')) && !cashReceiptChoiceReady(state.cashReceiptChoice);
   document.getElementById('payConfirm').disabled =
-    remaining !== 0 || (state.payRows.length === 0 && target !== 0) || cardMissing || easyMissing || pending || pointInvalid;
+    remaining !== 0 || (state.payRows.length === 0 && target !== 0) || cardMissing || easyMissing || pending || pointInvalid || receiptMissing;
 }
 
 function payloadPayments() {
@@ -667,7 +649,7 @@ function confirmPayment() {
         })),
         payments: payloadPayments(),
         ...(state.payContext === 'manual'
-          ? { recovery: { source: 'MANUAL', occurred_at: state.manual.occurred_at, outage_id: state.manual.outage_id, note: state.manual.note } }
+          ? { recovery: { source: 'MANUAL', occurred_at: state.manual.occurred_at, outage_id: state.manual.outage_id, note: state.manual.note, ...(state.manual.ref ? { ref: state.manual.ref } : {}) } }
           : {})
       };
       body.client_sale_id = saleIdFor(body);

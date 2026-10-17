@@ -80,7 +80,7 @@ function requireTerminal(req) {
 
 function publicTerminal(terminal) {
   if (!terminal) return null;
-  const { device_key_hash: deviceKeyHash, bridge_key_enc: bridgeKey, ...rest } = terminal;
+  const { device_key_hash: deviceKeyHash, bridge_key_enc: bridgeKey, seal_private_key_enc: _sealKey, seal_public_key: _sealPublic, ...rest } = terminal;
   return { ...rest, device_registered: Boolean(deviceKeyHash), bridge_paired: Boolean(bridgeKey) };
 }
 
@@ -152,6 +152,19 @@ function revokeDevice(pharmacyId, terminalId) {
   if (result.changes === 0) throw new PosError('PC가 등록된 카운터를 찾을 수 없습니다.', 404);
 }
 
+const PRINTER_MODES = {
+  BROWSER: '브라우저 인쇄 (window.print)',
+  BRIDGE: '영수증 프린터 직접 출력 (Bridge)'
+};
+
+function printerSettings(terminal) {
+  return {
+    mode: PRINTER_MODES[terminal?.printer_mode] ? terminal.printer_mode : 'BROWSER',
+    auto_print: terminal?.printer_auto_print === 1,
+    open_drawer: terminal?.printer_open_drawer === 1
+  };
+}
+
 function vanInfo(terminal) {
   const adapter = adapterFor(terminal);
   return {
@@ -162,16 +175,20 @@ function vanInfo(terminal) {
     tid: terminal.tid || null,
     is_demo: adapter.isDemo,
     bridge_paired: Boolean(terminal.bridge_key_enc),
-    bridge_paired_at: terminal.bridge_paired_at || null
+    bridge_paired_at: terminal.bridge_paired_at || null,
+    printer: printerSettings(terminal),
+    printer_modes: PRINTER_MODES
   };
 }
 
 module.exports = {
   DEVICE_HEADER,
   DEVICE_STATES,
+  PRINTER_MODES,
   ensureTerminal,
   issueBridgeKey,
   listTerminals,
+  printerSettings,
   publicTerminal,
   registerDevice,
   requireTerminal,

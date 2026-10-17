@@ -340,7 +340,7 @@ CREATE TABLE IF NOT EXISTS van_transactions (
   terminal_id INTEGER REFERENCES pos_terminals(id) ON DELETE SET NULL,
   van_company TEXT,
   tid TEXT,
-  transaction_type TEXT NOT NULL CHECK (transaction_type IN ('APPROVE', 'CANCEL', 'CASH_RECEIPT')),
+  transaction_type TEXT NOT NULL CHECK (transaction_type IN ('APPROVE', 'CANCEL', 'CASH_RECEIPT', 'CASH_RECEIPT_CANCEL')),
   payment_method TEXT NOT NULL,
   amount INTEGER NOT NULL CHECK (amount > 0),
   installment_months INTEGER NOT NULL DEFAULT 0,
@@ -360,7 +360,35 @@ CREATE TABLE IF NOT EXISTS van_transactions (
   source TEXT,
   van_reference TEXT,
   resolved_at TEXT,
-  resolved_by INTEGER
+  resolved_by INTEGER,
+  cash_receipt_purpose TEXT,
+  identity_type TEXT,
+  original_approved_at TEXT,
+  cancel_reason TEXT
+);
+
+-- 영수증 출력 작업. 같은 job_id는 Bridge가 한 번만 출력한다. 처음 출력 뒤의 출력은 재출력(REPRINT)으로 표시한다.
+-- 출력 문서는 저장하지 않고 주문에서 다시 만든다(가입 코드 등). document_hashes에는 이 작업으로 보낸 문서 해시를 남긴다.
+CREATE TABLE IF NOT EXISTS pos_print_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+  terminal_id INTEGER REFERENCES pos_terminals(id) ON DELETE SET NULL,
+  order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
+  job_id TEXT NOT NULL,
+  document_type TEXT NOT NULL CHECK (document_type IN ('RECEIPT', 'TEST')),
+  copy_type TEXT NOT NULL CHECK (copy_type IN ('ORIGINAL', 'REPRINT')),
+  channel TEXT NOT NULL CHECK (channel IN ('BRIDGE', 'BROWSER')),
+  status TEXT NOT NULL DEFAULT 'REQUESTED' CHECK (status IN ('REQUESTED', 'PRINTED', 'FAILED', 'CANCELED')),
+  open_drawer INTEGER NOT NULL DEFAULT 0,
+  document_hashes TEXT,
+  error_code TEXT,
+  message TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  printed_at TEXT,
+  UNIQUE (pharmacy_id, job_id)
 );
 
 -- 결제 전에 서버에 올려 두는 판매. 카드 승인은 이 판매에 묶이고, 승인 뒤에는 상품·금액을 바꿀 수 없다.
@@ -633,6 +661,12 @@ CREATE TABLE IF NOT EXISTS customer_consents (
   source TEXT NOT NULL CHECK (source IN ('SIGNUP', 'APP', 'POS', 'PARTNER', 'NOTICE', 'MIGRATION')),
   created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS system_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_role_pharmacy ON users(role, pharmacy_id);

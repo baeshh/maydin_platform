@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const { getAll, getOne, run, transaction } = require('../db');
 const { authenticate, requireRole } = require('../middleware/auth');
+const { passwordProblem: validatePassword } = require('../services/password-policy');
 
 const router = express.Router();
 
@@ -9,13 +10,6 @@ const STAFF_COLUMNS = `u.id, u.email, u.name, u.phone, u.status, u.created_at, u
   (SELECT MAX(created_at) FROM admin_logs l WHERE l.user_id = u.id AND l.action LIKE 'POS_%') AS last_pos_activity_at,
   (SELECT COUNT(*) FROM orders o WHERE o.cashier_user_id = u.id AND o.order_type = 'POS_SALE'
      AND date(o.created_at, 'localtime') = date('now', 'localtime')) AS today_sale_count`;
-
-function validatePassword(password) {
-  const value = String(password || '');
-  if (value.length < 8) return '비밀번호는 8자 이상이어야 합니다.';
-  if (!/[A-Za-z]/.test(value) || !/\d/.test(value)) return '비밀번호는 영문과 숫자를 함께 사용해 주세요.';
-  return null;
-}
 
 function audit(req, action, targetId, description) {
   run(

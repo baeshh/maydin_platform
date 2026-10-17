@@ -372,7 +372,7 @@ function migratePayments() {
 
 function needsVanTransactionsRebuild() {
   const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'van_transactions'").get();
-  return row && !row.sql.includes("'UNKNOWN'");
+  return row && !row.sql.includes("'CASH_RECEIPT_CANCEL'");
 }
 
 // 카드 승인은 요청 번호(request_id) 하나에 한 번만. 결과를 모르면 UNKNOWN으로 두고 대사로만 정한다.
@@ -386,7 +386,17 @@ function migrateVan(schema) {
   addColumnIfMissing('pos_terminals', 'bridge_key_enc', 'TEXT');
   addColumnIfMissing('pos_terminals', 'bridge_paired_at', 'TEXT');
   addColumnIfMissing('pos_sale_drafts', 'pickup_order_id', 'INTEGER');
+  for (const column of ['cash_receipt_purpose', 'identity_type', 'original_approved_at', 'cancel_reason']) {
+    addColumnIfMissing('van_transactions', column, 'TEXT');
+  }
+  // 카운터 영수증 프린터: BROWSER(브라우저 인쇄) · BRIDGE(이 PC Bridge로 직접 출력)
+  addColumnIfMissing('pos_terminals', 'printer_mode', "TEXT NOT NULL DEFAULT 'BROWSER'");
+  addColumnIfMissing('pos_terminals', 'printer_auto_print', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('pos_terminals', 'printer_open_drawer', 'INTEGER NOT NULL DEFAULT 0');
   db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_pos_print_jobs_order ON pos_print_jobs(order_id);
+    CREATE INDEX IF NOT EXISTS idx_pos_print_jobs_open ON pos_print_jobs(terminal_id, status) WHERE status IN ('REQUESTED', 'FAILED');
+    CREATE INDEX IF NOT EXISTS idx_van_transactions_order ON van_transactions(order_id) WHERE order_id IS NOT NULL;
     CREATE UNIQUE INDEX IF NOT EXISTS idx_van_transactions_request
       ON van_transactions(pharmacy_id, request_id) WHERE request_id IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_van_transactions_draft ON van_transactions(sale_draft_id);
@@ -405,6 +415,45 @@ function migrateTerminals() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_pos_terminals_device
       ON pos_terminals(device_key_hash) WHERE device_key_hash IS NOT NULL;
     DROP INDEX IF EXISTS idx_pos_sessions_open_terminal;
+  `);
+}
+
+// 장애 중 기기 보관 거래 보존.
+// 카운터마다 RSA 키 쌍을 두고 기기는 공개키로만 잠근다(개인키는 서버에 암호문으로). 기기마다 미전송 거래 목록(번호·시각·금액)을 보고받는다.
+function migrateOfflinePreservation() {
+  addColumnIfMissing('pos_terminals', 'seal_key_id', 'TEXT');
+  addColumnIfMissing('pos_terminals', 'seal_public_key', 'TEXT');
+  addColumnIfMissing('pos_terminals', 'seal_private_key_enc', 'TEXT');
+  addColumnIfMissing('orders', 'recovery_ref', 'TEXT');
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pos_device_queues (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pharmacy_id INTEGER NOT NULL REFERENCES pharmacies(id) ON DELETE CASCADE,
+      install_id TEXT NOT NULL,
+      terminal_id INTEGER REFERENCES pos_terminals(id) ON DELETE SET NULL,
+      device_key_hash TEXT,
+      storage TEXT,
+      pending_count INTEGER NOT NULL DEFAULT 0,
+      failed_count INTEGER NOT NULL DEFAULT 0,
+      plain_count INTEGER NOT NULL DEFAULT 0,
+      total_amount INTEGER NOT NULL DEFAULT 0,
+      oldest_at TEXT,
+      entries_json TEXT NOT NULL DEFAULT '[]',
+      user_agent TEXT,
+      reported_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      reported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      retired_at TEXT,
+      retired_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      retire_note TEXT,
+      resolved_at TEXT,
+      resolved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      resolve_note TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (pharmacy_id, install_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_pos_device_queues_terminal ON pos_device_queues(terminal_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_pos_terminals_seal_key ON pos_terminals(seal_key_id) WHERE seal_key_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_orders_recovery_ref ON orders(pharmacy_id, recovery_ref) WHERE recovery_ref IS NOT NULL;
   `);
 }
 
@@ -483,6 +532,7 @@ function migratePos(schema) {
   migratePrivacy();
   migratePayments();
   migrateTerminals();
+  migrateOfflinePreservation();
   migrateVan(schema);
 
   db.exec(`

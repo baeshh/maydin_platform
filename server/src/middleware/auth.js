@@ -1,7 +1,8 @@
 const jwt = require('jsonwebtoken');
 const { getOne } = require('../db');
+const { jwtSecret } = require('../services/secrets');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
+const JWT_SECRET = jwtSecret();
 
 function signToken(user) {
   return jwt.sign(

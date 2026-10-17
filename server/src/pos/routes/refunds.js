@@ -2,6 +2,7 @@ const express = require('express');
 const { getAll, getOne, run, transaction } = require('../../db');
 const { PAYMENT_METHODS, PosError, audit, cleanText, handle, requireOwner, toInt, won } = require('../common');
 const { attachVanOriginals, normalizePayments, requireBridgeCancels, vanOriginal } = require('../services/payment-service');
+const { cancelCashReceiptsForRefund, reissueHint } = require('../services/cash-receipt-service');
 const { createRefundOrder, refundablePaymentBalances, reverseEarnedPoints } = require('../services/refund-service');
 const { buildReceipt, getPosOrder } = require('../services/sale-service');
 const { requireOpenSession } = require('../services/session-service');
@@ -66,6 +67,7 @@ router.post(
         terminal
       });
       reverseEarnedPoints(req, original, refundOrderId, lines, { full: true });
+      const cashReceipt = cancelCashReceiptsForRefund(req, { terminal, original, refundOrderId, payments, cancels: req.body.cash_receipt_cancels });
 
       run(
         `UPDATE payments SET payment_status = 'CANCELED', canceled_at = CURRENT_TIMESTAMP
@@ -80,7 +82,7 @@ router.post(
         original.id,
         `판매 전체 취소 ${original.order_number} · ${won(refundTotal)} · 사유: ${reason}${restock ? '' : ' · 재입고 안 함'}`
       );
-      return { refund: buildReceipt(req, refundOrderId), original: buildReceipt(req, original.id) };
+      return { refund: buildReceipt(req, refundOrderId), original: buildReceipt(req, original.id), cash_receipt_notices: cashReceipt.notices };
     })();
 
     return receipt;
@@ -173,6 +175,7 @@ router.post(
       ).remaining;
       const nextStatus = remainingQuantity > 0 ? 'PARTIALLY_REFUNDED' : 'REFUNDED';
       reverseEarnedPoints(req, original, refundOrderId, lines, { full: nextStatus === 'REFUNDED' });
+      const cashReceipt = cancelCashReceiptsForRefund(req, { terminal, original, refundOrderId, payments, cancels: req.body.cash_receipt_cancels });
       run(
         `UPDATE orders SET order_status = @status, payment_status = @status, updated_at = CURRENT_TIMESTAMP
          WHERE id = @id`,
@@ -194,7 +197,12 @@ router.post(
         original.id,
         `부분반품 ${original.order_number} · ${summary} · ${won(refundTotal)} · 사유: ${reason}${restock ? '' : ' · 재입고 안 함'}`
       );
-      return { refund: buildReceipt(req, refundOrderId), original: buildReceipt(req, original.id) };
+      return {
+        refund: buildReceipt(req, refundOrderId),
+        original: buildReceipt(req, original.id),
+        cash_receipt_notices: cashReceipt.notices,
+        cash_receipt_reissue: reissueHint(original.id, cashReceipt.canceled)
+      };
     })();
 
     res.status(201);

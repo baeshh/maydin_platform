@@ -2,6 +2,7 @@ const { getAll, getOne, run } = require('../../db');
 const { changePoints } = require('../../services/points');
 const { ADAPTERS, VanError, adapterFor, demoAdapter, manualAdapter } = require('../integrations');
 const { BRIDGE_PROTOCOL } = require('../integrations/bridge-protocol');
+const { TEST_PAYMENTS_DISABLED, testPaymentsAllowed } = require('../../services/payment-policy');
 const { PAYMENT_METHODS, PosError, cleanText, toInt, won } = require('../common');
 const { requireOpenSession } = require('./session-service');
 
@@ -80,6 +81,10 @@ function publicVan(tx) {
     source: tx.source,
     is_demo: tx.is_demo === 1,
     message: tx.message,
+    masked_identity: tx.masked_identity || null,
+    cash_receipt_purpose: tx.cash_receipt_purpose || null,
+    identity_type: tx.identity_type || null,
+    original_approval_number: tx.original_approval_number || null,
     order_id: tx.order_id,
     sale_draft_id: tx.sale_draft_id,
     created_at: tx.created_at
@@ -91,11 +96,13 @@ function insertVan(req, terminal, fields) {
     `INSERT INTO van_transactions (
       pharmacy_id, terminal_id, van_company, tid, transaction_type, payment_method, amount, installment_months,
       approval_number, card_company, masked_identity, original_approval_number, status, order_id, is_demo, message, created_by,
-      request_id, sale_draft_id, source, van_reference, resolved_at
+      request_id, sale_draft_id, source, van_reference, resolved_at,
+      cash_receipt_purpose, identity_type, original_approved_at, cancel_reason
     ) VALUES (
       @pharmacy_id, @terminal_id, @van_company, @tid, @transaction_type, @payment_method, @amount, @installment_months,
       @approval_number, @card_company, @masked_identity, @original_approval_number, @status, @order_id, @is_demo, @message, @created_by,
-      @request_id, @sale_draft_id, @source, @van_reference, @resolved_at
+      @request_id, @sale_draft_id, @source, @van_reference, @resolved_at,
+      @cash_receipt_purpose, @identity_type, @original_approved_at, @cancel_reason
     )`,
     {
       pharmacy_id: terminal.pharmacy_id,
@@ -116,6 +123,10 @@ function insertVan(req, terminal, fields) {
       source: 'SERVER',
       van_reference: null,
       resolved_at: null,
+      cash_receipt_purpose: null,
+      identity_type: null,
+      original_approved_at: null,
+      cancel_reason: null,
       ...fields
     }
   );
@@ -173,6 +184,11 @@ function requireBridgeAdapter(terminal) {
   return adapter;
 }
 
+function demoRejected() {
+  return new PosError(TEST_PAYMENTS_DISABLED, 409, 'TEST_PAYMENTS_DISABLED');
+}
+
+// 운영 서버는 데모 Bridge 승인을 실제 승인으로 받지 않는다. 데모 Bridge는 청구하지 않으므로 거절로 남긴다.
 function applyBridgeResult(terminal, tx, raw) {
   const outcome = requireBridgeAdapter(terminal).verifyBridgeResult(terminal, raw, {
     requestId: tx.request_id,
@@ -180,6 +196,9 @@ function applyBridgeResult(terminal, tx, raw) {
     method: tx.payment_method,
     amount: tx.amount
   });
+  if (outcome.isDemo && !testPaymentsAllowed()) {
+    return applyOutcome(tx, { status: 'DECLINED', message: `(데모) Bridge 결과라 받지 않았습니다. ${TEST_PAYMENTS_DISABLED}` }, { isDemo: true });
+  }
   return applyOutcome(tx, outcome, { isDemo: outcome.isDemo });
 }
 
@@ -266,6 +285,7 @@ function requestApproval(req, { terminal, draft, body }) {
     return { tx, bridgeRequest: bridgeRequest(terminal, tx) };
   }
 
+  if (adapter.isDemo && !testPaymentsAllowed()) throw demoRejected();
   // 서버가 VAN사와 직접 통신. 요청 기록을 먼저 남겨 두어, 응답 전에 끊겨도 대사할 거리가 남는다.
   const tx = insertVan(req, terminal, { ...base, source: 'SERVER', is_demo: adapter.isDemo ? 1 : 0, status: 'REQUESTED' });
   let outcome;
@@ -329,6 +349,8 @@ function reconcileApproval(req, { terminal, tx, body, owner }) {
 function voidApproval(req, { terminal, tx, body }) {
   if (tx.transaction_type !== 'APPROVE') throw new PosError('VAN 승인 내역을 찾을 수 없습니다.', 404);
   if (tx.terminal_id !== terminal.id) throw new PosError('다른 카운터 단말기의 승인은 그 카운터에서 취소해 주세요.', 403);
+  // 취소는 반영됐는데 응답만 못 받은 POS가 다시 보내는 경우.
+  if (tx.status === 'VOIDED') return tx;
   if (PENDING_STATUSES.includes(tx.status)) throw new PosError('결과를 모르는 승인은 먼저 결과를 조회해 주세요.', 409, 'APPROVAL_PENDING');
   if (tx.status !== 'APPROVED' || tx.order_id) throw new PosError('판매에 사용된 승인은 거래내역에서 취소·반품으로 처리해 주세요.', 409);
 
@@ -338,7 +360,14 @@ function voidApproval(req, { terminal, tx, body }) {
     if (!body.bridge_result) {
       throw new PosError('카드 단말기에서 승인을 취소해야 합니다.', 409, 'VAN_CANCEL_REQUIRED', { bridge_request: { ...cancelRequest, request_id: null } });
     }
-    recordBridgeCancel(req, terminal, { method: tx.payment_method, amount: tx.amount, originalApprovalNumber: tx.approval_number, cardCompany: tx.card_company, raw: body.bridge_result });
+    recordBridgeCancel(req, terminal, {
+      method: tx.payment_method,
+      amount: tx.amount,
+      originalApprovalNumber: tx.approval_number,
+      originalIsDemo: tx.is_demo === 1,
+      cardCompany: tx.card_company,
+      raw: body.bridge_result
+    });
     message = '판매 전 승인 취소 (단말기 취소 확인)';
   } else if (tx.source === 'MANUAL') {
     message = '판매 전 승인 취소 · 단말기에서 취소했는지 영수증으로 확인';
@@ -386,7 +415,8 @@ function verifyStatusFor(tx) {
   return tx.source === 'MANUAL' || tx.resolved_by ? 'UNVERIFIED' : 'VERIFIED';
 }
 
-function recordBridgeCancel(req, terminal, { method, amount, originalApprovalNumber, cardCompany, raw, orderId = null }) {
+// 데모 Bridge 취소는 데모 승인을 되돌릴 때만 받는다. 실제 승인을 데모로 취소하면 고객 카드는 취소되지 않는다.
+function recordBridgeCancel(req, terminal, { method, amount, originalApprovalNumber, originalIsDemo = false, cardCompany, raw, orderId = null }) {
   if (!raw?.request_id) throw new PosError('Bridge 취소 결과가 없습니다.', 400, 'BRIDGE_RESULT_INVALID');
   const outcome = requireBridgeAdapter(terminal).verifyBridgeResult(terminal, raw, {
     requestId: raw.request_id,
@@ -395,6 +425,7 @@ function recordBridgeCancel(req, terminal, { method, amount, originalApprovalNum
     amount,
     originalApprovalNumber
   });
+  if (outcome.isDemo && !originalIsDemo && !testPaymentsAllowed()) throw demoRejected();
   if (outcome.status !== 'APPROVED') throw new PosError(`단말기 취소가 완료되지 않았습니다. (${outcome.message || outcome.status})`, 409, 'VAN_CANCEL_FAILED');
   if (findByRequest(terminal.pharmacy_id, raw.request_id)) throw new PosError('이미 반영된 취소 결과입니다.', 409, 'REQUEST_ID_REUSED');
   return insertVan(req, terminal, {
@@ -435,9 +466,14 @@ function cancelVanPayment(req, payment, orderId, { terminal }) {
 const CANCELABLE_PROVIDERS = ['VAN_DEMO', 'VAN_BRIDGE'];
 
 function vanOriginal(row) {
-  return CANCELABLE_PROVIDERS.includes(row.payment_provider)
-    ? { approval_number: row.approval_number, card_company: row.card_company, provider: row.payment_provider }
-    : null;
+  if (!CANCELABLE_PROVIDERS.includes(row.payment_provider)) return null;
+  const tx = row.van_transaction_id ? getVan(row.van_transaction_id) : null;
+  return {
+    approval_number: row.approval_number,
+    card_company: row.card_company,
+    provider: row.payment_provider,
+    is_demo: row.payment_provider === 'VAN_DEMO' || tx?.is_demo === 1
+  };
 }
 
 function attachVanOriginals(originalOrderId, payments) {
@@ -507,6 +543,7 @@ function insertPayments(orderId, payments, { sign = 1, session, terminal, userId
         method: input.method,
         amount: input.amount,
         originalApprovalNumber: input.van_original.approval_number,
+        originalIsDemo: input.van_original.is_demo,
         cardCompany: input.van_original.card_company,
         raw: input.bridge_cancel,
         orderId
@@ -575,6 +612,7 @@ function requireVanAdapter(req) {
   const { terminal, session } = requireOpenSession(req);
   const adapter = adapterFor(terminal);
   if (!adapter.isDemo) throw new PosError('단말기가 데모 VAN 모드가 아닙니다. 현금영수증은 카드 단말기에서 발급해 주세요.', 409);
+  if (!testPaymentsAllowed()) throw demoRejected();
   return { terminal, session, adapter };
 }
 
@@ -582,8 +620,9 @@ function requireVanAdapter(req) {
 function openApprovals(terminalId) {
   return getAll(
     `SELECT * FROM van_transactions
-     WHERE terminal_id = @terminal_id AND transaction_type = 'APPROVE'
-       AND (status IN ('REQUESTED', 'UNKNOWN') OR (status = 'APPROVED' AND order_id IS NULL))
+     WHERE terminal_id = @terminal_id
+       AND ((transaction_type = 'APPROVE' AND (status IN ('REQUESTED', 'UNKNOWN') OR (status = 'APPROVED' AND order_id IS NULL)))
+         OR (transaction_type = 'CASH_RECEIPT' AND status IN ('REQUESTED', 'UNKNOWN')))
      ORDER BY id ASC`,
     { terminal_id: terminalId }
   );
@@ -592,6 +631,9 @@ function openApprovals(terminalId) {
 module.exports = {
   ADAPTERS,
   PENDING_STATUSES,
+  demoRejected,
+  insertVan,
+  requireBridgeAdapter,
   attachVanOriginals,
   claimVanTransaction,
   draftApprovals,

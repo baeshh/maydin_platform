@@ -117,6 +117,9 @@ try {
   {
     let res = await as(owner)('/pos/terminals/register', { method: 'POST', body: { terminal_id: terminalA.id } });
     check('이미 PC가 있는 카운터는 교체 확인 필요(409)', res.status === 409 && res.data.reason === 'DEVICE_ALREADY_REGISTERED', res.data);
+    // 교체 전에 기존 PC가 보관 거래가 없다고 보고한다(PC 교체 절차).
+    res = await as(owner, deviceA)('/pos/offline-queue/report', { method: 'POST', body: { install_id: 'phase14-pc-a-000001', storage: 'indexeddb', entries: [] } });
+    check('기존 PC 보관 거래 보고', res.status === 200, res.data);
     res = await as(owner)('/pos/terminals/register', { method: 'POST', body: { terminal_id: terminalA.id, replace: true, device_label: '새 PC' } });
     check('교체 등록', res.status === 201 && res.data.replaced === true, res.data);
     const oldA = deviceA;
@@ -187,6 +190,8 @@ try {
     res = await as(owner)(`/pos/terminals/${terminalA.id}`, { method: 'PATCH', body: { status: 'BROKEN' } });
     check('없는 상태 거절', res.status === 400, res.data);
 
+    res = await as(owner, deviceB)('/pos/offline-queue/report', { method: 'POST', body: { install_id: 'phase14-pc-b-000001', storage: 'indexeddb', entries: [] } });
+    check('B PC 보관 거래 보고', res.status === 200, res.data);
     res = await as(owner)(`/pos/terminals/${firstTerminal.id}/revoke-device`, { method: 'POST' });
     check('B PC 해제', res.status === 200, res.data);
     res = await as(owner, deviceB)('/pos/sales', { method: 'POST', body: saleBody() });

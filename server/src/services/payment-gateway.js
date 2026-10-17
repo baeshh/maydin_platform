@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { getOne, run } = require('../db');
+const { testPaymentsAllowed } = require('./payment-policy');
 
 // 결제사 연동. 실제 결제사는 토스페이먼츠(코어 API v1)만, 그 밖에는 실제 돈이 오가지 않는 데모 결제사를 둔다.
 // 서버는 결제사의 응답(승인 상태·금액·주문번호)을 직접 다시 확인한 뒤에만 주문을 만든다.
@@ -23,7 +24,6 @@ function disabled(provider, message) {
 // 운영(NODE_ENV=production)에서는 실제 결제가 확실히 켜진 경우에만 온라인 결제를 연다(실패 시 닫힘).
 function paymentConfig(env = process.env) {
   const provider = String(env.PG_PROVIDER || 'DEMO').trim().toUpperCase();
-  const production = env.NODE_ENV === 'production';
 
   if (provider === 'TOSS') {
     const secretKey = String(env.TOSS_SECRET_KEY || '').trim();
@@ -34,8 +34,8 @@ function paymentConfig(env = process.env) {
     if (live && env.PG_LIVE_ENABLED !== 'true') {
       return disabled(provider, '실결제 키가 있지만 운영 전환(PG_LIVE_ENABLED=true)을 하지 않아 온라인 결제를 막아 두었습니다.');
     }
-    if (!live && production && env.ALLOW_TEST_PAYMENTS !== 'true') {
-      return disabled(provider, '운영 서버에서는 테스트 키로 결제를 받을 수 없습니다.');
+    if (!live && !testPaymentsAllowed(env)) {
+      return disabled(provider, '운영 서버에서는 테스트 키로 결제를 받을 수 없습니다. 테스트 키는 스테이징 서버(별도 DB)에서만 씁니다.');
     }
     return {
       provider,
@@ -48,7 +48,7 @@ function paymentConfig(env = process.env) {
   }
 
   if (provider === 'DEMO') {
-    if (production && env.ALLOW_DEMO_PAYMENTS !== 'true') {
+    if (!testPaymentsAllowed(env)) {
       return disabled(provider, '운영 서버에서는 데모 결제를 쓸 수 없습니다. 결제사 연동을 마친 뒤 온라인 주문을 열어 주세요.');
     }
     return {

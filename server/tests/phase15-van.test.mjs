@@ -323,13 +323,22 @@ try {
   console.log('[현금영수증 (데모) — 식별번호는 가려서만 저장]');
   {
     await setMode('DEMO');
-    res = await o('/van/cash-receipt', { amount: 5000, identity: '010-1234-5678' });
-    check('발급', res.status === 201 && res.data.van_transaction.masked_identity === '010-****-5678', res.data);
+    const cashCid = randomUUID();
+    await prepare(cashCid);
+    const cashOrder = (await confirm(cashCid, [{ method: 'CASH', amount: 10000 }])).data.order;
+    res = await o(`/sales/${cashOrder.id}/cash-receipt`, { request_id: randomUUID(), purpose: 'INCOME', identity_input: 'POS', identity: '900101-1234567' });
+    check('주민등록번호 거절', res.status === 400 && /주민등록번호/.test(res.data.message), res.data);
+    res = await o(`/sales/${cashOrder.id}/cash-receipt`, { request_id: randomUUID(), purpose: 'INCOME', identity_input: 'POS', identity: '010-1234-5678' });
+    check('발급 · 판매에 연결', res.status === 201 && res.data.van_transaction.masked_identity === '010-****-5678' && res.data.van_transaction.status === 'USED', res.data);
     const row = db.prepare('SELECT * FROM van_transactions WHERE id = ?').get(res.data.van_transaction.id);
     check('원래 번호 저장 안 함', !JSON.stringify(row).includes('12345678'), row);
+    check('금액은 서버가 판매에서 계산', row.amount === 10000 && row.order_id === cashOrder.id, row);
     await setMode('MANUAL');
-    res = await o('/van/cash-receipt', { amount: 5000, identity: '01012345678' });
-    check('데모가 아니면 단말기에서 발급하라고 안내(409)', res.status === 409, res.data);
+    const manualCid = randomUUID();
+    await prepare(manualCid);
+    const manualOrder = (await confirm(manualCid, [{ method: 'CASH', amount: 10000 }])).data.order;
+    res = await o(`/sales/${manualOrder.id}/cash-receipt`, { request_id: randomUUID(), purpose: 'INCOME' });
+    check('수동 모드는 단말기 발급 승인번호 필요(400)', res.status === 400 && /승인번호/.test(res.data.message), res.data);
   }
 
   console.log('[픽업 주문 카운터 결제 — 승인은 그 픽업 주문에 묶음]');

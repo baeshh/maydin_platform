@@ -1,18 +1,10 @@
 const express = require('express');
 const { getAll, getOne, run, transaction } = require('../../db');
-const { PosError, audit, cleanText, handle, isOwner, requireOwner, toInt, won } = require('../common');
+const { PosError, audit, cleanText, handle, isOwner, requireOwner, won } = require('../common');
+const { PURPOSES, cashReceiptAmounts, issueCashReceipt, receiptCashReceipts, reconcileCashReceipt } = require('../services/cash-receipt-service');
 const { requireOpenDraft } = require('../services/draft-service');
-const {
-  findByRequest,
-  openApprovals,
-  parseRequestId,
-  publicVan,
-  reconcileApproval,
-  recordVan,
-  requestApproval,
-  requireVanAdapter,
-  voidApproval
-} = require('../services/payment-service');
+const { findByRequest, openApprovals, parseRequestId, publicVan, reconcileApproval, requestApproval, voidApproval } = require('../services/payment-service');
+const { getPosOrder } = require('../services/sale-service');
 const { requireOpenSession } = require('../services/session-service');
 const { requireTerminal } = require('../services/terminal-service');
 
@@ -44,7 +36,7 @@ function findApproval(req) {
   const tx = req.body.van_transaction_id
     ? getOne('SELECT * FROM van_transactions WHERE id = @id AND pharmacy_id = @pharmacy_id', { id: Number(req.body.van_transaction_id), pharmacy_id: req.pharmacyId })
     : findByRequest(req.pharmacyId, parseRequestId(req.body.request_id));
-  if (!tx || tx.transaction_type !== 'APPROVE') throw new PosError('승인 요청을 찾을 수 없습니다.', 404);
+  if (!tx || !['APPROVE', 'CASH_RECEIPT'].includes(tx.transaction_type)) throw new PosError('승인 요청을 찾을 수 없습니다.', 404);
   return tx;
 }
 
@@ -54,14 +46,17 @@ router.post(
   handle((req) => {
     const terminal = requireTerminal(req);
     const before = findApproval(req);
-    const { tx, unchanged } = reconcileApproval(req, { terminal, tx: before, body: req.body, owner: isOwner(req) });
+    const cashReceipt = before.transaction_type === 'CASH_RECEIPT';
+    const { tx, unchanged } = transaction(() =>
+      (cashReceipt ? reconcileCashReceipt : reconcileApproval)(req, { terminal, tx: before, body: req.body, owner: isOwner(req) })
+    )();
     if (!unchanged) {
       audit(
         req,
         req.body.resolution ? 'POS_VAN_RESOLVE' : 'POS_VAN_RECONCILE',
         'VAN_TRANSACTION',
         tx.id,
-        `승인 결과 확인 ${won(tx.amount)} · ${before.status} → ${tx.status}${req.body.resolution ? ' (관리자 확인)' : ''}${tx.approval_number && tx.approval_number !== '-' ? ` · 승인번호 ${tx.approval_number}` : ''}`
+        `${cashReceipt ? '현금영수증 발급' : '승인'} 결과 확인 ${won(tx.amount)} · ${before.status} → ${tx.status}${req.body.resolution ? ' (관리자 확인)' : ''}${tx.approval_number && tx.approval_number !== '-' ? ` · 승인번호 ${tx.approval_number}` : ''}`
       );
     }
     return { van_transaction: publicVan(tx), unchanged: Boolean(unchanged) };
@@ -88,7 +83,9 @@ router.post(
       });
       if (!current) throw new PosError('VAN 승인 내역을 찾을 수 없습니다.', 404);
       const voided = voidApproval(req, { terminal, tx: current, body: req.body });
-      audit(req, 'POS_VAN_VOID', 'VAN_TRANSACTION', voided.id, `판매 전 승인 취소 ${won(voided.amount)} · ${voided.source || 'SERVER'}`);
+      if (current.status !== 'VOIDED') {
+        audit(req, 'POS_VAN_VOID', 'VAN_TRANSACTION', voided.id, `판매 전 승인 취소 ${won(voided.amount)} · ${voided.source || 'SERVER'}`);
+      }
       return voided;
     })();
     return { van_transaction: publicVan(tx) };
@@ -183,26 +180,41 @@ router.post(
   })
 );
 
-/* ---------- 현금영수증 (데모) ---------- */
+/* ---------- 현금영수증 (판매 후 발급) ---------- */
+
+// 판매의 현금·계좌이체 금액으로 발급한다. 금액·과세 구분은 서버가 정하고, 식별번호는 Bridge(단말기)에서만 다룬다.
+router.get(
+  '/sales/:id/cash-receipt',
+  handle((req) => {
+    const order = getPosOrder(req, req.params.id);
+    return {
+      amounts: order.order_type === 'POS_SALE' ? cashReceiptAmounts(order.id) : null,
+      cash_receipts: receiptCashReceipts(order),
+      purposes: PURPOSES
+    };
+  })
+);
 
 router.post(
-  '/van/cash-receipt',
+  '/sales/:id/cash-receipt',
   handle((req, res) => {
-    const { terminal, adapter } = requireVanAdapter(req);
-    const amount = toInt(req.body.amount, '현금영수증 금액', { min: 1, max: 100000000 });
-    const purpose = req.body.purpose === 'EXPENSE' ? 'EXPENSE' : 'INCOME';
-    const result = adapter.issueCashReceipt({ identity: req.body.identity, purpose });
-    const tx = recordVan(req, terminal, {
-      transaction_type: 'CASH_RECEIPT',
-      payment_method: 'CASH',
-      amount,
-      approval_number: result.approvalNumber,
-      masked_identity: result.maskedIdentity,
-      status: 'APPROVED',
-      message: result.message
-    });
-    res.status(201);
-    return { van_transaction: { ...publicVan(tx), masked_identity: tx.masked_identity } };
+    const terminal = requireTerminal(req);
+    const order = getPosOrder(req, req.params.id);
+    const { tx, duplicate, bridgeRequest } = transaction(() => issueCashReceipt(req, { terminal, order, body: req.body }))();
+    if (tx.status === 'DECLINED' || tx.status === 'NOT_FOUND') {
+      throw new PosError(tx.message || '현금영수증 발급이 거절되었습니다.', 402, 'VAN_DECLINED', { van_transaction: publicVan(tx) });
+    }
+    if (!duplicate && ['USED', 'REQUESTED'].includes(tx.status)) {
+      audit(
+        req,
+        'POS_CASH_RECEIPT',
+        'ORDER',
+        order.id,
+        `${order.order_number} 현금영수증 ${PURPOSES[tx.cash_receipt_purpose] || ''} ${won(tx.amount)} · ${tx.source} · ${tx.status === 'USED' ? `승인 ${tx.approval_number}` : '단말기 요청'}${tx.is_demo ? ' (데모)' : ''}`
+      );
+    }
+    res.status(duplicate ? 200 : tx.status === 'USED' ? 201 : 202);
+    return { van_transaction: publicVan(tx), duplicate: Boolean(duplicate), bridge_request: bridgeRequest };
   })
 );
 

@@ -4,6 +4,7 @@ const crypto = require('crypto');
 // Bridge는 카운터 PC에서 카드 단말기·VAN Agent와 통신하고, 결과를 카운터 등록 때 받은 Bridge 키로 서명해 POS 화면에 돌려준다.
 // POS 화면은 결과를 그대로 서버에 전달만 한다. 서명이 맞지 않으면 서버는 승인으로 인정하지 않는다.
 // 서명 대상 문자열 = 아래 필드를 순서대로 줄바꿈으로 이은 값. 없는 값은 빈 문자열.
+// transaction_type: APPROVE · CANCEL(카드) · CASH_RECEIPT · CASH_RECEIPT_CANCEL(현금영수증) · PRINT(영수증 출력)
 const BRIDGE_PROTOCOL = 'maydin-bridge/1';
 const SIGNED_FIELDS = [
   'terminal_id',
@@ -18,7 +19,14 @@ const SIGNED_FIELDS = [
   'card_company',
   'van_reference',
   'occurred_at',
-  'demo'
+  'demo',
+  'purpose',
+  'identity_type',
+  'masked_identity',
+  'original_approved_at',
+  'cancel_reason',
+  'error_code',
+  'document_hash'
 ];
 
 function canonical(payload) {

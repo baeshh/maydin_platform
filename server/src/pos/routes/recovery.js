@@ -4,8 +4,16 @@ const { OUTAGE_KINDS, createOutage, listOutages, outageDetail } = require('../..
 const { syncSettings } = require('../../services/product-import');
 const { PosError, audit, cleanText, handle, requireOwner, toInt } = require('../common');
 const { logStock } = require('../services/inventory-service');
+const { outageDeviceCheck } = require('../services/offline-service');
 
 const router = express.Router();
+
+function unconfirmedLabel(item) {
+  const name = item.terminal_name || '카운터 없음';
+  if (item.kind === 'LOST') return `${name} 교체한 PC ${item.install}(서버에 없는 거래 ${item.missing_count}건)`;
+  if (item.kind === 'UNREPORTED') return `${name}(보고 없음)`;
+  return `${name} PC ${item.install}(마지막 보고 ${item.reported_at})`;
+}
 
 // 장애 때 단말기에 보관할 상품 목록. 바코드·가격·구분만 담고 고객 정보는 넣지 않는다.
 router.get(
@@ -49,9 +57,13 @@ router.post(
   })
 );
 
+function withDeviceCheck(pharmacyId, detail) {
+  return { ...detail, device_check: detail.outage.status === 'RECONCILED' ? null : outageDeviceCheck(pharmacyId, detail.outage) };
+}
+
 router.get(
   '/outages/:id',
-  handle((req) => ({ ...outageDetail(req.pharmacyId, req.params.id), legacy_stock: syncSettings(req.pharmacyId).enabled }))
+  handle((req) => ({ ...withDeviceCheck(req.pharmacyId, outageDetail(req.pharmacyId, req.params.id)), legacy_stock: syncSettings(req.pharmacyId).enabled }))
 );
 
 // 장애 뒤 재고 대사: 복구 거래에 나온 상품을 모두 세어 시스템 재고를 실제 수량으로 맞추고 장애를 닫는다.
@@ -67,6 +79,19 @@ router.post(
     return transaction(() => {
       const detail = outageDetail(req.pharmacyId, req.params.id);
       if (detail.outage.status === 'RECONCILED') throw new PosError('이미 재고 대사를 마친 장애입니다.', 409);
+      // 다른 PC에 아직 안 들어온 장애 중 거래가 있으면 센 수량과 시스템 재고가 맞지 않는다.
+      const deviceCheck = outageDeviceCheck(req.pharmacyId, detail.outage);
+      if (deviceCheck.pending.length) {
+        const count = deviceCheck.pending.reduce((sum, d) => sum + d.unsent_count, 0);
+        throw new PosError(`서버로 보내지 않은 장애 중 거래가 ${count}건 남은 PC가 있습니다(${deviceCheck.pending.map((d) => d.terminal_name || `PC ${d.install}`).join(', ')}). 먼저 보낸 뒤 대사해 주세요.`, 409, 'OFFLINE_QUEUE_PENDING', {
+          device_check: deviceCheck
+        });
+      }
+      if (deviceCheck.unconfirmed.length && req.body.confirm_devices !== true) {
+        throw new PosError('장애가 끝난 뒤 보관 거래를 확인하지 못한 PC가 있습니다. 그 PC에 남은 거래가 없는지 직접 확인한 뒤 대사해 주세요.', 409, 'DEVICES_UNCONFIRMED', {
+          device_check: deviceCheck
+        });
+      }
       const adjusted = [];
       if (!legacy) {
         for (const item of detail.products) {
@@ -102,7 +127,7 @@ router.post(
         'POS_OUTAGE_RECONCILE',
         'OUTAGE',
         detail.outage.id,
-        `장애 #${detail.outage.id} 재고 대사 완료 · 상품 ${detail.products.length}종 확인${legacy ? ' (기존 POS 재고 기준 — 수량은 기존 POS에서 조정)' : ` · 조정 ${adjusted.length}종`}${adjusted.length ? ` (${adjusted.map((a) => `${a.product_name} ${a.before}→${a.after}`).join(', ')})` : ''}`
+        `장애 #${detail.outage.id} 재고 대사 완료 · 상품 ${detail.products.length}종 확인${legacy ? ' (기존 POS 재고 기준 — 수량은 기존 POS에서 조정)' : ` · 조정 ${adjusted.length}종`}${adjusted.length ? ` (${adjusted.map((a) => `${a.product_name} ${a.before}→${a.after}`).join(', ')})` : ''}${deviceCheck.unconfirmed.length ? ` · 관리자가 직접 확인한 PC: ${deviceCheck.unconfirmed.map(unconfirmedLabel).join(', ')}` : ''}`
       );
       return { ...outageDetail(req.pharmacyId, detail.outage.id), adjusted, legacy_stock: legacy };
     })();

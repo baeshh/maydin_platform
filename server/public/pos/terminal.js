@@ -1,13 +1,13 @@
 // MAYDIN POS · 단말기·VAN 설정
 /* ---------- 단말기 · VAN ---------- */
 
-const VAN_TX_LABELS = { APPROVE: '승인', CANCEL: '취소', CASH_RECEIPT: '현금영수증' };
+const VAN_TX_LABELS = { APPROVE: '승인', CANCEL: '취소', CASH_RECEIPT: '현금영수증', CASH_RECEIPT_CANCEL: '현금영수증 취소' };
 const VAN_TX_STATUS = {
   REQUESTED: ['orange', '응답 대기'],
   UNKNOWN: ['red', '결과 모름'],
   APPROVED: ['blue', '승인(미사용)'],
   USED: ['green', '판매 반영'],
-  VOIDED: ['gray', '판매 전 취소'],
+  VOIDED: ['gray', '취소됨'],
   DECLINED: ['red', '거절'],
   NOT_FOUND: ['gray', '승인 없음 확인']
 };
@@ -40,7 +40,7 @@ async function openVanSettings() {
                 .map(
                   (m) => `<label class="pay-row" style="display: flex; gap: 10px; align-items: flex-start; padding: 10px; margin: 0; cursor: ${owner && (m.available || m.mode === van.mode) ? 'pointer' : 'not-allowed'}; opacity: ${m.available || m.mode === van.mode ? 1 : 0.55};">
                     <input type="radio" name="vanMode" value="${m.mode}" ${m.mode === van.mode ? 'checked' : ''} ${owner && (m.available || m.mode === van.mode) ? '' : 'disabled'} onchange="pickVanMode('${m.mode}')" />
-                    <span><b>${h(m.label)}</b>${m.is_demo ? ' <span class="demo-tag">데모</span>' : ''}${m.available ? '' : ' <span class="badge gray">계약 정보 필요</span>'}
+                    <span><b>${h(m.label)}</b>${m.is_demo ? ' <span class="demo-tag">데모</span>' : ''}${m.available ? '' : ` <span class="badge gray">${m.is_demo ? '운영 서버에서 사용 안 함' : '계약 정보 필요'}</span>`}
                       <div class="muted" style="font-size: 12px; line-height: 1.5;">${h(VAN_MODE_HELP[m.mode] || '')}${m.available || !m.requirements.length ? '' : `<br />필요한 것: ${h(m.requirements.join(', '))}`}</div></span>
                   </label>`
                 )
@@ -54,6 +54,7 @@ async function openVanSettings() {
             </div>
             ${owner ? '<button class="btn btn-primary btn-block" type="button" onclick="saveVanSettings()">저장</button>' : '<div class="notice">단말기 설정은 약국 관리자만 바꿀 수 있습니다.</div>'}
             ${van.is_demo ? '<div class="notice" style="margin-top: 12px;">데모 규칙: 5만원 미만 할부는 카드사 거절로 처리됩니다. 간편결제 바코드는 숫자 16~24자리(28로 시작=카카오페이, 29=네이버페이, 30=토스페이, 31=페이코)로 인식합니다.</div>' : ''}
+            ${printerBoxHtml(van, owner)}
           </div>
           <div>
             <div class="section-title" style="margin-top: 0;">오늘 이 카운터 승인 기록</div>

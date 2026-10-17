@@ -1,5 +1,7 @@
 const crypto = require('crypto');
 const { getOne, run } = require('../../db');
+const { testPaymentsAllowed } = require('../../services/payment-policy');
+const { IdentityError, classifyIdentity } = require('./cash-identity');
 const { VanError, defineAdapter, result } = require('./van-adapter');
 
 const DEMO_CARD_COMPANIES = ['신한카드', '삼성카드', 'KB국민카드', '현대카드', '롯데카드', '하나카드', 'BC카드', 'NH농협카드'];
@@ -25,10 +27,11 @@ function pick(list) {
 }
 
 function maskIdentity(value) {
-  const digits = String(value || '').replace(/\D/g, '');
-  if (digits.length < 4) return null;
-  if (digits.length === 10 && !digits.startsWith('01')) return `${digits.slice(0, 3)}-**-***${digits.slice(-2)}`;
-  return `${digits.slice(0, 3)}-****-${digits.slice(-4)}`;
+  try {
+    return classifyIdentity(value).masked;
+  } catch {
+    return null;
+  }
 }
 
 // 데모 VAN사 서버의 거래 원장에 남긴다. 결과 조회는 이 원장만 본다.
@@ -46,6 +49,7 @@ const demoAdapter = defineAdapter({
   mode: 'DEMO',
   label: 'VAN 자동 승인 (데모)',
   isDemo: true,
+  available: () => testPaymentsAllowed(),
 
   approve({ pharmacyId, requestId, method, amount, installmentMonths = 0, barcode, simulate }) {
     let cardCompany;
@@ -106,11 +110,16 @@ const demoAdapter = defineAdapter({
   },
 
   issueCashReceipt({ identity, purpose }) {
-    const masked = maskIdentity(identity);
-    if (!masked) throw new VanError('[데모] 휴대폰번호 또는 사업자번호를 입력해 주세요.');
+    let classified;
+    try {
+      classified = classifyIdentity(identity);
+    } catch (error) {
+      if (error instanceof IdentityError) throw new VanError(`[데모] ${error.message}`, 400, 'IDENTITY_INVALID');
+      throw error;
+    }
     return result('APPROVED', {
       approvalNumber: approvalNumber(),
-      maskedIdentity: masked,
+      maskedIdentity: classified.masked,
       message: `[데모] 현금영수증 ${purpose === 'EXPENSE' ? '지출증빙' : '소득공제'} 발급 완료`
     });
   }

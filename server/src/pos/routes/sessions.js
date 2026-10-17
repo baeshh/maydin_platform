@@ -1,6 +1,7 @@
 const express = require('express');
 const { getOne, run, transaction } = require('../../db');
 const { PosError, audit, cleanText, handle, requireOwner, toInt, won } = require('../common');
+const { unsentForTerminal } = require('../services/offline-service');
 const { openApprovals, publicVan } = require('../services/payment-service');
 const { findOpenSession, requireOpenSession, sessionSummary, withSummary } = require('../services/session-service');
 const { publicTerminal, requireTerminal } = require('../services/terminal-service');
@@ -107,6 +108,14 @@ router.post(
     if (approvals.length) {
       throw new PosError(`정리되지 않은 카드 승인이 ${approvals.length}건 있습니다. 승인 결과를 확인하거나 취소한 뒤 마감해 주세요.`, 409, 'VAN_APPROVALS_OPEN', {
         approvals: approvals.map(publicVan)
+      });
+    }
+    // 장애 중 판매가 PC에 남아 있으면 그 매출·현금이 이 영업에 아직 안 들어왔다.
+    const unsent = unsentForTerminal(session.terminal_id);
+    if (unsent.length) {
+      const count = unsent.reduce((sum, d) => sum + d.unsent_count, 0);
+      throw new PosError(`이 카운터 PC에 서버로 보내지 않은 장애 중 거래가 ${count}건 있습니다. 「장애 · 복구」에서 보낸 뒤 마감해 주세요.`, 409, 'OFFLINE_QUEUE_PENDING', {
+        devices: unsent
       });
     }
     const unverified = getOne("SELECT COUNT(*) AS count FROM payments WHERE pos_session_id = @id AND verify_status = 'UNVERIFIED'", { id: session.id }).count;

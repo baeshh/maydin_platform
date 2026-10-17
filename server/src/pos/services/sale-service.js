@@ -2,6 +2,7 @@ const { getAll, getOne } = require('../../db');
 const { receiptSignupCode } = require('../../services/member-auth');
 const { taxBreakdown } = require('../../services/tax');
 const { PosError, isOwner } = require('../common');
+const { cashReceiptAmounts, receiptCashReceipts } = require('./cash-receipt-service');
 const { refundablePaymentBalances } = require('./refund-service');
 
 function getPosOrder(req, id) {
@@ -51,6 +52,13 @@ function buildReceipt(req, orderId) {
   const pointBalance = order.customer_id
     ? getOne('SELECT point_balance FROM customers WHERE id = @id', { id: order.customer_id })?.point_balance ?? null
     : null;
+  const cashReceipts = receiptCashReceipts(order);
+  const issuable = order.order_type === 'POS_SALE' && ['COMPLETED', 'PARTIALLY_REFUNDED'].includes(order.order_status);
+  const cashReceiptAmount = issuable ? cashReceiptAmounts(order.id).amount : 0;
+  const pendingCashReceipt = getOne(
+    "SELECT id FROM van_transactions WHERE order_id = @id AND transaction_type = 'CASH_RECEIPT' AND status IN ('REQUESTED', 'UNKNOWN') LIMIT 1",
+    { id: order.id }
+  );
 
   return {
     pharmacy,
@@ -72,7 +80,11 @@ function buildReceipt(req, orderId) {
     tax: taxBreakdown(items),
     payment_balances: order.order_type === 'POS_SALE' ? refundablePaymentBalances(order.id) : {},
     signup_code: receiptSignupCode(order),
+    cash_receipts: cashReceipts,
+    cash_receipt_amount: cashReceiptAmount,
+    cash_receipt_pending: Boolean(pendingCashReceipt),
     permissions: {
+      can_issue_cash_receipt: cashReceiptAmount > 0 && !cashReceipts.length && !pendingCashReceipt,
       can_issue_signup_code:
         isOwner(req) && order.order_type === 'POS_SALE' && !order.customer_id && ['COMPLETED', 'PARTIALLY_REFUNDED'].includes(order.order_status),
       can_cancel: isOwner(req) && order.order_type === 'POS_SALE' && order.order_status === 'COMPLETED' && sameDay,

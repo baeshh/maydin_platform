@@ -16,11 +16,11 @@
         <form id="loginForm">
           <div class="field">
             <label class="label" for="loginEmail">이메일</label>
-            <input id="loginEmail" class="input" name="email" autocomplete="username" value="owner@apharmacy.kr" />
+            <input id="loginEmail" class="input" name="email" autocomplete="username" />
           </div>
           <div class="field">
             <label class="label" for="loginPassword">비밀번호</label>
-            <input id="loginPassword" class="input" name="password" type="password" autocomplete="current-password" value="owner1234" />
+            <input id="loginPassword" class="input" name="password" type="password" autocomplete="current-password" />
           </div>
           <button class="btn btn-primary btn-block btn-lg" type="submit">로그인</button>
         </form>
@@ -41,7 +41,8 @@
           </button>
           <button class="status-chip" id="networkChip" type="button" onclick="openRecovery()" title="장애 대응 · 복구"><span class="dot"></span><span>온라인</span></button>
           <span class="status-chip hide-md" id="stockMasterChip" style="display: none;"></span>
-          <button class="status-chip" id="approvalChip" type="button" onclick="openApprovalManager()" style="display: none;" title="결과를 모르거나 판매에 안 쓴 카드 승인"></button>
+          <button class="status-chip" id="approvalChip" type="button" onclick="openApprovalManager()" style="display: none;" title="결과를 모르거나 판매에 안 쓴 카드 승인 · 현금영수증"></button>
+          <button class="status-chip" id="printChip" type="button" onclick="openPrintJobs()" style="display: none;" title="프린터 문제로 뽑지 못한 영수증"></button>
         </div>
         <div class="top-actions">
           <a class="btn btn-outline btn-sm" href="/owner.html">파트너센터</a>
@@ -115,6 +116,7 @@
     <script src="/scan-kit.js"></script>
     <script src="/pos/core.js"></script>
     <script src="/pos/auth.js"></script>
+    <script src="/pos/offline-seal.js"></script>
     <script src="/pos/local-store.js"></script>
     <script src="/pos/recovery.js"></script>
     <script src="/pos/session.js"></script>
@@ -125,6 +127,8 @@
     <script src="/pos/payment.js"></script>
     <script src="/pos/approvals.js"></script>
     <script src="/pos/receipt.js"></script>
+    <script src="/pos/printer.js"></script>
+    <script src="/pos/cash-receipt.js"></script>
     <script src="/pos/refund.js"></script>
     <script src="/pos/pickup.js"></script>
     <script src="/pos/hold.js"></script>

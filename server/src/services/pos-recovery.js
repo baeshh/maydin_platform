@@ -50,8 +50,19 @@ function parseRecovery(raw, pharmacyId) {
   const occurredAt = toDbTime(parseTime(raw.occurred_at, '실제 판매 시각'));
   if (!raw.outage_id) throw new RecoveryError('복구 거래는 장애 기록에 묶어야 합니다. 장애를 먼저 등록해 주세요.');
   const outage = findOutage(pharmacyId, raw.outage_id);
-  return { source, occurredAt, outage, note: String(raw.note || '').trim().slice(0, 200) };
+  const ref = source === 'MANUAL' ? parseRecoveryRef(raw.ref) : null;
+  return { source, occurredAt, outage, ref, note: String(raw.note || '').trim().slice(0, 200) };
 }
+
+// 수기 복구 때 임시 영수증·장부에 적힌 임시번호(거래 고유번호 앞 8자리). 같은 거래가 기기에서 늦게 전송돼 두 번 기록되는 것을 막는다.
+function parseRecoveryRef(value) {
+  if (value === undefined || value === null || String(value).trim() === '') return null;
+  const ref = String(value).trim().toLowerCase();
+  if (!/^[0-9a-f]{8}$/.test(ref)) throw new RecoveryError('임시번호는 임시 영수증에 찍힌 8자리(0~9, A~F)입니다.');
+  return ref;
+}
+
+const recoveryRefOf = (clientSaleId) => String(clientSaleId || '').slice(0, 8).toLowerCase();
 
 // 이미 저장된 거래의 재전송(중복)은 대사 뒤에도 허용해야 하므로, 중복 확인 다음에 부른다.
 function assertOutageOpen(outage) {
@@ -120,7 +131,8 @@ function listOutages(pharmacyId) {
 function outageDetail(pharmacyId, id) {
   const outage = findOutage(pharmacyId, id);
   const sales = getAll(
-    `SELECT o.id, o.order_number, o.final_amount, o.created_at, o.recovered_at, o.recovery_source, u.name AS cashier_name,
+    `SELECT o.id, o.order_number, o.final_amount, o.created_at, o.recovered_at, o.recovery_source, o.recovery_ref,
+            UPPER(SUBSTR(o.client_sale_id, 1, 8)) AS temp_number, u.name AS cashier_name,
             (SELECT GROUP_CONCAT(product_name || ' ×' || quantity, ', ') FROM order_items WHERE order_id = o.id) AS items_summary
      FROM orders o LEFT JOIN users u ON u.id = o.cashier_user_id
      WHERE o.outage_id = @id ORDER BY o.created_at ASC`,
@@ -141,6 +153,7 @@ function outageDetail(pharmacyId, id) {
 }
 
 module.exports = {
+  CLIENT_SALE_ID_PATTERN: CLIENT_SALE_ID,
   OUTAGE_KINDS,
   RECOVERY_SOURCES,
   RecoveryError,
@@ -151,5 +164,7 @@ module.exports = {
   outageDetail,
   parseClientSaleId,
   parseRecovery,
+  parseRecoveryRef,
+  recoveryRefOf,
   saleFingerprint
 };

@@ -140,7 +140,7 @@ console.log('[본사 약국별 성과]');
       store_slug: `perf-${code.toLowerCase()}`,
       commission_rate: 5,
       owner_email: `${code.toLowerCase()}@perf.kr`,
-      owner_password: 'owner1234'
+      owner_password: 'perfOwner2026'
     }
   });
   check('테스트 약국 생성', created.status === 201 || created.status === 200, created.data);

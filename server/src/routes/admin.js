@@ -9,6 +9,7 @@ const { retentionSettings } = require('../services/customers');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { pharmacyPerformance } = require('../services/members');
 const { sendCsv } = require('../services/csv');
+const { passwordProblem } = require('../services/password-policy');
 
 const router = express.Router();
 
@@ -95,6 +96,9 @@ router.post('/pharmacies', (req, res) => {
     default_courier
   } = req.body;
 
+  const passwordError = passwordProblem(owner_password);
+  if (passwordError) return res.status(400).json({ message: `운영자 임시 비밀번호: ${passwordError}` });
+
   const exists = getOne('SELECT id FROM pharmacies WHERE pharmacy_code = @pharmacy_code OR store_slug = @store_slug', {
     pharmacy_code,
     store_slug
@@ -139,7 +143,7 @@ router.post('/pharmacies', (req, res) => {
        VALUES (@email, @password_hash, @name, @phone, 'PHARMACY_OWNER', @pharmacy_id)`,
       {
         email: owner_email,
-        password_hash: bcrypt.hashSync(owner_password || 'owner1234', 10),
+        password_hash: bcrypt.hashSync(String(owner_password), 10),
         name: owner_name,
         phone: owner_phone || phone,
         pharmacy_id: pharmacyId

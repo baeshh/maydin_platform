@@ -1,7 +1,43 @@
 require('dotenv').config();
 
+const { SecretConfigError, assertSecrets, isProduction } = require('../services/secrets');
+
+try {
+  assertSecrets();
+} catch (error) {
+  if (!(error instanceof SecretConfigError)) throw error;
+  console.error(`[보안] ${error.message}`);
+  process.exit(1);
+}
+
 const bcrypt = require('bcryptjs');
-const { migrate, getOne, run } = require('./index');
+const { db, migrate, getOne, run } = require('./index');
+const { passwordProblem } = require('../services/password-policy');
+const { environmentProblem, markDataEnvironment } = require('../services/payment-policy');
+
+// 운영 DB에는 데모 약국·계정을 만들지 않는다. 첫 플랫폼 관리자는 환경변수로 받은 이메일·비밀번호로만 만든다.
+function seedInitialAdmin() {
+  if (getOne("SELECT id FROM users WHERE role = 'ADMIN' AND status = 'ACTIVE' LIMIT 1")) {
+    console.log('플랫폼 관리자 계정이 이미 있어 새로 만들지 않았습니다.');
+    return;
+  }
+  const email = String(process.env.INITIAL_ADMIN_EMAIL || '').trim().toLowerCase();
+  const password = String(process.env.INITIAL_ADMIN_PASSWORD || '');
+  if (!email || !password) {
+    console.log('플랫폼 관리자 계정이 없습니다. INITIAL_ADMIN_EMAIL·INITIAL_ADMIN_PASSWORD를 넣고 다시 실행하면 만듭니다.');
+    return;
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('INITIAL_ADMIN_EMAIL 형식이 올바르지 않습니다.');
+  const problem = passwordProblem(password, { minLength: 12 });
+  if (problem) throw new Error(`INITIAL_ADMIN_PASSWORD: ${problem}`);
+  if (getOne('SELECT id FROM users WHERE email = @email', { email })) throw new Error(`${email}은(는) 이미 다른 계정이 쓰는 이메일입니다.`);
+  run(
+    `INSERT INTO users (email, password_hash, name, role, status)
+     VALUES (@email, @password_hash, '플랫폼 관리자', 'ADMIN', 'ACTIVE')`,
+    { email, password_hash: bcrypt.hashSync(password, 12) }
+  );
+  console.log(`플랫폼 관리자 ${email}을(를) 만들었습니다. 환경변수에서 INITIAL_ADMIN_PASSWORD를 지워 주세요.`);
+}
 
 function seedAdmin() {
   const email = 'admin@maydin.kr';
@@ -120,12 +156,23 @@ function seedProducts(pharmacyId) {
   }
 }
 
-migrate();
-const pharmacyId = seedDemoPharmacy();
-seedAdmin();
-seedOwner(pharmacyId);
-seedProducts(pharmacyId);
+const environmentError = environmentProblem(db);
+if (environmentError) {
+  console.error(`[보안] ${environmentError}`);
+  process.exit(1);
+}
 
-console.log('DB initialized');
-console.log('Admin: admin@maydin.kr / admin1234');
-console.log('Owner: owner@apharmacy.kr / owner1234');
+migrate();
+markDataEnvironment(db);
+if (isProduction()) {
+  seedInitialAdmin();
+  console.log('DB initialized (운영 · 데모 약국·계정은 만들지 않음)');
+} else {
+  const pharmacyId = seedDemoPharmacy();
+  seedAdmin();
+  seedOwner(pharmacyId);
+  seedProducts(pharmacyId);
+  console.log('DB initialized (개발용 데모 데이터)');
+  console.log('Admin: admin@maydin.kr / admin1234');
+  console.log('Owner: owner@apharmacy.kr / owner1234');
+}
