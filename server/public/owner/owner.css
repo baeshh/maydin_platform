@@ -1053,6 +1053,41 @@ tr.selected td {
   font-size: 12px;
 }
 
+.mall-visibility {
+  border: 1px solid #d7e6fb;
+  border-radius: 14px;
+  background: #f4f8ff;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.mall-visibility.is-empty {
+  border-color: #f6d3a8;
+  background: #fff7ed;
+}
+
+.mall-visibility-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mall-visibility-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  font-size: 13px;
+}
+
+.mall-visibility-reasons span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .notice {
   position: fixed;
   right: 24px;

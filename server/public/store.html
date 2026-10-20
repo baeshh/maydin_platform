@@ -717,7 +717,7 @@
     <script src="/app.js"></script>
     <script>
       const params = new URLSearchParams(location.search);
-      const pharmacyCode = params.get('pharmacyCode') || 'A001';
+      const pharmacyCode = pharmacyCodeFromUrl();
       let pharmacy = null;
       let products = [];
       let selectedCategory = '전체';
@@ -807,7 +807,9 @@
                   el('div', { class: 'price' }, money(salePrice(product)))
                 )
               )
-            : [el('p', { class: 'muted', style: 'padding: 0 20px;' }, '등록된 상품이 없습니다. 약국 운영자 화면에서 상품을 등록해주세요.')])
+            : [el('p', { class: 'muted', style: 'padding: 0 20px;' }, isCustomerInThisStore()
+                ? '아직 이 약국몰에서 온라인으로 판매하는 상품이 없어요. 약국에 방문해 상담받아 보세요.'
+                : '고객 몰에 보이는 상품이 없습니다. 파트너센터 상품 관리에서 "일반 상품"으로 분류하고 "온라인 판매"를 켠 상품만 고객에게 보입니다.')])
         );
       }
 

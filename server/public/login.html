@@ -174,7 +174,7 @@
     <script src="/app.js"></script>
     <script>
       const params = new URLSearchParams(location.search);
-      const pharmacyCode = params.get('pharmacyCode') || 'A001';
+      const pharmacyCode = params.get('pharmacyCode') || '';
       $('#joinLink').href = `/join.html?pharmacyCode=${encodeURIComponent(pharmacyCode)}`;
 
       async function loadPharmacy() {
@@ -232,7 +232,7 @@
         message(notice);
       }
 
-      loadPharmacy();
+      if (requirePharmacyCode(pharmacyCode)) loadPharmacy();
     </script>
   </body>
 </html>

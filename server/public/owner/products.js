@@ -58,6 +58,7 @@ async function setProductsOnline(ids, visible) {
   if (visible && !confirm(`${ids.length.toLocaleString()}개 상품의 온라인 판매를 켤까요? 가격·구분·설명을 확인한 뒤 켜 주세요.`)) return;
   try {
     const { updated, skipped } = await api.request('/products/bulk-visibility', { method: 'POST', body: { ids, online_visible: visible } });
+    if (visible && productState.filter === 'offline') productState.filter = 'all';
     showToast(
       `${updated.toLocaleString()}개 상품의 온라인 판매를 ${visible ? '켰습니다' : '껐습니다'}.${skipped ? ` 일반 상품이 아닌 ${skipped.toLocaleString()}개는 건너뛰었습니다.` : ''}`
     );
@@ -81,7 +82,9 @@ async function classifyFilteredProducts() {
   if (!confirm(`${items.length.toLocaleString()}개 상품을 "${PRODUCT_TYPE_LABELS[type]}"(으)로 분류할까요?${warning} 온라인 판매는 분류한 뒤 따로 켭니다.`)) return;
   try {
     const { updated } = await api.request('/products/bulk-type', { method: 'POST', body: { ids: items.map((p) => p.id), product_type: type } });
-    showToast(`${updated.toLocaleString()}개 상품을 ${PRODUCT_TYPE_LABELS[type]}(으)로 분류했습니다.`);
+    // 일반 상품은 이어서 온라인 판매를 켜야 고객 몰에 보이므로 그 목록으로 넘어간다.
+    if (type === 'GENERAL') productState.filter = 'offline';
+    showToast(`${updated.toLocaleString()}개 상품을 ${PRODUCT_TYPE_LABELS[type]}(으)로 분류했습니다.${type === 'GENERAL' ? ' 이제 온라인 판매를 켜면 고객 몰에 보입니다.' : ''}`);
     loadOwner();
   } catch (error) {
     showToast(error.message);
@@ -90,6 +93,34 @@ async function classifyFilteredProducts() {
 
 function productMatches(p, q) {
   return [p.product_name, p.category_name, p.brand, p.barcode, p.external_code].some((value) => String(value || '').toLowerCase().includes(q));
+}
+
+const isMallVisible = (p) => p.product_type === 'GENERAL' && Number(p.online_visible) === 1 && p.status !== 'HIDDEN';
+
+// 고객 몰에는 "일반 상품 + 온라인 판매 켬"만 보인다. 몇 개가 왜 안 보이는지 상품 목록 위에 늘 보여 준다.
+function renderMallVisibility() {
+  const live = productState.source.filter((p) => p.status !== 'HIDDEN');
+  if (!live.length) return '';
+  const count = (match) => live.filter(match).length;
+  const visible = count(isMallVisible);
+  const unclassified = count((p) => p.product_type === 'UNCLASSIFIED');
+  const offline = count((p) => p.product_type === 'GENERAL' && !Number(p.online_visible));
+  const otc = count((p) => p.product_type === 'OTC');
+  const etc = count((p) => p.product_type === 'ETC');
+  const reasons = [
+    unclassified && `<span>분류 전 <b>${unclassified.toLocaleString()}개</b> <button class="btn btn-outline btn-sm" type="button" onclick="showProductFilter('unclassified')">분류하기</button></span>`,
+    offline && `<span>일반 상품이지만 온라인 판매 꺼짐 <b>${offline.toLocaleString()}개</b> <button class="btn btn-outline btn-sm" type="button" onclick="showProductFilter('offline')">켜기</button></span>`,
+    otc && `<span>일반의약품 <b>${otc.toLocaleString()}개</b> · 온라인 판매 불가(매장 판매만)</span>`,
+    etc && `<span>전문의약품 <b>${etc.toLocaleString()}개</b> · 판매 불가</span>`
+  ].filter(Boolean);
+  const preview = window.ownerPharmacyCode
+    ? `<a class="btn btn-outline btn-sm" href="/store.html?pharmacyCode=${encodeURIComponent(window.ownerPharmacyCode)}" target="_blank" rel="noopener">고객 몰 미리보기</a>`
+    : '';
+  return `<div class="mall-visibility ${visible ? '' : 'is-empty'}">
+    <div class="mall-visibility-head"><strong>고객 몰에 보이는 상품 ${visible.toLocaleString()}개</strong>${reasons.length ? ` <span class="list-meta">· 안 보이는 상품 ${(live.length - visible).toLocaleString()}개</span>` : ''}<span style="flex: 1;"></span>${preview}</div>
+    ${reasons.length ? `<div class="mall-visibility-reasons">${reasons.join('')}</div>` : ''}
+    ${visible ? '' : '<p class="list-meta">고객 몰이 비어 있습니다. 건강기능식품·웰니스 제품은 "일반 상품"으로 분류하고 온라인 판매를 켜 주세요.</p>'}
+  </div>`;
 }
 
 function renderProductFilters() {
@@ -111,7 +142,7 @@ function renderProductFilters() {
       </span>`
   };
   const bulk = productState.all.length ? bulkActions[productState.filter] || '' : '';
-  return `<div class="tab-bar" style="align-items: center;">${chips}<span style="flex: 1;"></span>${bulk}</div>`;
+  return `${renderMallVisibility()}<div class="tab-bar" style="align-items: center;">${chips}<span style="flex: 1;"></span>${bulk}</div>`;
 }
 
 function searchProducts(value) {
@@ -168,6 +199,7 @@ function renderProductPage() {
                 <span class="badge gray">${h(product.category_name || '미분류')}</span>
                 ${PRODUCT_TYPE_BADGES[product.product_type] || ''}
                 ${product.product_type === 'GENERAL' && !Number(product.online_visible) ? '<span class="badge gray">온라인 판매 꺼짐</span>' : ''}
+                ${isMallVisible(product) ? '<span class="badge green">고객 몰에 보임</span>' : ''}
                 ${product.product_type !== 'ETC' && !Number(product.pos_sale_enabled ?? 1) ? '<span class="badge gray">POS 판매 중지</span>' : ''}
                 <div class="list-meta">${product.barcode ? `바코드 ${h(product.barcode)}` : '바코드 미등록'}${product.external_code ? ` · 기존 코드 ${h(product.external_code)}` : ''}</div>
               </td>

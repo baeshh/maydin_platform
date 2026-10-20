@@ -25,14 +25,17 @@ const PENDING_MESSAGE = '약국에서 가입 내용을 확인하고 있어요. �
 const REJECTED_MESSAGE = '가입이 승인되지 않았어요. 자세한 내용은 약국에 문의해 주세요.';
 const LOGIN_FAILED = '휴대폰 번호 또는 PIN이 맞지 않습니다.';
 
+// 약국마다 독립된 폐쇄몰이라, 화면은 pharmacy_code로 회원 자신의 약국몰을 찾는다.
 function publicUser(user) {
+  const pharmacy = user.pharmacy_id ? getOne('SELECT pharmacy_code FROM pharmacies WHERE id = @id', { id: user.pharmacy_id }) : null;
   return {
     id: user.id,
     email: user.email,
     name: user.name,
     phone: user.phone,
     role: user.role,
-    pharmacy_id: user.pharmacy_id
+    pharmacy_id: user.pharmacy_id,
+    pharmacy_code: pharmacy?.pharmacy_code || null
   };
 }
 

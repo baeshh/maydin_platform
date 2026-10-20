@@ -480,7 +480,7 @@
     <script src="/app.js"></script>
     <script>
       const params = new URLSearchParams(location.search);
-      const pharmacyCode = params.get('pharmacyCode') || 'A001';
+      const pharmacyCode = params.get('pharmacyCode') || '';
       const channelCode = params.get('ch') || '';
       const form = $('#signupForm');
 
@@ -598,7 +598,7 @@
         }
       });
 
-      loadPharmacy();
+      if (requirePharmacyCode(pharmacyCode)) loadPharmacy();
     </script>
   </body>
 </html>

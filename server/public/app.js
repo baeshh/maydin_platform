@@ -109,9 +109,30 @@ function serializeForm(form) {
   return Object.fromEntries(new FormData(form).entries());
 }
 
-function pharmacyCodeFromUrl(fallback = 'A001') {
-  return new URLSearchParams(location.search).get('pharmacyCode') || fallback;
+// 약국몰은 약국마다 따로다. 주소에 약국 코드가 없으면 로그인한 회원의 약국으로 가고, 다른 약국으로 넘어가지 않는다.
+function pharmacyCodeFromUrl(fallback = '') {
+  return new URLSearchParams(location.search).get('pharmacyCode') || currentUser()?.pharmacy_code || fallback;
 }
+
+// 약국 코드 없이 열면(QR·약국 링크가 아닌 경우) 어느 약국몰인지 알 수 없으므로 안내만 보여 준다.
+function requirePharmacyCode(pharmacyCode) {
+  if (pharmacyCode) return true;
+  document.body.innerHTML = `
+    <main style="max-width: 420px; margin: 18vh auto; padding: 0 24px; text-align: center; font-family: inherit; line-height: 1.7;">
+      <h1 style="font-size: 22px; margin-bottom: 12px;">어느 약국몰인지 알 수 없어요</h1>
+      <p style="color: #6b7280;">메이딘 약국몰은 약국마다 따로 운영돼요. 약국에서 받은 QR 코드나 링크로 다시 접속해 주세요.</p>
+      <p style="margin-top: 20px;"><a href="/" style="color: #3182f6;">메이딘 스토어 홈으로</a></p>
+    </main>`;
+  return false;
+}
+
+// 다른 약국 회원으로 로그인한 채 이 약국몰을 열면, 이 약국 회원으로 다시 로그인하게 한다.
+function otherPharmacyMember(pharmacyCode) {
+  const user = currentUser();
+  return Boolean(user?.role === 'CUSTOMER' && user.pharmacy_code && pharmacyCode && user.pharmacy_code.toUpperCase() !== String(pharmacyCode).toUpperCase());
+}
+
+const OTHER_PHARMACY_NOTICE = '다른 약국몰 회원으로 로그인되어 있어요. 약국몰은 약국마다 따로라서, 이 약국에서 가입한 휴대폰 번호와 PIN으로 다시 로그인해 주세요.';
 
 function withPharmacy(path, pharmacyCode = pharmacyCodeFromUrl()) {
   const joiner = path.includes('?') ? '&' : '?';
@@ -119,9 +140,14 @@ function withPharmacy(path, pharmacyCode = pharmacyCodeFromUrl()) {
 }
 
 function requireCustomerLogin(pharmacyCode = pharmacyCodeFromUrl()) {
+  if (!requirePharmacyCode(pharmacyCode)) return false;
   const user = currentUser();
   if (!user || user.role !== 'CUSTOMER') {
     sendToMallLogin(pharmacyCode);
+    return false;
+  }
+  if (otherPharmacyMember(pharmacyCode)) {
+    sendToMallLogin(pharmacyCode, OTHER_PHARMACY_NOTICE);
     return false;
   }
   return true;
@@ -133,9 +159,14 @@ function sendToMallLogin(pharmacyCode = pharmacyCodeFromUrl(), notice = '이 약
 }
 
 function requireMallLogin(pharmacyCode = pharmacyCodeFromUrl()) {
+  if (!requirePharmacyCode(pharmacyCode)) return false;
   const user = currentUser();
   if (!user || !localStorage.getItem('token') || !['CUSTOMER', 'PHARMACY_OWNER', 'POS_STAFF', 'ADMIN'].includes(user.role)) {
     sendToMallLogin(pharmacyCode);
+    return false;
+  }
+  if (otherPharmacyMember(pharmacyCode)) {
+    sendToMallLogin(pharmacyCode, OTHER_PHARMACY_NOTICE);
     return false;
   }
   return true;

@@ -35,6 +35,7 @@ async function loadOwner() {
 
 function renderHeader(qr) {
   const user = currentUser();
+  window.ownerPharmacyCode = qr.pharmacy_code || user?.pharmacy_code || '';
   $('#sidebarPharmacyName').textContent = qr.pharmacy_name || '약국';
   $('#pagePharmacyName').textContent = qr.pharmacy_name || '약국';
   $('#sidebarUser').textContent = user?.email ? `운영자 계정 (${user.email})` : '운영자 계정';
