@@ -25,9 +25,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.sha }}
+      # 운영 서버와 같은 Node. 24.19 이상은 better-sqlite3 11.x에서 GC 중 비정상 종료한다(nodejs/node#65446).
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.18.1
           cache: npm
           cache-dependency-path: server/package-lock.json
       - run: npm ci --no-audit --no-fund
