@@ -27,16 +27,22 @@ gh run watch                                           # 진행 상황
 
 DB 구조 변경(새 열·표)은 서버가 시작할 때 자동으로 적용된다. 되돌릴 때 DB를 백업으로 복원하므로, 실패한 배포 동안(재시작~확인, 1분 이내) 들어온 주문은 사라질 수 있다. 영업 중 배포는 피한다.
 
-## 처음 한 번 설정 (완료 상태는 아래 표)
+## 설정 (2026-10-20 완료)
 
 | 항목 | 내용 |
 |---|---|
-| EC2 인스턴스 역할 | `maydin-ec2` (`AmazonSSMManagedInstanceCore`) — SSM 에이전트가 명령을 받는다 |
+| EC2 인스턴스 | `i-06f53ddeea03f984e` (maydin-platform-prod), 인스턴스 프로필 `maydin-ec2` (`AmazonSSMManagedInstanceCore`) — 서버의 SSM 에이전트(snap)가 명령을 받는다 |
 | GitHub OIDC 공급자 | `token.actions.githubusercontent.com` |
 | 배포 역할 | `maydin-github-deploy` — `repo:baeshh/maydin_platform:environment:production`만 받을 수 있고, 이 인스턴스에 `AWS-RunShellScript` 보내기·결과 읽기만 허용 |
-| GitHub `production` 환경 변수 | `AWS_DEPLOY_ROLE_ARN`, `EC2_INSTANCE_ID`, `APP_URL=https://maydinstore.co.kr` |
+| GitHub `production` 환경 | 변수 `AWS_DEPLOY_ROLE_ARN`, `EC2_INSTANCE_ID`, `APP_URL=https://maydinstore.co.kr` · main 브랜치에서만 배포 가능(공개 저장소라 다른 사람의 PR이 이 환경을 쓰지 못하게) |
 
 배포 전에 사람 승인을 받으려면 GitHub → Settings → Environments → production → Required reviewers를 켠다.
+
+SSM으로 명령을 보낼 때는 root로 실행되므로 `sudo -iu ubuntu bash -lc '...'`로 감싸고, 안쪽은 작은따옴표로 둔다(`$HOME`이 root 셸에서 먼저 풀리지 않게). nvm은 비대화형 셸에서 자동으로 안 읽히므로 `. ~/.nvm/nvm.sh`를 먼저 한다(`deploy.sh`는 스스로 읽는다).
+
+## Node · DB 라이브러리
+
+운영 Node는 24.18.1. better-sqlite3 13(N-API)을 쓰므로 Node 24.19+로 올려도 된다(11.x·12.x는 24.19+에서 GC 중 비정상 종료 — nodejs/node#65446). CI는 24.18.1과 최신 24.x 둘 다로 테스트한다.
 
 ## 직접 확인·복구
 
