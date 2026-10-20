@@ -40,6 +40,17 @@ DB 구조 변경(새 열·표)은 서버가 시작할 때 자동으로 적용된
 
 SSM으로 명령을 보낼 때는 root로 실행되므로 `sudo -iu ubuntu bash -lc '...'`로 감싸고, 안쪽은 작은따옴표로 둔다(`$HOME`이 root 셸에서 먼저 풀리지 않게). nvm은 비대화형 셸에서 자동으로 안 읽히므로 `. ~/.nvm/nvm.sh`를 먼저 한다(`deploy.sh`는 스스로 읽는다).
 
+## 상품 사진 · 식약처 연동 (2026-10-21)
+
+| 항목 | 내용 |
+|---|---|
+| 사진 저장소 | S3 `maydin-product-media-prod`(서울) · 공개 차단 · 기본 암호화 · 버전 보관(지운 버전 30일 뒤 삭제) |
+| 서버 권한 | `maydin-ec2` 인라인 정책 `product-media-s3`: `products/*` 읽기·쓰기·삭제, `products/` 범위 목록(없는 사진을 404로 받기 위해) |
+| 운영 `.env` | `MEDIA_BUCKET`, `MEDIA_REGION`, `MFDS_SERVICE_KEY`(공공데이터포털 식약처_건강기능식품정보, 개발계정 하루 10,000건 · 2028-10-20까지) |
+| 제공 | 사진은 `/media/products/<sha256>.webp`(1200px)·`_480.webp`(목록용)로 서버가 S3에서 읽어 준다 |
+
+`MEDIA_BUCKET`이 없으면(개발·테스트) `server/uploads/media`에 저장한다. 식약처 키는 저장소에 넣지 않는다.
+
 ## Node · DB 라이브러리
 
 운영 Node는 24.18.1. better-sqlite3 13(N-API)을 쓰므로 Node 24.19+로 올려도 된다(11.x·12.x는 24.19+에서 GC 중 비정상 종료 — nodejs/node#65446). CI는 24.18.1과 최신 24.x 둘 다로 테스트한다.
