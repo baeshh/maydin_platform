@@ -27,13 +27,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref }}
           fetch-depth: 0
       - id: sha
+        env:
+          REF: ${{ inputs.ref }}
         run: |
-          sha=$(git rev-parse HEAD)
+          # 짧은 SHA·브랜치 이름도 받는다.
+          sha=$(git rev-parse --verify --quiet "origin/${REF}^{commit}" || git rev-parse --verify --quiet "${REF}^{commit}") || { echo "::error::커밋을 찾을 수 없습니다: ${REF}"; exit 1; }
           git merge-base --is-ancestor "$sha" origin/main || { echo "::error::main에 들어간 커밋만 운영에 배포합니다 ($sha)"; exit 1; }
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "배포할 커밋: $sha"
 
   test:
     name: 테스트
