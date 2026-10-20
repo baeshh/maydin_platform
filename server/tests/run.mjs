@@ -39,8 +39,14 @@ const env = {
   DB_PATH: path.join(tempDir, 'test.db'),
   BACKUP_DIR: path.join(tempDir, 'backups'),
   PORT: String(await freePort()),
-  NODE_ENV: 'test'
+  NODE_ENV: 'test',
+  MEDIA_DIR: path.join(tempDir, 'media'),
+  MEDIA_BUCKET: '',
+  // 식약처 API 대신 테스트가 띄우는 가짜 서버(phase23)를 부른다.
+  MFDS_FAKE_PORT: String(await freePort()),
+  MFDS_SERVICE_KEY: 'test-mfds-key'
 };
+env.MFDS_API_BASE = `http://127.0.0.1:${env.MFDS_FAKE_PORT}/1471000/HtfsInfoService03`;
 const base = `http://127.0.0.1:${env.PORT}`;
 
 const init = spawnSync(process.execPath, ['src/db/init.js'], { cwd: serverDir, env, encoding: 'utf8' });

@@ -1053,6 +1053,82 @@ tr.selected td {
   font-size: 12px;
 }
 
+.product-name-cell {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.product-thumb {
+  background: #f2f4f6;
+  border-radius: 10px;
+  flex-shrink: 0;
+  height: 44px;
+  object-fit: cover;
+  width: 44px;
+}
+
+.product-thumb.empty {
+  align-items: center;
+  color: #8b95a1;
+  display: inline-flex;
+  font-size: 10px;
+  justify-content: center;
+}
+
+.media-section {
+  border-top: 1px solid #eef0f3;
+  padding: 16px 0;
+}
+
+.media-section:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.media-heading {
+  font-size: 15px;
+  margin: 0 0 10px;
+}
+
+.media-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+}
+
+.media-tile {
+  margin: 0;
+}
+
+.media-tile img {
+  aspect-ratio: 1 / 1;
+  background: #f2f4f6;
+  border-radius: 12px;
+  object-fit: cover;
+  width: 100%;
+}
+
+.media-tile figcaption {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.muted-link.danger {
+  color: var(--danger);
+}
+
+.mfds-linked {
+  background: #f4f8ff;
+  border-radius: 12px;
+  font-size: 14px;
+  padding: 12px 14px;
+}
+
 .mall-visibility {
   border: 1px solid #d7e6fb;
   border-radius: 14px;

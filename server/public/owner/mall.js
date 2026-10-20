@@ -5,7 +5,8 @@ function mallSettingsBody() {
     pickup_enabled: $('#mallPickup').checked,
     delivery_fee: Number($('#mallDeliveryFee').value || 0),
     free_delivery_min: Number($('#mallFreeMin').value || 0),
-    notice: $('#mallNoticeInput').value
+    notice: $('#mallNoticeInput').value,
+    share_product_photos: $('#mallSharePhotos').checked
   };
 }
 
@@ -18,7 +19,8 @@ async function toggleMallSettings(show) {
   form.hidden = show === undefined ? !form.hidden : !show;
   if (form.hidden) return;
   try {
-    const { mall } = await api.request('/pharmacies/me/mall-settings');
+    const { mall, share_product_photos: sharePhotos } = await api.request('/pharmacies/me/mall-settings');
+    $('#mallSharePhotos').checked = sharePhotos;
     $('#mallDelivery').checked = mall.delivery_enabled;
     $('#mallPickup').checked = mall.pickup_enabled;
     $('#mallDeliveryFee').value = mall.delivery_fee;

@@ -194,7 +194,10 @@ function renderProductPage() {
             <tr>
               <td class="row-no">${start + index + 1}</td>
               <td>
-                <div class="list-title">${h(product.product_name)}</div>
+                <div class="product-name-cell">
+                  ${product.thumbnail_url ? `<img class="product-thumb" src="${h(product.thumbnail_url)}" alt="" loading="lazy" />` : '<span class="product-thumb empty">사진 없음</span>'}
+                  <div class="list-title">${h(product.product_name)}</div>
+                </div>
                 ${product.brand ? `<div class="list-meta">${h(product.brand)}</div>` : ''}
                 <span class="badge gray">${h(product.category_name || '미분류')}</span>
                 ${PRODUCT_TYPE_BADGES[product.product_type] || ''}
@@ -240,8 +243,10 @@ function renderProductPage() {
               <td>
                 <div class="inline-actions">
                   <button class="btn btn-outline btn-sm" type="button" onclick="updateProduct(${Number(product.id)})">저장</button>
+                  <button class="btn btn-outline btn-sm" type="button" onclick="openProductMedia(${Number(product.id)})">사진·성분</button>
                   <button class="btn btn-danger btn-sm" type="button" onclick="hideProduct(${Number(product.id)})">숨김</button>
                 </div>
+                ${product.mfds_report_no ? '<div class="list-meta" style="margin-top: 4px;">식약처 정보 연결됨</div>' : ''}
                 <div class="inline-actions" style="margin-top: 6px; flex-wrap: wrap;">
                   <label class="check-chip" title="현장(POS) 판매"><input id="pos-${product.id}" type="checkbox" ${Number(product.pos_sale_enabled ?? 1) ? 'checked' : ''} ${product.product_type === 'ETC' ? 'disabled' : ''} /> POS 판매</label>
                   <label class="check-chip" title="일반 상품만 온라인에서 팔 수 있습니다"><input id="online-${product.id}" type="checkbox" ${product.product_type === 'GENERAL' && Number(product.online_visible) ? 'checked' : ''} ${product.product_type !== 'GENERAL' ? 'disabled' : ''} /> 온라인 판매</label>

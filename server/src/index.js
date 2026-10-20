@@ -19,6 +19,7 @@ const { startRetentionSchedule } = require('./services/privacy');
 const { startPaymentSchedule } = require('./services/online-payments');
 const { markDataEnvironment } = require('./services/payment-policy');
 const { startupProblems } = require('./services/startup-checks');
+const mediaStore = require('./services/media-store');
 
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
@@ -114,6 +115,21 @@ app.get('/vendor/:file', (req, res, next) => {
   return res.sendFile(file);
 });
 
+// 상품 사진. 키가 내용의 해시라 한 번 받은 사진은 바뀌지 않는다.
+app.get('/media/products/:file', async (req, res, next) => {
+  const key = `products/${req.params.file}`;
+  if (!mediaStore.KEY_PATTERN.test(key)) return res.status(404).end();
+  try {
+    const object = await mediaStore.getObject(key);
+    if (!object) return res.status(404).end();
+    res.set({ 'Content-Type': object.contentType, 'Cache-Control': 'public, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' });
+    if (Buffer.isBuffer(object.body)) return res.end(object.body);
+    object.body.on('error', next).pipe(res);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.use(express.static(path.join(__dirname, '../public')));
 
 app.get('/', (req, res) => {
@@ -121,6 +137,9 @@ app.get('/', (req, res) => {
 });
 
 app.use((err, req, res, next) => {
+  // 본문 해석 오류(잘못된 JSON·너무 큰 파일)는 요청 쪽 문제다.
+  if (err.type === 'entity.too.large') return res.status(413).json({ message: '보낸 파일이나 내용이 너무 큽니다.' });
+  if (err.status >= 400 && err.status < 500) return res.status(err.status).json({ message: '요청 형식이 올바르지 않습니다.' });
   console.error(err);
   res.status(500).json({ message: '서버 오류가 발생했습니다.' });
 });

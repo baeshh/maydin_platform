@@ -123,6 +123,99 @@
         font-weight: 800;
       }
 
+      .gallery {
+        position: relative;
+      }
+
+      .gallery-track {
+        display: flex;
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        scrollbar-width: none;
+      }
+
+      .gallery-track::-webkit-scrollbar {
+        display: none;
+      }
+
+      .gallery-track > .hero-img {
+        border-radius: 0;
+        flex: 0 0 100%;
+        margin: 0;
+        scroll-snap-align: center;
+        width: 100%;
+      }
+
+      @media (min-width: 640px) {
+        .gallery-track {
+          border-radius: 24px;
+          margin: 16px 20px 0;
+        }
+      }
+
+      .gallery-dots {
+        bottom: 14px;
+        display: flex;
+        gap: 6px;
+        justify-content: center;
+        left: 0;
+        position: absolute;
+        right: 0;
+      }
+
+      .gallery-dots button {
+        background: rgba(255, 255, 255, 0.6);
+        border: none;
+        border-radius: 50%;
+        cursor: pointer;
+        height: 7px;
+        padding: 0;
+        width: 7px;
+      }
+
+      .gallery-dots button.on {
+        background: #191f28;
+      }
+
+      .gallery-count {
+        background: rgba(25, 31, 40, 0.6);
+        border-radius: 999px;
+        color: #fff;
+        font-size: 12px;
+        font-weight: 700;
+        padding: 4px 9px;
+        position: absolute;
+        right: 14px;
+        top: 14px;
+      }
+
+      .detail.mfds dl {
+        display: grid;
+        font-size: 14px;
+        gap: 12px;
+      }
+
+      .detail.mfds dt {
+        color: #8b95a1;
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .detail.mfds dd {
+        color: #333d4b;
+        line-height: 1.65;
+        margin: 2px 0 0;
+        white-space: pre-wrap;
+        word-break: keep-all;
+      }
+
+      .detail.mfds .source {
+        color: #8b95a1;
+        font-size: 12px;
+        line-height: 1.6;
+        margin-top: 16px;
+      }
+
       .summary {
         padding: 22px 20px 20px;
       }
@@ -374,6 +467,8 @@
       let pharmacy = null;
       let mall = null;
       let product = null;
+      let images = [];
+      let mfds = null;
       let quantity = 1;
       let alertId = null;
 
@@ -408,13 +503,52 @@
         $('#buyBar').hidden = true;
       }
 
+      // 약국이 올린 사진(여러 장)을 옆으로 넘겨 본다. 사진이 없으면 약국이 넣은 이미지 주소, 그것도 없으면 이름 칸.
       function heroImage() {
-        const src = safeUrl(product.thumbnail_url);
         const placeholder = () => el('span', { class: 'placeholder' }, product.brand || product.category_name || '상품 이미지');
-        return el(
+        const urls = images.length ? images.map((img) => img.url) : [safeUrl(product.thumbnail_url)].filter(Boolean);
+        if (!urls.length) return el('div', { class: 'hero-img' }, placeholder());
+        const track = el(
           'div',
-          { class: 'hero-img' },
-          src ? el('img', { src, alt: product.product_name, referrerpolicy: 'no-referrer', onerror: (e) => e.currentTarget.replaceWith(placeholder()) }) : placeholder()
+          { class: 'gallery-track', onscroll: (e) => markSlide(Math.round(e.currentTarget.scrollLeft / e.currentTarget.clientWidth)) },
+          ...urls.map((src, index) =>
+            el('div', { class: 'hero-img' }, el('img', { src, alt: `${product.product_name} 사진 ${index + 1}`, loading: index ? 'lazy' : 'eager', referrerpolicy: 'no-referrer', onerror: (e) => e.currentTarget.replaceWith(placeholder()) }))
+          )
+        );
+        if (urls.length === 1) return track;
+        const dots = el('div', { class: 'gallery-dots' }, ...urls.map((_, index) => el('button', { type: 'button', 'aria-label': `사진 ${index + 1}`, class: index ? '' : 'on', onclick: () => track.scrollTo({ left: index * track.clientWidth, behavior: 'smooth' }) })));
+        return el('div', { class: 'gallery' }, track, dots, el('span', { class: 'gallery-count', id: 'galleryCount' }, `1 / ${urls.length}`));
+      }
+
+      function markSlide(index) {
+        document.querySelectorAll('.gallery-dots button').forEach((dot, i) => dot.classList.toggle('on', i === index));
+        const count = $('#galleryCount');
+        if (count) count.textContent = `${index + 1} / ${document.querySelectorAll('.gallery-dots button').length}`;
+      }
+
+      // 식약처 건강기능식품 신고 내용. 고친 문구 없이 신고된 그대로 보여 준다.
+      function mfdsSection() {
+        if (!mfds) return null;
+        const rows = [
+          ['주된 기능성', mfds.main_function],
+          ['섭취 방법', mfds.intake_method],
+          ['섭취 시 주의사항', mfds.intake_caution],
+          ['보관 방법', mfds.storage],
+          ['소비기한', mfds.shelf_life]
+        ].filter(([, value]) => value);
+        const updated = String(mfds.fetched_at || '').slice(0, 10);
+        return el(
+          'section',
+          { class: 'detail mfds' },
+          el('h2', {}, '식약처 신고 정보'),
+          el('dl', {}, ...rows.flatMap(([label, value]) => [el('dt', {}, label), el('dd', {}, value)])),
+          el(
+            'p',
+            { class: 'source' },
+            `${mfds.product_name}${mfds.company ? ` · ${mfds.company}` : ''} · 신고번호 ${mfds.report_no}`,
+            el('br'),
+            `출처: ${mfds.source}${updated ? ` (${updated} 기준)` : ''}. 실제 제품 포장의 표시 사항을 우선해 주세요.`
+          )
         );
       }
 
@@ -454,8 +588,9 @@
             'section',
             { class: 'detail' },
             el('h2', {}, '상품 설명'),
-            product.description ? el('p', {}, product.description) : el('p', { class: 'muted' }, '등록된 상품 설명이 없어요. 궁금한 점은 약국에 문의해 주세요.')
+            product.description ? el('p', {}, product.description) : el('p', { class: 'muted' }, mfds ? '약국이 따로 적은 설명은 없어요. 아래 식약처 신고 정보를 참고해 주세요.' : '등록된 상품 설명이 없어요. 궁금한 점은 약국에 문의해 주세요.')
           ),
+          mfdsSection(),
           sellerFooter(window.__seller)
         );
         renderBuyBar();
@@ -547,6 +682,8 @@
           $('#mallSub').textContent = mallSubtitle(pharmacy);
           const result = await api.request(`/products/mall/${productId}?pharmacyCode=${encodeURIComponent(pharmacyCode)}`);
           product = result.product;
+          images = result.images || [];
+          mfds = result.mfds || null;
           document.title = mallTitle(pharmacy, product.product_name);
           if (result.online_paused && result.notice) toast(result.notice);
           await loadAlert();

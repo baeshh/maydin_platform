@@ -54,6 +54,9 @@ function updateMallPolicy(pharmacyId, body) {
     notice: body.notice === undefined ? current.notice : String(body.notice || '').trim()
   };
   if (next.notice.length > LIMITS.notice) throw new MallPolicyError(`몰 공지는 ${LIMITS.notice}자 이내로 입력해 주세요.`);
+  if (body.share_product_photos !== undefined) {
+    run('UPDATE pharmacies SET share_product_photos = @share WHERE id = @id', { id: pharmacyId, share: flag(body.share_product_photos, false) ? 1 : 0 });
+  }
   if (!next.delivery_enabled && !next.pickup_enabled) throw new MallPolicyError('배송과 매장 픽업 중 하나는 켜 두어야 고객이 주문할 수 있습니다.');
   run(
     `UPDATE pharmacies
@@ -70,6 +73,11 @@ function updateMallPolicy(pharmacyId, body) {
     }
   );
   return mallPolicy(pharmacyId);
+}
+
+// 약국 관리자 화면에만 보이는 설정(공개 몰 정책에는 넣지 않는다).
+function photoSharing(pharmacyId) {
+  return Number(getOne('SELECT share_product_photos FROM pharmacies WHERE id = @id', { id: pharmacyId })?.share_product_photos) === 1;
 }
 
 // 전자상거래 판매자 표시 정보(상호·대표자·사업자등록번호·주소·전화).
@@ -97,4 +105,4 @@ function popularProductIds(pharmacyId, limit = 10) {
   ).map((row) => row.product_id);
 }
 
-module.exports = { MallPolicyError, deliveryFeeFor, mallPolicy, popularProductIds, sellerInfo, updateMallPolicy };
+module.exports = { MallPolicyError, deliveryFeeFor, mallPolicy, photoSharing, popularProductIds, sellerInfo, updateMallPolicy };

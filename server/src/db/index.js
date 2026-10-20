@@ -608,6 +608,39 @@ function migrateMallSettings() {
   addColumnIfMissing('pharmacies', 'free_delivery_min', 'INTEGER NOT NULL DEFAULT 50000');
   addColumnIfMissing('pharmacies', 'pickup_enabled', 'INTEGER NOT NULL DEFAULT 1');
   addColumnIfMissing('pharmacies', 'mall_notice', 'TEXT');
+  migrateProductMedia();
+}
+
+// 상품 사진(약국이 찍은 사진, 다른 약국이 공유한 사진)과 식약처 건강기능식품 신고 정보 연결.
+function migrateProductMedia() {
+  addColumnIfMissing('product_images', 'image_key', 'TEXT');
+  addColumnIfMissing('product_images', 'source', "TEXT NOT NULL DEFAULT 'UPLOAD'");
+  addColumnIfMissing('product_images', 'pharmacy_id', 'INTEGER');
+  addColumnIfMissing('product_images', 'created_by', 'INTEGER');
+  addColumnIfMissing('product_images', 'width', 'INTEGER');
+  addColumnIfMissing('product_images', 'height', 'INTEGER');
+  // 내가 올린 사진을 같은 상품(바코드·신고번호)을 파는 다른 MAYDIN 약국이 쓰도록 허락하는지. 기본은 허락 안 함.
+  addColumnIfMissing('pharmacies', 'share_product_photos', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('products', 'mfds_report_no', 'TEXT');
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_product_images_key ON product_images(image_key);
+    CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
+    CREATE INDEX IF NOT EXISTS idx_products_mfds ON products(mfds_report_no);
+    CREATE TABLE IF NOT EXISTS mfds_htfs (
+      report_no TEXT PRIMARY KEY,
+      product_name TEXT NOT NULL,
+      company TEXT,
+      main_function TEXT,
+      intake_method TEXT,
+      intake_caution TEXT,
+      storage TEXT,
+      shelf_life TEXT,
+      appearance TEXT,
+      standard TEXT,
+      registered_at TEXT,
+      fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
 }
 
 function migrate() {

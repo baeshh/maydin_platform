@@ -1,0 +1,187 @@
+import { createServer } from 'node:http';
+import { createRequire } from 'node:module';
+import { BASE, api, check, done, login } from './lib.mjs';
+
+const require = createRequire(import.meta.url);
+const Database = require('better-sqlite3');
+const sharp = require('sharp');
+const db = new Database(process.env.DB_PATH);
+
+// 상품 사진(촬영·업로드·공유)과 식약처 건강기능식품 신고 정보 연결.
+const admin = await login('admin@maydin.kr', 'admin1234');
+const stamp = String(Date.now()).slice(-5);
+
+async function openPharmacy(letter) {
+  const code = `PM${letter}${stamp}`;
+  const email = `${code.toLowerCase()}@media.kr`;
+  await api('/admin/pharmacies', {
+    token: admin,
+    method: 'POST',
+    body: { pharmacy_code: code, pharmacy_name: `${letter}사진약국`, owner_name: `${letter}약사`, store_slug: `media-${code.toLowerCase()}`, owner_email: email, owner_password: 'mediaOwner2026' }
+  });
+  return { code, id: db.prepare('SELECT id FROM pharmacies WHERE pharmacy_code = ?').get(code).id, owner: await login(email, 'mediaOwner2026') };
+}
+
+const A = await openPharmacy('A');
+const B = await openPharmacy('B');
+const BARCODE = `880${stamp}12345`.slice(0, 13);
+const product = async (pharmacy, name) =>
+  (await api('/products', { token: pharmacy.owner, method: 'POST', body: { product_name: name, price: 20000, stock_quantity: 5, product_type: 'GENERAL', online_visible: true, barcode: BARCODE } })).data.product;
+const aItem = await product(A, '사진 테스트 오메가3');
+const bItem = await product(B, '사진 테스트 오메가3');
+
+const upload = (token, productId, buffer, type = 'image/jpeg') =>
+  fetch(`${BASE}/api/products/${productId}/images`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': type }, body: buffer }).then(async (res) => ({
+    status: res.status,
+    data: await res.json().catch(() => ({}))
+  }));
+const photo = (color, { width = 1600, height = 1000, orientation } = {}) => {
+  let image = sharp({ create: { width, height, channels: 3, background: color } }).jpeg({ quality: 90 });
+  if (orientation) image = image.withMetadata({ orientation });
+  return image.withExif({ IFD0: { Make: 'TestPhone', Copyright: 'pharmacy' }, IFD3: { GPSLatitudeRef: 'N', GPSLatitude: '37/1 33/1 0/1' } }).toBuffer();
+};
+const media = async (url) => {
+  const res = await fetch(`${BASE}${url}`);
+  return { status: res.status, type: res.headers.get('content-type'), cache: res.headers.get('cache-control'), body: Buffer.from(await res.arrayBuffer()) };
+};
+
+console.log('[사진 올리기 — 방향 바로잡기·크기 줄이기·위치정보 지우기]');
+let first;
+{
+  const res = await upload(A.owner, aItem.id, await photo('#d33', { width: 1600, height: 1000, orientation: 6 }));
+  check('업로드 200 · 사진 1장', res.status === 200 && res.data.images?.length === 1, res.data);
+  first = res.data.images[0];
+  check('세로 사진은 돌려서 저장(EXIF 방향 6 → 750×1200)', first.width === 750 && first.height === 1200, first);
+  const full = await media(first.url);
+  check('/media 원본 WebP · 1년 캐시', full.status === 200 && full.type === 'image/webp' && /immutable/.test(full.cache), full);
+  const meta = await sharp(full.body).metadata();
+  check('긴 변 1200px 이하', Math.max(meta.width, meta.height) <= 1200, meta);
+  check('촬영 정보·위치(EXIF) 지움', !meta.exif && !full.body.includes(Buffer.from('TestPhone')), meta.exif?.length);
+  const thumb = await sharp((await media(first.thumb_url)).body).metadata();
+  check('목록용 작은 사진 480px', Math.max(thumb.width, thumb.height) <= 480, thumb);
+  const row = db.prepare('SELECT thumbnail_url FROM products WHERE id = ?').get(aItem.id);
+  check('상품 대표 이미지가 첫 사진의 작은 사진', row.thumbnail_url === first.thumb_url, row);
+  const again = await upload(A.owner, aItem.id, await photo('#d33', { width: 1600, height: 1000, orientation: 6 }));
+  check('같은 사진 또 올리면 409', again.status === 409, again.data);
+}
+
+console.log('[잘못된 파일·권한·약국 독립]');
+{
+  let res = await upload(A.owner, aItem.id, Buffer.from('<svg onload=alert(1)>'), 'image/svg+xml');
+  check('그림이 아닌 파일 400', res.status === 400, res.data);
+  res = await upload(A.owner, bItem.id, await photo('#3a3'));
+  check('다른 약국 상품에 업로드 404', res.status === 404, res.data);
+  res = await api(`/products/${bItem.id}/images`, { token: A.owner });
+  check('다른 약국 상품 사진 목록 404', res.status === 404, res.data);
+  res = await upload(A.owner, aItem.id, Buffer.alloc(11 * 1024 * 1024, 1), 'image/jpeg');
+  check('10MB 넘는 파일 413', res.status === 413, res.data);
+  for (const bad of ['../../etc/passwd', 'x.webp', `${'a'.repeat(64)}.png`]) {
+    const r = await fetch(`${BASE}/media/products/${bad}`);
+    check(`이상한 사진 경로 거절(${bad})`, r.status === 404);
+  }
+}
+
+console.log('[여러 장 · 대표 사진 · 삭제]');
+let second;
+{
+  const res = await upload(A.owner, aItem.id, await photo('#33d'));
+  second = res.data.images[1];
+  check('두 번째 사진', res.data.images.length === 2 && second, res.data);
+  const primary = await api(`/products/${aItem.id}/images/${second.id}`, { token: A.owner, method: 'PATCH', body: { primary: true } });
+  check('대표 사진 바꾸기', primary.data.images[0].id === second.id, primary.data);
+  check('목록 대표 이미지도 바뀜', db.prepare('SELECT thumbnail_url FROM products WHERE id = ?').get(aItem.id).thumbnail_url === second.thumb_url);
+  const detail = await api(`/products/mall/${aItem.id}?pharmacyCode=${A.code}`, { token: A.owner });
+  check('고객 상세에 사진 2장(대표 먼저)', detail.status === 200 && detail.data.images.length === 2 && detail.data.images[0].id === second.id, detail.data.images);
+}
+
+console.log('[공유 사진 — 같은 바코드, 올린 약국이 허락했을 때만]');
+{
+  let res = await api(`/products/${bItem.id}/image-suggestions`, { token: B.owner });
+  check('A가 허락 전에는 후보 없음', res.status === 200 && res.data.suggestions.length === 0, res.data);
+  res = await api('/pharmacies/me/mall-settings', { token: A.owner, method: 'PATCH', body: { share_product_photos: true } });
+  check('A 사진 공유 허락', res.status === 200 && res.data.share_product_photos === true, res.data);
+  res = await api(`/products/${bItem.id}/image-suggestions`, { token: B.owner });
+  check('B에게 A 사진 2장이 후보로', res.data.suggestions.length === 2 && !JSON.stringify(res.data).includes(A.code), res.data);
+  const pick = res.data.suggestions.find((s) => s.url === first.url);
+  res = await api(`/products/${bItem.id}/images/shared`, { token: B.owner, method: 'POST', body: { image_key: pick.image_key } });
+  check('B가 공유 사진 쓰기', res.status === 200 && res.data.images.length === 1 && res.data.images[0].source === 'SHARED', res.data);
+  res = await api(`/products/${bItem.id}/images/shared`, { token: B.owner, method: 'POST', body: { image_key: 'products/' + 'f'.repeat(64) + '.webp' } });
+  check('후보가 아닌 사진 키는 거절', res.status === 404, res.data);
+  res = await api(`/products/${aItem.id}/image-suggestions`, { token: A.owner });
+  check('B는 공유 허락 안 했으므로 A에게 후보 없음', res.data.suggestions.length === 0, res.data);
+
+  const firstRow = (await api(`/products/${aItem.id}/images`, { token: A.owner })).data.images.find((i) => i.url === first.url);
+  res = await api(`/products/${aItem.id}/images/${firstRow.id}`, { token: A.owner, method: 'DELETE' });
+  check('A가 사진 지움', res.status === 200 && res.data.images.length === 1, res.data);
+  check('B가 쓰는 사진 파일은 남음', (await media(first.url)).status === 200);
+  const bDetail = await api(`/products/mall/${bItem.id}?pharmacyCode=${B.code}`, { token: B.owner });
+  check('B 상세에 그대로 보임', bDetail.data.images.length === 1 && bDetail.data.images[0].url === first.url, bDetail.data.images);
+
+  await api('/pharmacies/me/mall-settings', { token: A.owner, method: 'PATCH', body: { share_product_photos: false } });
+  res = await api(`/products/${bItem.id}/image-suggestions`, { token: B.owner });
+  check('A가 공유를 끄면 새 후보로 안 보임', res.data.suggestions.length === 0, res.data);
+}
+
+console.log('[식약처 건강기능식품 정보 — 검색·연결·고객 상세]');
+const calls = [];
+const fake = createServer((req, res) => {
+  const url = new URL(req.url, 'http://x');
+  calls.push(Object.fromEntries(url.searchParams));
+  const item = {
+    STTEMNT_NO: '200400200001',
+    PRDUCT: ' 사진 테스트 오메가3 ',
+    ENTRPS: '(주)테스트제약',
+    MAIN_FNCTN: '혈중 중성지질 개선·혈행 개선에 도움을 줄 수 있음',
+    SRV_USE: '1일 1회, 1회 1캡슐을 물과 함께 섭취하십시오.',
+    INTAKE_HINT1: '1. 질환이 있거나 의약품 복용 시 전문가와 상담하십시오.\n2. 알레르기 체질은 섭취에 주의하십시오.',
+    PRSRV_PD: '직사광선을 피해 서늘한 곳에 보관',
+    DISTB_PD: '제조일로부터 24개월',
+    SUNGSANG: '노란색 연질캡슐',
+    BASE_STANDARD: 'EPA와 DHA의 합: 표시량의 80% 이상',
+    REGIST_DT: '20040101'
+  };
+  const other = { ...item, STTEMNT_NO: '200500300002', PRDUCT: '다른회사 오메가3', ENTRPS: '다른식품' };
+  let items = [];
+  if (url.searchParams.get('STTEMNT_NO')) items = [item, other].filter((i) => i.STTEMNT_NO === url.searchParams.get('STTEMNT_NO'));
+  else if (url.searchParams.get('Prduct')) items = [other, item];
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify({ header: { resultCode: '00', resultMsg: 'NORMAL SERVICE.' }, body: { totalCount: items.length, items: items.map((i) => ({ item: i })) } }));
+});
+await new Promise((resolve) => fake.listen(Number(process.env.MFDS_FAKE_PORT), '127.0.0.1', resolve));
+try {
+  let res = await api(`/products/mfds/search?q=${encodeURIComponent('오')}`, { token: A.owner });
+  check('한 글자 검색 400', res.status === 400, res.data);
+  res = await api(`/products/mfds/search?q=${encodeURIComponent('오메가3')}&company=${encodeURIComponent('테스트제약')}`, { token: A.owner });
+  check('제품명 검색 · 같은 제조사 먼저', res.status === 200 && res.data.results[0]?.report_no === '200400200001' && res.data.results.length === 2, res.data);
+  check('인증키를 서버에서만 붙임', calls.at(-1)?.serviceKey === 'test-mfds-key' && !JSON.stringify(res.data).includes('test-mfds-key'), calls.at(-1));
+  res = await api(`/products/${aItem.id}/mfds`, { token: A.owner, method: 'POST', body: { report_no: '200400200001' } });
+  check('신고번호로 연결', res.status === 200 && res.data.mfds.main_function.includes('혈행'), res.data);
+  check('신고 정보를 DB에 보관', Boolean(db.prepare("SELECT 1 FROM mfds_htfs WHERE report_no = '200400200001'").get()));
+  res = await api(`/products/${aItem.id}/mfds`, { token: A.owner, method: 'POST', body: { report_no: '999999999999' } });
+  check('없는 신고번호 404', res.status === 404, res.data);
+  res = await api(`/products/${bItem.id}/mfds`, { token: A.owner, method: 'POST', body: { report_no: '200400200001' } });
+  check('다른 약국 상품 연결 불가(404)', res.status === 404, res.data);
+  const detail = await api(`/products/mall/${aItem.id}?pharmacyCode=${A.code}`, { token: A.owner });
+  const info = detail.data.mfds;
+  check('고객 상세에 기능성·섭취 방법·주의사항·보관·출처', info?.main_function && info.intake_method && info.intake_caution.includes('\n') && info.storage && /식품의약품안전처/.test(info.source), info);
+  check('제품명 앞뒤 공백 정리', info.product_name === '사진 테스트 오메가3', info.product_name);
+
+  // 같은 신고번호를 연결한 약국끼리도 공유 사진 후보가 된다.
+  await api('/pharmacies/me/mall-settings', { token: A.owner, method: 'PATCH', body: { share_product_photos: true } });
+  db.prepare('UPDATE products SET barcode = NULL WHERE id = ?').run(bItem.id);
+  res = await api(`/products/${bItem.id}/image-suggestions`, { token: B.owner });
+  check('바코드 없으면(신고번호 연결 전) 후보 없음', res.data.suggestions.length === 0, res.data);
+  await api(`/products/${bItem.id}/mfds`, { token: B.owner, method: 'POST', body: { report_no: '200400200001' } });
+  res = await api(`/products/${bItem.id}/image-suggestions`, { token: B.owner });
+  check('같은 신고번호면 후보로 보임', res.data.suggestions.length === 1 && res.data.suggestions[0].url === second.url, res.data);
+
+  res = await api(`/products/${aItem.id}/mfds`, { token: A.owner, method: 'DELETE' });
+  check('연결 해제', res.status === 200);
+  check('해제하면 고객 상세에서 사라짐', (await api(`/products/mall/${aItem.id}?pharmacyCode=${A.code}`, { token: A.owner })).data.mfds === null);
+  const customer = (await api('/products/mfds/search?q=abc', {})).status;
+  check('로그인 없이 식약처 검색 불가', customer === 401, customer);
+} finally {
+  fake.close();
+}
+
+done();

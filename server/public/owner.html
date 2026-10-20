@@ -307,6 +307,19 @@
             <div id="staffTable" class="loading">직원 정보를 불러오는 중입니다.</div>
           </section>
 
+          <div class="modal-backdrop" id="productMediaModal" hidden onclick="if (event.target === this) closeProductMedia()">
+            <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="productMediaTitle">
+              <div class="card-header">
+                <div>
+                  <h2 class="card-title" id="productMediaTitle">상품 사진 · 식약처 정보</h2>
+                  <span class="list-meta" id="productMediaName"></span>
+                </div>
+                <button class="muted-link" type="button" onclick="closeProductMedia()">닫기</button>
+              </div>
+              <div id="productMediaBody" class="loading">불러오는 중입니다.</div>
+            </section>
+          </div>
+
           <div class="modal-backdrop" id="productModal" hidden onclick="if (event.target === this) closeProductModal()">
             <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="productModalTitle">
             <div class="card-header">
@@ -427,6 +440,10 @@
                   <label class="check-chip"><input id="mallPickup" type="checkbox" /> 매장 픽업 받기</label>
                 </div>
               </div>
+              <div class="form-group full">
+                <label class="check-chip"><input id="mallSharePhotos" type="checkbox" /> 내가 올린 상품 사진을 같은 상품을 파는 다른 MAYDIN 약국이 쓰도록 허락</label>
+                <span class="list-meta">허락하면 같은 바코드·식약처 신고번호 상품을 등록한 약국에게 사진 후보로 보입니다. 직접 찍은 사진만 공유됩니다.</span>
+              </div>
               <div class="form-group">
                 <label class="form-label" for="mallDeliveryFee">배송비 (원)</label>
                 <input id="mallDeliveryFee" class="form-control" type="number" min="0" max="100000" step="100" />
@@ -486,6 +503,7 @@
     <script src="/owner/orders.js"></script>
     <script src="/owner/products.js"></script>
     <script src="/owner/mall.js"></script>
+    <script src="/owner/product-media.js"></script>
     <script src="/owner/staff.js"></script>
     <script src="/owner/report.js"></script>
     <script src="/owner/purchasing.js"></script>

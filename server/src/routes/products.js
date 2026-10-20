@@ -4,6 +4,9 @@ const { authenticate, requireRole } = require('../middleware/auth');
 const { requirePharmacyScope } = require('../middleware/scope');
 const { ImportError, assertNotSyncing, onlineStockGate } = require('../services/product-import');
 const { popularProductIds } = require('../services/mall-policy');
+const mfds = require('../services/mfds');
+const imageService = require('../services/product-images');
+const { ImageError, listImages } = imageService;
 const { normalizeProductType, onlineSellableSql, resolveOnlineVisible } = require('../services/product-kind');
 
 const router = express.Router();
@@ -174,10 +177,83 @@ router.get('/mall/:id', authenticate, mallPharmacy, (req, res) => {
   );
   if (!product) return res.status(404).json({ message: '상품을 찾을 수 없습니다.' });
   const gate = onlineStockGate(req.mallPharmacyId);
-  res.json({ product: publicProduct(product, mallBuffer(gate)), online_paused: gate.paused, notice: gate.message });
+  res.json({
+    product: publicProduct(product, mallBuffer(gate)),
+    images: listImages(product.id),
+    mfds: mfds.mallRecord(product.mfds_report_no),
+    online_paused: gate.paused,
+    notice: gate.message
+  });
 });
 
 router.use(authenticate, requireRole('PHARMACY_OWNER', 'ADMIN'), requirePharmacyScope);
+
+const mediaRoute = (handler) => async (req, res) => {
+  try {
+    res.json(await handler(req));
+  } catch (error) {
+    if (error instanceof ImageError || error instanceof mfds.MfdsError) return res.status(error.status).json({ message: error.message });
+    console.error(error);
+    res.status(500).json({ message: '처리 중 오류가 발생했습니다.' });
+  }
+};
+
+/* ---------- 상품 사진 ---------- */
+
+router.get('/:id/images', mediaRoute((req) => ({ images: imageService.productImages(req.pharmacyId, req.params.id) })));
+
+router.post(
+  '/:id/images',
+  express.raw({ type: ['image/*', 'application/octet-stream'], limit: imageService.MAX_BYTES }),
+  mediaRoute(async (req) => ({
+    images: await imageService.uploadImage({ pharmacyId: req.pharmacyId, productId: req.params.id, userId: req.user.id, buffer: req.body })
+  }))
+);
+
+router.patch(
+  '/:id/images/:imageId',
+  mediaRoute((req) => ({ images: imageService.makePrimary({ pharmacyId: req.pharmacyId, productId: req.params.id, imageId: req.params.imageId }) }))
+);
+
+router.delete(
+  '/:id/images/:imageId',
+  mediaRoute(async (req) => ({ images: await imageService.deleteImage({ pharmacyId: req.pharmacyId, productId: req.params.id, imageId: req.params.imageId }) }))
+);
+
+router.get('/:id/image-suggestions', mediaRoute((req) => ({ suggestions: imageService.sharedSuggestions({ pharmacyId: req.pharmacyId, productId: req.params.id }) })));
+
+router.post(
+  '/:id/images/shared',
+  mediaRoute((req) => ({
+    images: imageService.useSharedImage({ pharmacyId: req.pharmacyId, productId: req.params.id, imageKey: String(req.body.image_key || ''), userId: req.user.id })
+  }))
+);
+
+/* ---------- 식약처 건강기능식품 신고 정보 ---------- */
+
+router.get('/mfds/search', mediaRoute(async (req) => ({ results: await mfds.searchProducts(req.query.q, req.query.company) })));
+
+router.get(
+  '/:id/mfds',
+  mediaRoute((req) => {
+    const product = getOne('SELECT mfds_report_no FROM products WHERE id = @id AND pharmacy_id = @pharmacy_id', { id: Number(req.params.id), pharmacy_id: req.pharmacyId });
+    if (!product) throw new mfds.MfdsError('상품을 찾을 수 없습니다.', 404);
+    return { mfds: mfds.cachedRecord(product.mfds_report_no) };
+  })
+);
+
+router.post(
+  '/:id/mfds',
+  mediaRoute(async (req) => ({ mfds: await mfds.linkProduct(req.pharmacyId, req.params.id, req.body.report_no) }))
+);
+
+router.delete(
+  '/:id/mfds',
+  mediaRoute((req) => {
+    mfds.unlinkProduct(req.pharmacyId, req.params.id);
+    return { ok: true };
+  })
+);
 
 router.get('/', (req, res) => {
   const products = getAll(
