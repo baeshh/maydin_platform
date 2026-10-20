@@ -211,7 +211,7 @@ async function waitForHealth(base, child, timeoutMs) {
   while (Date.now() < deadline) {
     if (child.exitCode !== null) return { ok: false, reason: `복구 서버가 종료되었습니다(코드 ${child.exitCode}).` };
     try {
-      const res = await fetch(`${base}/api/health`);
+      const res = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(2000) });
       const body = await res.json().catch(() => ({}));
       if (res.ok && body.db === 'ok') return { ok: true };
     } catch {}

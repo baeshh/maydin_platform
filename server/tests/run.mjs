@@ -1,6 +1,6 @@
 // 임시 DB로 서버를 띄우고 tests/*.test.mjs 를 차례로 실행한다. 실제 DB(server/data)는 건드리지 않는다.
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { closeSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -49,10 +49,11 @@ if (init.status !== 0) {
   process.exit(1);
 }
 
-const server = spawn(process.execPath, ['src/index.js'], { cwd: serverDir, env, stdio: ['ignore', 'pipe', 'pipe'] });
-let serverLog = '';
-server.stdout.on('data', (chunk) => (serverLog += chunk));
-server.stderr.on('data', (chunk) => (serverLog += chunk));
+// 서버 출력은 파일로 받는다. 테스트 파일을 spawnSync로 도는 동안 파이프를 읽지 못하면,
+// Linux에서는 파이프 쓰기가 동기라 버퍼(64KB)가 차는 순간 서버가 console.log에서 멈춘다.
+const serverLogFile = path.join(tempDir, 'server.log');
+const logFd = openSync(serverLogFile, 'a');
+const server = spawn(process.execPath, ['src/index.js'], { cwd: serverDir, env, stdio: ['ignore', logFd, logFd] });
 
 let failed = 0;
 try {
@@ -73,9 +74,11 @@ try {
   failed += 1;
 } finally {
   server.kill();
-  rmSync(tempDir, { recursive: true, force: true });
+  closeSync(logFd);
 }
 
+const serverLog = readFileSync(serverLogFile, 'utf8');
+rmSync(tempDir, { recursive: true, force: true });
 if (failed) {
   console.error(`\n✗ 실패한 테스트 파일 ${failed}개`);
   if (process.env.SHOW_SERVER_LOG) console.error(serverLog);
