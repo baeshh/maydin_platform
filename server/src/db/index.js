@@ -533,6 +533,7 @@ function migratePos(schema) {
   migratePayments();
   migrateTerminals();
   migrateOfflinePreservation();
+  migrateMallSettings();
   migrateVan(schema);
 
   db.exec(`
@@ -598,6 +599,15 @@ function migratePos(schema) {
       SELECT RAISE(ABORT, '재고가 부족합니다.');
     END;
   `);
+}
+
+// 약국마다 다른 온라인 몰 정책. 기본값은 예전에 모든 약국에 고정돼 있던 값(배송비 3,000원, 5만원 이상 무료)이다.
+function migrateMallSettings() {
+  addColumnIfMissing('pharmacies', 'delivery_enabled', 'INTEGER NOT NULL DEFAULT 1');
+  addColumnIfMissing('pharmacies', 'delivery_fee', 'INTEGER NOT NULL DEFAULT 3000');
+  addColumnIfMissing('pharmacies', 'free_delivery_min', 'INTEGER NOT NULL DEFAULT 50000');
+  addColumnIfMissing('pharmacies', 'pickup_enabled', 'INTEGER NOT NULL DEFAULT 1');
+  addColumnIfMissing('pharmacies', 'mall_notice', 'TEXT');
 }
 
 function migrate() {

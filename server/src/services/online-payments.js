@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { getAll, getOne, run, transaction } = require('../db');
+const { deliveryFeeFor, mallPolicy } = require('./mall-policy');
 const { onlineOrderStatus } = require('./member-auth');
 const { onlineStockGate } = require('./product-import');
 const { isOnlineSellable, onlineBlockedMessage } = require('./product-kind');
@@ -190,6 +191,9 @@ function createCheckout({ userId, customer, pharmacyId, body }) {
   const orderType = String(body.order_type || '').toUpperCase();
   if (!ONLINE_TYPES.has(orderType)) throw new PaymentError('배송 주문 또는 매장 픽업만 결제할 수 있습니다.', 400, 'INVALID_ORDER_TYPE');
   if (!customer) throw new PaymentError('고객 정보를 찾을 수 없습니다.', 400, 'NO_MEMBER');
+  const policy = mallPolicy(pharmacyId);
+  if (orderType === 'DELIVERY' && !policy.delivery_enabled) throw new PaymentError('이 약국은 지금 배송 주문을 받지 않습니다. 매장 픽업으로 주문해 주세요.', 400, 'DELIVERY_DISABLED');
+  if (orderType === 'PICKUP' && !policy.pickup_enabled) throw new PaymentError('이 약국은 지금 매장 픽업 주문을 받지 않습니다.', 400, 'PICKUP_DISABLED');
 
   const eligibility = onlineOrderStatus(customer);
   if (!eligibility.allowed) throw new PaymentError(eligibility.message, 403, eligibility.reason);
@@ -209,7 +213,7 @@ function createCheckout({ userId, customer, pharmacyId, body }) {
   const lines = linesFromCart(cartItems(userId, pharmacyId), gate.buffer);
   const details = parseOrderDetails(orderType, body, customer);
   const total = lines.reduce((sum, l) => sum + l.price * l.quantity, 0);
-  const deliveryFee = orderType === 'DELIVERY' && total < 50000 ? 3000 : 0;
+  const deliveryFee = orderType === 'DELIVERY' ? deliveryFeeFor(policy, total) : 0;
   const amount = total + deliveryFee;
   if (amount <= 0) throw new PaymentError('결제 금액이 0원인 주문은 받을 수 없습니다.', 400, 'ZERO_AMOUNT');
   const hash = cartHash(orderType, lines, amount);

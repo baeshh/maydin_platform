@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>MAYDIN STORE</title>
+    <script>
+      if (!localStorage.getItem('token')) {
+        sessionStorage.setItem('loginNotice', '이 약국몰은 회원 전용이에요. 로그인하거나 영수증 코드로 가입해 주세요.');
+        location.replace('/login.html' + location.search);
+      }
+    </script>
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+    <link rel="stylesheet" href="/mall.css" />
+    <style>
+      * {
+        box-sizing: border-box;
+        font-family: "Pretendard", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+        margin: 0;
+        padding: 0;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      body {
+        background: #fff;
+        color: #191f28;
+        padding-bottom: 120px;
+      }
+
+      header {
+        background: rgba(255, 255, 255, 0.92);
+        backdrop-filter: blur(20px);
+        border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+
+      .header-inner {
+        align-items: center;
+        display: flex;
+        gap: 12px;
+        margin: 0 auto;
+        max-width: 768px;
+        padding: 12px 20px;
+      }
+
+      .back {
+        color: #191f28;
+        font-size: 22px;
+        font-weight: 700;
+        text-decoration: none;
+      }
+
+      .header-inner .mall-brand {
+        flex: 1;
+      }
+
+      .icon-btn {
+        display: flex;
+        position: relative;
+      }
+
+      .icon-btn svg {
+        height: 24px;
+        stroke: #191f28;
+        width: 24px;
+      }
+
+      .cart-badge {
+        align-items: center;
+        background: #f04452;
+        border-radius: 50%;
+        color: #fff;
+        display: flex;
+        font-size: 11px;
+        font-weight: 800;
+        height: 16px;
+        justify-content: center;
+        min-width: 16px;
+        padding: 0 4px;
+        position: absolute;
+        right: -7px;
+        top: -5px;
+      }
+
+      .cart-badge[hidden] {
+        display: none;
+      }
+
+      main {
+        margin: 0 auto;
+        max-width: 768px;
+      }
+
+      .hero-img {
+        align-items: center;
+        aspect-ratio: 1 / 1;
+        background: #f2f4f6;
+        display: flex;
+        justify-content: center;
+        overflow: hidden;
+        width: 100%;
+      }
+
+      @media (min-width: 640px) {
+        .hero-img {
+          border-radius: 24px;
+          margin: 16px auto 0;
+          width: calc(100% - 40px);
+        }
+      }
+
+      .hero-img img {
+        height: 100%;
+        object-fit: cover;
+        width: 100%;
+      }
+
+      .hero-img .placeholder {
+        color: #8b95a1;
+        font-size: 15px;
+        font-weight: 800;
+      }
+
+      .summary {
+        padding: 22px 20px 20px;
+      }
+
+      .crumb {
+        color: #8b95a1;
+        font-size: 13px;
+        font-weight: 700;
+        margin-bottom: 6px;
+      }
+
+      h1 {
+        font-size: 22px;
+        font-weight: 800;
+        letter-spacing: -0.4px;
+        line-height: 1.35;
+      }
+
+      .price-wrap {
+        align-items: baseline;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 8px;
+        margin-top: 14px;
+      }
+
+      .discount {
+        color: #f04452;
+        font-size: 22px;
+        font-weight: 800;
+      }
+
+      .price {
+        font-size: 24px;
+        font-weight: 900;
+      }
+
+      .list-price {
+        color: #8b95a1;
+        font-size: 15px;
+        text-decoration: line-through;
+      }
+
+      .stock {
+        border-radius: 8px;
+        display: inline-block;
+        font-size: 12px;
+        font-weight: 800;
+        margin-top: 12px;
+        padding: 5px 9px;
+      }
+
+      .stock.ok {
+        background: #e8f3ff;
+        color: #1b64da;
+      }
+
+      .stock.out {
+        background: #fdecee;
+        color: #f04452;
+      }
+
+      .info {
+        border-top: 10px solid #f2f4f6;
+        padding: 18px 20px;
+      }
+
+      .info dl {
+        display: grid;
+        font-size: 14px;
+        gap: 10px 14px;
+        grid-template-columns: 72px 1fr;
+      }
+
+      .info dt {
+        color: #8b95a1;
+        font-weight: 700;
+      }
+
+      .info dd {
+        color: #333d4b;
+        line-height: 1.5;
+        margin: 0;
+      }
+
+      .detail {
+        border-top: 10px solid #f2f4f6;
+        padding: 22px 20px;
+      }
+
+      .detail h2 {
+        font-size: 17px;
+        font-weight: 800;
+        margin-bottom: 12px;
+      }
+
+      .detail p {
+        color: #333d4b;
+        font-size: 15px;
+        line-height: 1.75;
+        white-space: pre-wrap;
+        word-break: keep-all;
+      }
+
+      .detail .muted {
+        color: #8b95a1;
+      }
+
+      .buy-bar {
+        background: #fff;
+        border-top: 1px solid #f2f4f6;
+        bottom: 0;
+        left: 0;
+        padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
+        position: fixed;
+        right: 0;
+        z-index: 20;
+      }
+
+      .buy-inner {
+        align-items: center;
+        display: flex;
+        gap: 10px;
+        margin: 0 auto;
+        max-width: 728px;
+      }
+
+      .qty {
+        align-items: center;
+        border: 1px solid #e5e8eb;
+        border-radius: 14px;
+        display: flex;
+        flex-shrink: 0;
+        height: 52px;
+      }
+
+      .qty button {
+        background: none;
+        border: none;
+        color: #333d4b;
+        cursor: pointer;
+        font-size: 20px;
+        font-weight: 700;
+        height: 100%;
+        width: 40px;
+      }
+
+      .qty span {
+        font-size: 16px;
+        font-weight: 800;
+        min-width: 26px;
+        text-align: center;
+      }
+
+      .buy-btn {
+        border: none;
+        border-radius: 14px;
+        cursor: pointer;
+        flex: 1;
+        font-size: 16px;
+        font-weight: 800;
+        height: 52px;
+      }
+
+      .buy-btn.secondary {
+        background: #e8f3ff;
+        color: #1b64da;
+      }
+
+      .buy-btn.primary {
+        background: #3182f6;
+        color: #fff;
+      }
+
+      .buy-btn.muted {
+        background: #f2f4f6;
+        color: #4e5968;
+      }
+
+      .state {
+        color: #4e5968;
+        font-size: 15px;
+        line-height: 1.6;
+        padding: 80px 24px;
+        text-align: center;
+      }
+
+      .state a {
+        color: #3182f6;
+        font-weight: 800;
+      }
+
+      .toast {
+        background: rgba(25, 31, 40, 0.94);
+        border-radius: 999px;
+        bottom: 100px;
+        color: #fff;
+        font-size: 14px;
+        font-weight: 700;
+        left: 50%;
+        opacity: 0;
+        padding: 12px 18px;
+        pointer-events: none;
+        position: fixed;
+        transform: translate(-50%, 10px);
+        transition: 0.2s;
+        white-space: nowrap;
+        z-index: 30;
+      }
+
+      .toast.show {
+        opacity: 1;
+        transform: translate(-50%, 0);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="header-inner">
+        <a class="back" id="backLink" href="/store.html" aria-label="몰 홈으로">←</a>
+        <a class="mall-brand" id="brandLink" href="/store.html">
+          <span class="mall-brand-title">MAYDIN STORE</span>
+          <span class="mall-brand-sub" id="mallSub">약국 온라인 몰</span>
+        </a>
+        <a class="icon-btn" id="cartLink" href="/cart.html" aria-label="장바구니">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="9" cy="21" r="1"></circle>
+            <circle cx="20" cy="21" r="1"></circle>
+            <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
+          </svg>
+          <span class="cart-badge" id="cartBadge" hidden>0</span>
+        </a>
+      </div>
+    </header>
+
+    <main id="page"><p class="state">상품 정보를 불러오는 중이에요.</p></main>
+
+    <div class="buy-bar" id="buyBar" hidden>
+      <div class="buy-inner" id="buyInner"></div>
+    </div>
+
+    <div id="message" class="toast"></div>
+
+    <script src="/app.js"></script>
+    <script>
+      const pharmacyCode = pharmacyCodeFromUrl();
+      const productId = Number(new URLSearchParams(location.search).get('id'));
+      const storeUrl = withPharmacy('/store.html', pharmacyCode);
+      let pharmacy = null;
+      let mall = null;
+      let product = null;
+      let quantity = 1;
+      let alertId = null;
+
+      $('#backLink').href = storeUrl;
+      $('#brandLink').href = storeUrl;
+      $('#cartLink').href = withPharmacy('/cart.html', pharmacyCode);
+
+      function toast(text) {
+        const target = $('#message');
+        target.textContent = text;
+        target.classList.add('show');
+        window.clearTimeout(window.__toastTimer);
+        window.__toastTimer = window.setTimeout(() => target.classList.remove('show'), 2200);
+      }
+
+      const salePrice = (p) => Number(p.discount_price || p.price || 0);
+      const isSoldOut = (p) => p.status === 'SOLD_OUT' || Number(p.stock_quantity) <= 0;
+      const maxQuantity = () => Math.max(1, Math.min(99, Number(product.stock_quantity) || 1));
+
+      function isCustomerInThisStore() {
+        const user = currentUser();
+        return user?.role === 'CUSTOMER' && pharmacy && Number(user.pharmacy_id) === Number(pharmacy.id);
+      }
+
+      function discountRate(p) {
+        if (!p.discount_price || Number(p.discount_price) >= Number(p.price)) return null;
+        return Math.round((1 - Number(p.discount_price) / Number(p.price)) * 100);
+      }
+
+      function showState(text) {
+        $('#page').replaceChildren(el('p', { class: 'state' }, text, el('br'), el('a', { href: storeUrl }, '몰 홈으로')));
+        $('#buyBar').hidden = true;
+      }
+
+      function heroImage() {
+        const src = safeUrl(product.thumbnail_url);
+        const placeholder = () => el('span', { class: 'placeholder' }, product.brand || product.category_name || '상품 이미지');
+        return el(
+          'div',
+          { class: 'hero-img' },
+          src ? el('img', { src, alt: product.product_name, referrerpolicy: 'no-referrer', onerror: (e) => e.currentTarget.replaceWith(placeholder()) }) : placeholder()
+        );
+      }
+
+      function deliveryLine() {
+        if (!mall.delivery_enabled) return '배송 주문을 받지 않아요';
+        const fee = deliveryFeeOf(mall, salePrice(product) * quantity);
+        return `${fee ? `배송비 ${money(fee)}` : '무료배송'}${mall.delivery_fee && mall.free_delivery_min ? ` (${money(mall.free_delivery_min)} 이상 무료)` : ''}`;
+      }
+
+      function renderPage() {
+        const rate = discountRate(product);
+        const soldOut = isSoldOut(product);
+        const rows = [
+          ['배송', deliveryLine()],
+          mall.pickup_enabled ? ['매장 픽업', `${pharmacy.pharmacy_name}에서 무료로 받을 수 있어요`] : null,
+          product.supply_days ? ['사용 기간', `1개 기준 약 ${product.supply_days}일분`] : null,
+          ['판매', pharmacy.pharmacy_name]
+        ].filter(Boolean);
+        $('#page').replaceChildren(
+          heroImage(),
+          el(
+            'section',
+            { class: 'summary' },
+            el('div', { class: 'crumb' }, [product.category_name, product.brand].filter(Boolean).join(' · ') || ' '),
+            el('h1', {}, product.product_name),
+            el(
+              'div',
+              { class: 'price-wrap' },
+              rate ? el('span', { class: 'discount' }, `${rate}%`) : null,
+              el('span', { class: 'price' }, money(salePrice(product))),
+              rate ? el('span', { class: 'list-price' }, money(product.price)) : null
+            ),
+            el('span', { class: soldOut ? 'stock out' : 'stock ok' }, soldOut ? '품절' : '구매 가능')
+          ),
+          el('section', { class: 'info' }, el('dl', {}, ...rows.flatMap(([label, value]) => [el('dt', {}, label), el('dd', label === '배송' ? { id: 'deliveryLine' } : {}, value)]))),
+          el(
+            'section',
+            { class: 'detail' },
+            el('h2', {}, '상품 설명'),
+            product.description ? el('p', {}, product.description) : el('p', { class: 'muted' }, '등록된 상품 설명이 없어요. 궁금한 점은 약국에 문의해 주세요.')
+          ),
+          sellerFooter(window.__seller)
+        );
+        renderBuyBar();
+      }
+
+      function renderBuyBar() {
+        $('#buyBar').hidden = false;
+        if (isSoldOut(product)) {
+          $('#buyInner').replaceChildren(
+            el('button', { type: 'button', class: alertId ? 'buy-btn muted' : 'buy-btn secondary', onclick: toggleAlert }, alertId ? '입고 알림 신청됨 · 취소' : '입고 알림 받기')
+          );
+          return;
+        }
+        $('#buyInner').replaceChildren(
+          el(
+            'div',
+            { class: 'qty' },
+            el('button', { type: 'button', 'aria-label': '수량 줄이기', onclick: () => setQuantity(quantity - 1) }, '−'),
+            el('span', { id: 'qtyValue' }, String(quantity)),
+            el('button', { type: 'button', 'aria-label': '수량 늘리기', onclick: () => setQuantity(quantity + 1) }, '+')
+          ),
+          el('button', { type: 'button', class: 'buy-btn secondary', onclick: () => addToCart(false) }, '장바구니'),
+          el('button', { type: 'button', class: 'buy-btn primary', onclick: () => addToCart(true) }, `${money(salePrice(product) * quantity)} 구매`)
+        );
+      }
+
+      function setQuantity(next) {
+        const limited = Math.max(1, Math.min(maxQuantity(), next));
+        if (next > maxQuantity()) toast(`지금 주문할 수 있는 수량은 ${maxQuantity()}개까지예요.`);
+        quantity = limited;
+        $('#deliveryLine').textContent = deliveryLine();
+        renderBuyBar();
+      }
+
+      async function refreshCartBadge() {
+        if (!isCustomerInThisStore()) return;
+        const data = await api.request('/cart');
+        const count = data.items.reduce((sum, item) => sum + Number(item.quantity), 0);
+        $('#cartBadge').textContent = count > 99 ? '99+' : String(count);
+        $('#cartBadge').hidden = count === 0;
+      }
+
+      async function addToCart(goToCart) {
+        if (!isCustomerInThisStore()) return toast('약국 계정으로 미리 보는 중에는 담을 수 없어요.');
+        try {
+          await api.request('/cart', { method: 'POST', body: { product_id: product.id, quantity } });
+          if (goToCart) return location.assign(withPharmacy('/cart.html', pharmacyCode));
+          toast('장바구니에 담았어요.');
+          await refreshCartBadge();
+        } catch (error) {
+          toast(error.message);
+        }
+      }
+
+      async function loadAlert() {
+        if (!isCustomerInThisStore() || !isSoldOut(product)) return;
+        try {
+          const { alerts } = await api.request('/demand/me/restock-alerts');
+          alertId = alerts.find((a) => a.status === 'WAITING' && a.product_id === product.id)?.id || null;
+        } catch {
+          alertId = null;
+        }
+      }
+
+      async function toggleAlert() {
+        if (!isCustomerInThisStore()) return toast('입고 알림은 이 약국몰 회원만 신청할 수 있어요.');
+        try {
+          if (alertId) {
+            await api.request(`/demand/me/restock-alerts/${alertId}`, { method: 'DELETE' });
+            toast('입고 알림을 취소했어요.');
+          } else {
+            await api.request('/demand/me/restock-alerts', { method: 'POST', body: { product_id: product.id } });
+            toast('입고되면 알려 드릴게요.');
+          }
+          await loadAlert();
+          renderBuyBar();
+        } catch (error) {
+          toast(error.message);
+        }
+      }
+
+      async function load() {
+        if (!Number.isInteger(productId) || productId <= 0) return showState('상품을 찾을 수 없어요.');
+        try {
+          const data = await api.request(`/pharmacies/by-code/${encodeURIComponent(pharmacyCode)}`);
+          pharmacy = data.pharmacy;
+          mall = data.mall;
+          window.__seller = data.seller;
+          $('#mallSub').textContent = mallSubtitle(pharmacy);
+          const result = await api.request(`/products/mall/${productId}?pharmacyCode=${encodeURIComponent(pharmacyCode)}`);
+          product = result.product;
+          document.title = mallTitle(pharmacy, product.product_name);
+          if (result.online_paused && result.notice) toast(result.notice);
+          await loadAlert();
+          renderPage();
+          refreshCartBadge().catch(() => {});
+        } catch (error) {
+          if (handleMallAuthError(error, pharmacyCode)) return;
+          showState(error.status === 404 ? '판매하지 않거나 없는 상품이에요.' : error.message);
+        }
+      }
+
+      if (requireMallLogin(pharmacyCode)) load();
+    </script>
+  </body>
+</html>

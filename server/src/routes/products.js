@@ -3,6 +3,7 @@ const { getAll, getOne, run, transaction } = require('../db');
 const { authenticate, requireRole } = require('../middleware/auth');
 const { requirePharmacyScope } = require('../middleware/scope');
 const { ImportError, assertNotSyncing, onlineStockGate } = require('../services/product-import');
+const { popularProductIds } = require('../services/mall-policy');
 const { normalizeProductType, onlineSellableSql, resolveOnlineVisible } = require('../services/product-kind');
 
 const router = express.Router();
@@ -155,6 +156,8 @@ router.get('/mall', authenticate, mallPharmacy, (req, res) => {
   const gate = onlineStockGate(req.mallPharmacyId);
   res.json({
     products: products.map((product) => publicProduct(product, mallBuffer(gate))),
+    // 최근 30일 실제 판매 수량 순. 판매가 없으면 빈 목록(화면에서 인기 상품 칸을 숨긴다).
+    popular_ids: popularProductIds(req.mallPharmacyId),
     online_paused: gate.paused,
     notice: gate.message
   });

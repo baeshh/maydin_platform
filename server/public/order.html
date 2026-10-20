@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>주문 · 예약</title>
+    <title>주문 · 예약 | MAYDIN STORE</title>
     <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
     <style>
       :root {
@@ -48,11 +48,12 @@
       }
       .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
     </style>
+    <link rel="stylesheet" href="/mall.css" />
   </head>
   <body>
     <header>
       <div class="header-inner">
-        <a class="back" id="storeLink" href="/store.html">← 쇼핑몰</a>
+        <a class="back" id="storeLink" href="/store.html">← 몰 홈</a>
         <div class="title">주문 · 예약</div>
         <span style="width:64px"></span>
       </div>
@@ -68,7 +69,7 @@
         <a class="card" id="deliveryLink" href="#">
           <div class="tag">DELIVERY</div>
           <h2>배송 주문</h2>
-          <p>장바구니 상품을 배송지로 받아보세요. 5만원 이상 무료배송입니다.</p>
+          <p>장바구니 상품을 배송지로 받아보세요.<span id="deliveryPolicy"></span></p>
         </a>
         <a class="card" id="pickupLink" href="#">
           <div class="tag">PICKUP</div>
@@ -101,6 +102,17 @@
       if (!requireCustomerLogin(pharmacyCode)) {
         message('로그인이 필요합니다.');
       } else {
+        loadMallInfo(pharmacyCode)
+          .then(({ pharmacy, mall }) => {
+            document.title = mallTitle(pharmacy, '주문 · 예약');
+            const fee = mall.delivery_fee
+              ? ` 배송비 ${money(mall.delivery_fee)}${mall.free_delivery_min ? `, ${money(mall.free_delivery_min)} 이상 무료배송` : ''}.`
+              : ' 무료배송.';
+            $('#deliveryPolicy').textContent = fee;
+            $('#deliveryLink').hidden = !mall.delivery_enabled;
+            $('#pickupLink').hidden = !mall.pickup_enabled;
+          })
+          .catch(() => {});
         guardOnlineOrder($('main'), [$('#deliveryLink'), $('#pickupLink')]);
       }
     </script>

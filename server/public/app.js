@@ -109,6 +109,69 @@ function serializeForm(form) {
   return Object.fromEntries(new FormData(form).entries());
 }
 
+/* ---------- 고객 몰 공통: 브랜드·배송 정책·판매자 정보 ---------- */
+const MALL_BRAND = 'MAYDIN STORE';
+
+function mallSubtitle(pharmacy) {
+  return pharmacy?.pharmacy_name ? `${pharmacy.pharmacy_name} 온라인 몰` : '약국 온라인 몰';
+}
+
+function mallTitle(pharmacy, page) {
+  return `${page ? `${page} · ` : ''}${mallSubtitle(pharmacy)} | ${MALL_BRAND}`;
+}
+
+const mallInfoRequests = new Map();
+
+// 약국 정보·몰 정책·판매자 정보. 한 화면에서 여러 번 불러도 요청은 한 번만 보낸다.
+function loadMallInfo(pharmacyCode) {
+  if (!mallInfoRequests.has(pharmacyCode)) {
+    const request = api.request(`/pharmacies/by-code/${encodeURIComponent(pharmacyCode)}`);
+    request.catch(() => mallInfoRequests.delete(pharmacyCode));
+    mallInfoRequests.set(pharmacyCode, request);
+  }
+  return mallInfoRequests.get(pharmacyCode);
+}
+
+// 서버가 내려준 약국 배송 정책(mall)으로만 배송비를 계산한다. 결제 금액은 서버가 같은 규칙으로 다시 계산한다.
+function deliveryFeeOf(mall, productTotal) {
+  if (!mall || !mall.delivery_fee || productTotal <= 0) return 0;
+  if (mall.free_delivery_min && productTotal >= mall.free_delivery_min) return 0;
+  return mall.delivery_fee;
+}
+
+function shippingSummary(mall) {
+  if (!mall) return '';
+  const parts = [];
+  if (mall.delivery_enabled) {
+    if (!mall.delivery_fee) parts.push('무료배송');
+    else parts.push(`배송비 ${money(mall.delivery_fee)}${mall.free_delivery_min ? ` · ${money(mall.free_delivery_min)} 이상 무료배송` : ''}`);
+  } else {
+    parts.push('배송 주문은 받지 않아요');
+  }
+  if (mall.pickup_enabled) parts.push('매장 픽업 무료');
+  return parts.join(' · ');
+}
+
+// 전자상거래 판매자 표시(상호·대표자·사업자등록번호·주소·전화). 등록되지 않은 항목은 빼고 보여 준다.
+function sellerFooter(seller) {
+  const rows = seller
+    ? [
+        ['상호', seller.pharmacy_name],
+        ['대표자', seller.owner_name],
+        ['사업자등록번호', seller.business_number],
+        ['주소', seller.address],
+        ['전화', seller.phone]
+      ].filter(([, value]) => value)
+    : [];
+  return el(
+    'footer',
+    { class: 'mall-footer' },
+    el('div', { class: 'mall-footer-brand' }, MALL_BRAND),
+    rows.length ? el('dl', {}, ...rows.flatMap(([label, value]) => [el('dt', {}, label), el('dd', {}, value)])) : null,
+    el('p', {}, '이 몰은 약국을 방문해 가입한 회원만 이용할 수 있는 약국 전용 몰입니다. 일반의약품은 약국에서 약사 상담 후 구매할 수 있습니다.')
+  );
+}
+
 // 약국몰은 약국마다 따로다. 주소에 약국 코드가 없으면 로그인한 회원의 약국으로 가고, 다른 약국으로 넘어가지 않는다.
 function pharmacyCodeFromUrl(fallback = '') {
   return new URLSearchParams(location.search).get('pharmacyCode') || currentUser()?.pharmacy_code || fallback;

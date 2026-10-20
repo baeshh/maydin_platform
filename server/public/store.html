@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>약국 쇼핑몰</title>
+    <title>MAYDIN STORE</title>
     <script>
       if (!localStorage.getItem('token')) {
         sessionStorage.setItem('loginNotice', '이 약국몰은 회원 전용이에요. 로그인하거나 영수증 코드로 가입해 주세요.');
@@ -11,6 +11,7 @@
       }
     </script>
     <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+    <link rel="stylesheet" href="/mall.css" />
     <style>
       :root {
         --toss-blue: #3182f6;
@@ -22,7 +23,6 @@
         --text-muted: #8b95a1;
         --border: #f2f4f6;
         --danger: #f04452;
-        --card-shadow: 0 8px 20px rgba(0, 0, 0, 0.04);
       }
 
       * {
@@ -39,11 +39,15 @@
         padding-bottom: 110px;
       }
 
+      a {
+        color: inherit;
+      }
+
       header {
         backdrop-filter: blur(20px);
         -webkit-backdrop-filter: blur(20px);
-        background: rgba(255, 255, 255, 0.86);
-        border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+        background: rgba(255, 255, 255, 0.9);
+        border-bottom: 1px solid rgba(0, 0, 0, 0.04);
         position: sticky;
         top: 0;
         z-index: 100;
@@ -52,33 +56,18 @@
       .header-inner {
         align-items: center;
         display: flex;
+        gap: 12px;
         justify-content: space-between;
         margin: 0 auto;
         max-width: 768px;
-        padding: 14px 20px;
-      }
-
-      .logo {
-        font-size: 20px;
-        font-weight: 800;
-        letter-spacing: -0.5px;
-      }
-
-      .logo span {
-        color: var(--toss-blue);
+        padding: 12px 20px;
       }
 
       .header-actions {
         align-items: center;
         display: flex;
-        gap: 14px;
-      }
-
-      .text-link {
-        color: var(--text-sub);
-        font-size: 13px;
-        font-weight: 700;
-        text-decoration: none;
+        flex-shrink: 0;
+        gap: 16px;
       }
 
       .icon-btn {
@@ -115,309 +104,106 @@
         top: -5px;
       }
 
+      .cart-badge[hidden] {
+        display: none;
+      }
+
       main {
         display: flex;
         flex-direction: column;
-        gap: 40px;
+        gap: 32px;
         margin: 0 auto;
         max-width: 768px;
       }
 
-      .hero-section {
-        padding: 20px 20px 0;
+      .mall-notice {
+        border-radius: 12px;
+        font-size: 14px;
+        font-weight: 700;
+        line-height: 1.5;
+        margin: 12px 20px 0;
+        padding: 12px 14px;
       }
 
-      .hero-banner {
-        background: linear-gradient(135deg, #1b64da 0%, #3182f6 100%);
-        border-radius: 24px;
-        box-shadow: 0 16px 32px rgba(49, 130, 246, 0.2);
-        color: #fff;
-        overflow: hidden;
-        padding: 32px 24px;
-        position: relative;
+      .mall-notice.warn {
+        background: #fff4e5;
+        color: #9a5b00;
       }
 
-      .hero-banner::after {
-        background: rgba(255, 255, 255, 0.12);
-        border-radius: 50%;
-        bottom: -20px;
-        content: "";
-        filter: blur(20px);
-        height: 120px;
-        position: absolute;
-        right: -20px;
-        width: 120px;
+      .store-card {
+        background: var(--bg-sub);
+        border-radius: 22px;
+        margin: 16px 20px 0;
+        padding: 20px;
       }
 
-      .hero-tag {
-        backdrop-filter: blur(10px);
-        background: rgba(255, 255, 255, 0.2);
-        border-radius: 20px;
-        display: inline-block;
+      .store-label {
+        color: var(--toss-blue);
+        font-size: 12px;
+        font-weight: 800;
+        margin-bottom: 4px;
+      }
+
+      .store-card h1 {
+        font-size: 22px;
+        font-weight: 800;
+        letter-spacing: -0.4px;
+      }
+
+      .store-card .owner-notice {
+        background: #fff;
+        border-radius: 14px;
+        color: var(--text-main);
+        font-size: 14px;
+        line-height: 1.6;
+        margin-top: 12px;
+        padding: 12px 14px;
+        white-space: pre-wrap;
+      }
+
+      .store-info {
+        color: var(--text-sub);
+        display: grid;
         font-size: 13px;
-        font-weight: 800;
-        margin-bottom: 12px;
-        padding: 6px 12px;
+        gap: 6px;
+        margin-top: 14px;
       }
 
-      .hero-banner h2 {
-        font-size: clamp(24px, 6vw, 28px);
-        font-weight: 800;
-        letter-spacing: -0.5px;
-        line-height: 1.3;
-        margin-bottom: 8px;
-      }
-
-      .hero-banner p {
-        font-size: 15px;
-        opacity: 0.92;
-      }
-
-      .category-scroll {
-        overflow-x: auto;
-        padding: 0 20px;
-        scrollbar-width: none;
-        white-space: nowrap;
-      }
-
-      .category-scroll::-webkit-scrollbar,
-      .horizontal-products::-webkit-scrollbar {
-        display: none;
-      }
-
-      .chip-list {
+      .store-info div {
         display: flex;
         gap: 8px;
       }
 
-      .chip {
-        background: var(--bg-sub);
-        border: none;
-        border-radius: 100px;
-        color: var(--text-sub);
-        cursor: pointer;
-        font-size: 15px;
-        font-weight: 700;
-        padding: 12px 20px;
-        transition: 0.2s;
-      }
-
-      .chip.active {
-        background: var(--text-main);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-        color: #fff;
-      }
-
-      .section-header {
-        align-items: flex-end;
-        display: flex;
-        justify-content: space-between;
-        margin-bottom: 16px;
-        padding: 0 20px;
-      }
-
-      .section-header h3 {
-        font-size: 20px;
-        font-weight: 800;
-        letter-spacing: -0.5px;
-      }
-
-      .section-header a {
+      .store-info dt {
         color: var(--text-muted);
-        font-size: 14px;
+        flex-shrink: 0;
         font-weight: 700;
+        width: 44px;
+      }
+
+      .store-info dd {
+        margin: 0;
+      }
+
+      .store-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 16px;
+      }
+
+      .ghost-btn {
+        background: #fff;
+        border: 1px solid #e5e8eb;
+        border-radius: 12px;
+        color: var(--text-main);
+        font-size: 13px;
+        font-weight: 800;
+        padding: 10px 14px;
         text-decoration: none;
       }
 
-      .horizontal-products {
-        display: flex;
-        gap: 16px;
-        overflow-x: auto;
-        padding: 0 20px 20px;
-        scroll-snap-type: x mandatory;
-        scrollbar-width: none;
-      }
-
-      .h-card {
-        cursor: pointer;
-        min-width: 160px;
-        scroll-snap-align: start;
-      }
-
-      .img-box {
-        align-items: center;
-        background: var(--bg-sub);
-        display: flex;
-        justify-content: center;
-        overflow: hidden;
-        position: relative;
-      }
-
-      .img-box img {
-        height: 100%;
-        object-fit: cover;
-        width: 100%;
-      }
-
-      .placeholder {
-        color: var(--text-muted);
-        font-size: 12px;
-      }
-
-      .h-card .img-box {
-        aspect-ratio: 1 / 1;
-        border-radius: 20px;
-        margin-bottom: 12px;
-        width: 100%;
-      }
-
-      .rank-badge {
-        align-items: center;
-        backdrop-filter: blur(4px);
-        background: rgba(0, 0, 0, 0.72);
-        border-radius: 8px;
-        color: #fff;
-        display: flex;
-        font-size: 12px;
-        font-weight: 800;
-        height: 24px;
-        justify-content: center;
-        left: 10px;
-        position: absolute;
-        top: 10px;
-        width: 24px;
-      }
-
-      .h-card h4 {
-        font-size: 15px;
-        font-weight: 700;
-        margin-bottom: 4px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .price {
-        font-size: 16px;
-        font-weight: 800;
-      }
-
-      .product-grid {
-        display: grid;
-        gap: 22px 16px;
-        grid-template-columns: repeat(2, 1fr);
-        padding: 0 20px;
-      }
-
-      .v-card {
-        cursor: pointer;
-        display: flex;
-        flex-direction: column;
-      }
-
-      .v-card .img-box {
-        aspect-ratio: 1 / 1;
-        border-radius: 20px;
-        margin-bottom: 14px;
-        transition: 0.2s;
-        width: 100%;
-      }
-
-      .v-card:active .img-box {
-        transform: scale(0.98);
-      }
-
-      .badge-wrap {
-        bottom: 10px;
-        display: flex;
-        gap: 4px;
-        left: 10px;
-        position: absolute;
-      }
-
-      .tag {
-        backdrop-filter: blur(4px);
-        background: rgba(255, 255, 255, 0.92);
-        border-radius: 6px;
-        font-size: 11px;
-        font-weight: 800;
-        padding: 4px 8px;
-      }
-
-      .tag.blue {
-        color: var(--toss-blue);
-      }
-
-      .tag.red {
-        color: var(--danger);
-      }
-
-      .brand {
-        color: var(--text-muted);
-        font-size: 12px;
-        font-weight: 700;
-        margin-bottom: 2px;
-      }
-
-      .v-card h4 {
-        -webkit-box-orient: vertical;
-        -webkit-line-clamp: 2;
-        display: -webkit-box;
-        font-size: 15px;
-        font-weight: 700;
-        line-height: 1.4;
-        margin-bottom: 8px;
-        overflow: hidden;
-      }
-
-      .price-wrap {
-        align-items: center;
-        display: flex;
-        gap: 6px;
-        margin-top: auto;
-      }
-
-      .discount {
-        color: var(--danger);
-        font-size: 17px;
-        font-weight: 800;
-      }
-
-      .add-btn {
-        background: var(--text-main);
-        border: none;
-        border-radius: 12px;
-        color: #fff;
-        cursor: pointer;
-        font-size: 13px;
-        font-weight: 800;
-        margin-top: 10px;
-        padding: 11px 12px;
-      }
-
-      .mall-notice {
-        margin: 12px 16px 0;
-        padding: 12px 14px;
-        border-radius: 12px;
-        background: #fff4e5;
-        color: #9a5b00;
-        font-size: 14px;
-        font-weight: 700;
-        line-height: 1.5;
-      }
-
-      .add-btn.alert-btn {
-        background: var(--toss-blue-light);
-        color: var(--toss-blue);
-      }
-
-      .add-btn.alert-btn.on {
-        background: var(--bg-sub);
-        color: var(--text-sub);
-      }
-
       .search-section {
-        padding: 0 20px 16px;
+        padding: 0 20px;
       }
 
       .search-box {
@@ -445,6 +231,268 @@
         padding: 14px 0;
       }
 
+      .category-scroll {
+        margin-top: -16px;
+        overflow-x: auto;
+        padding: 0 20px;
+        scrollbar-width: none;
+        white-space: nowrap;
+      }
+
+      .category-scroll::-webkit-scrollbar,
+      .horizontal-products::-webkit-scrollbar {
+        display: none;
+      }
+
+      .chip-list {
+        display: flex;
+        gap: 8px;
+      }
+
+      .chip {
+        background: var(--bg-sub);
+        border: none;
+        border-radius: 100px;
+        color: var(--text-sub);
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 700;
+        padding: 10px 16px;
+      }
+
+      .chip small {
+        font-size: 12px;
+        margin-left: 4px;
+        opacity: 0.7;
+      }
+
+      .chip.active {
+        background: var(--text-main);
+        color: #fff;
+      }
+
+      .section-header {
+        align-items: center;
+        display: flex;
+        gap: 12px;
+        justify-content: space-between;
+        margin-bottom: 14px;
+        padding: 0 20px;
+      }
+
+      .section-header h2 {
+        font-size: 19px;
+        font-weight: 800;
+        letter-spacing: -0.4px;
+      }
+
+      .section-header h2 small {
+        color: var(--text-muted);
+        font-size: 14px;
+        font-weight: 700;
+        margin-left: 6px;
+      }
+
+      .section-header select {
+        background: var(--bg-sub);
+        border: none;
+        border-radius: 10px;
+        color: var(--text-sub);
+        font-size: 13px;
+        font-weight: 700;
+        padding: 8px 10px;
+      }
+
+      .horizontal-products {
+        display: flex;
+        gap: 14px;
+        overflow-x: auto;
+        padding: 0 20px 4px;
+        scroll-snap-type: x mandatory;
+        scrollbar-width: none;
+      }
+
+      .h-card {
+        flex: 0 0 148px;
+        scroll-snap-align: start;
+        text-decoration: none;
+      }
+
+      .img-box {
+        align-items: center;
+        aspect-ratio: 1 / 1;
+        background: var(--bg-sub);
+        border-radius: 18px;
+        display: flex;
+        justify-content: center;
+        margin-bottom: 10px;
+        overflow: hidden;
+        position: relative;
+        width: 100%;
+      }
+
+      .img-box img {
+        height: 100%;
+        object-fit: cover;
+        width: 100%;
+      }
+
+      .placeholder {
+        color: var(--text-muted);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .rank-badge {
+        align-items: center;
+        background: rgba(0, 0, 0, 0.72);
+        border-radius: 8px;
+        color: #fff;
+        display: flex;
+        font-size: 12px;
+        font-weight: 800;
+        height: 24px;
+        justify-content: center;
+        left: 10px;
+        position: absolute;
+        top: 10px;
+        width: 24px;
+      }
+
+      .badge-wrap {
+        bottom: 10px;
+        display: flex;
+        gap: 4px;
+        left: 10px;
+        position: absolute;
+      }
+
+      .tag {
+        background: rgba(255, 255, 255, 0.94);
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 800;
+        padding: 4px 7px;
+      }
+
+      .tag.blue {
+        color: var(--toss-blue);
+      }
+
+      .tag.red {
+        color: var(--danger);
+      }
+
+      .tag.dark {
+        background: rgba(25, 31, 40, 0.86);
+        color: #fff;
+      }
+
+      .card-brand {
+        color: var(--text-muted);
+        font-size: 12px;
+        font-weight: 700;
+        margin-bottom: 2px;
+      }
+
+      .card-name {
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        display: -webkit-box;
+        font-size: 15px;
+        font-weight: 700;
+        line-height: 1.4;
+        margin-bottom: 6px;
+        overflow: hidden;
+      }
+
+      .price-wrap {
+        align-items: baseline;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 6px;
+      }
+
+      .discount {
+        color: var(--danger);
+        font-size: 16px;
+        font-weight: 800;
+      }
+
+      .price {
+        font-size: 16px;
+        font-weight: 800;
+      }
+
+      .list-price {
+        color: var(--text-muted);
+        font-size: 13px;
+        text-decoration: line-through;
+      }
+
+      .product-grid {
+        display: grid;
+        gap: 24px 14px;
+        grid-template-columns: repeat(2, 1fr);
+        padding: 0 20px;
+      }
+
+      @media (min-width: 640px) {
+        .product-grid {
+          grid-template-columns: repeat(3, 1fr);
+        }
+      }
+
+      .v-card {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .v-card > a {
+        text-decoration: none;
+      }
+
+      .v-card .img-box {
+        transition: transform 0.15s;
+      }
+
+      .v-card > a:active .img-box {
+        transform: scale(0.98);
+      }
+
+      .add-btn {
+        background: var(--text-main);
+        border: none;
+        border-radius: 12px;
+        color: #fff;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 800;
+        margin-top: 10px;
+        padding: 11px 12px;
+      }
+
+      .add-btn.alert-btn {
+        background: var(--toss-blue-light);
+        color: var(--toss-blue);
+      }
+
+      .add-btn.alert-btn.on {
+        background: var(--bg-sub);
+        color: var(--text-sub);
+      }
+
+      .empty {
+        background: var(--bg-sub);
+        border-radius: 18px;
+        color: var(--text-sub);
+        font-size: 14px;
+        grid-column: 1 / -1;
+        line-height: 1.6;
+        padding: 28px 20px;
+        text-align: center;
+      }
+
       .request-box {
         background: var(--bg-sub);
         border-radius: 18px;
@@ -467,64 +515,10 @@
         width: 100%;
       }
 
-      .customer-panel {
-        background: #fff;
-        border-top: 10px solid var(--bg-sub);
-        padding: 28px 20px 0;
-      }
-
-      .panel-card {
-        background: #fff;
-        border: 1px solid var(--border);
-        border-radius: 22px;
-        box-shadow: var(--card-shadow);
-        margin-bottom: 16px;
-        padding: 18px;
-      }
-
-      .cart-row,
-      .order-row {
-        border-bottom: 1px solid var(--border);
-        display: flex;
-        gap: 12px;
-        justify-content: space-between;
-        padding: 12px 0;
-      }
-
-      .cart-row:last-child,
-      .order-row:last-child {
-        border-bottom: none;
-      }
-
       .muted {
         color: var(--text-muted);
         font-size: 14px;
         line-height: 1.5;
-      }
-
-      .order-form {
-        display: grid;
-        gap: 10px;
-        margin-top: 14px;
-      }
-
-      .order-form input {
-        border: 1px solid var(--border);
-        border-radius: 14px;
-        font-size: 15px;
-        height: 48px;
-        padding: 0 14px;
-      }
-
-      .order-submit {
-        background: var(--toss-blue);
-        border: none;
-        border-radius: 16px;
-        color: #fff;
-        cursor: pointer;
-        font-size: 16px;
-        font-weight: 800;
-        height: 54px;
       }
 
       .bottom-nav {
@@ -550,7 +544,6 @@
         flex-direction: column;
         gap: 4px;
         text-decoration: none;
-        transition: 0.2s;
       }
 
       .nav-item.active {
@@ -594,30 +587,24 @@
       }
 
       @media (max-width: 420px) {
-        .header-inner {
-          padding: 13px 16px;
-        }
-
-        .header-actions {
-          gap: 10px;
-        }
-
-        .text-link {
-          display: none;
-        }
-
-        .product-grid {
-          gap: 20px 12px;
-          padding: 0 16px;
-        }
-
-        .hero-section,
+        .header-inner,
         .section-header,
         .category-scroll,
         .horizontal-products,
-        .customer-panel {
+        .product-grid,
+        .search-section {
           padding-left: 16px;
           padding-right: 16px;
+        }
+
+        .store-card,
+        .mall-notice {
+          margin-left: 16px;
+          margin-right: 16px;
+        }
+
+        .product-grid {
+          gap: 22px 12px;
         }
 
         .bottom-nav {
@@ -631,10 +618,11 @@
   <body>
     <header>
       <div class="header-inner">
-        <div class="logo"><span id="pharmacyLogo">약국</span> <span>쇼핑몰</span></div>
+        <a class="mall-brand" id="brandLink" href="#">
+          <span class="mall-brand-title">MAYDIN STORE</span>
+          <span class="mall-brand-sub" id="mallSub">약국 온라인 몰</span>
+        </a>
         <div class="header-actions">
-          <a class="text-link" id="meLink" href="#">내 정보</a>
-          <a class="text-link" href="#" onclick="logout(withPharmacy('/login.html', pharmacyCode)); return false;">로그아웃</a>
           <button class="icon-btn" type="button" onclick="focusSearch()" aria-label="상품 검색">
             <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="11" cy="11" r="8"></circle>
@@ -647,19 +635,23 @@
               <circle cx="20" cy="21" r="1"></circle>
               <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
             </svg>
-            <span class="cart-badge" id="cartBadge">0</span>
+            <span class="cart-badge" id="cartBadge" hidden>0</span>
           </a>
         </div>
       </div>
     </header>
 
     <main>
-      <div id="mallNotice" class="mall-notice" role="status" style="display: none;"></div>
-      <section class="hero-section">
-        <div class="hero-banner">
-          <span class="hero-tag" id="heroTag">약국 단독 혜택</span>
-          <h2>환절기 면역력,<br />하루 한 알로 챙기세요</h2>
-          <p>약국 운영자가 직접 등록한 건강기능식품과 의약외품을 만나보세요.</p>
+      <div id="mallNotice" class="mall-notice warn" role="status" hidden></div>
+
+      <section class="store-card" id="storeCard" aria-label="약국 정보">
+        <div class="store-label">회원 전용 온라인 몰</div>
+        <h1 id="storeName">약국</h1>
+        <div id="ownerNotice" class="owner-notice" hidden></div>
+        <dl class="store-info" id="storeInfo"></dl>
+        <div class="store-actions">
+          <a class="ghost-btn" id="counselLink" href="#">약사 상담 예약</a>
+          <a class="ghost-btn" id="callLink" href="#" hidden>전화 문의</a>
         </div>
       </section>
 
@@ -669,28 +661,38 @@
             <circle cx="11" cy="11" r="8"></circle>
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
-          <input id="storeSearch" type="search" placeholder="찾는 상품을 검색해 보세요" autocomplete="off" />
+          <input id="storeSearch" type="search" placeholder="상품명·브랜드로 검색" autocomplete="off" />
         </label>
       </section>
 
-      <section class="category-scroll">
+      <section class="category-scroll" aria-label="카테고리">
         <div class="chip-list" id="categoryChips"></div>
       </section>
 
-      <section>
-        <div class="section-header">
-          <h3>지금 가장 많이 담는 상품</h3>
-        </div>
-        <div class="horizontal-products" id="bestProducts"></div>
+      <section id="popularSection" hidden>
+        <div class="section-header"><h2>많이 구매한 상품 <small>최근 30일</small></h2></div>
+        <div class="horizontal-products" id="popularProducts"></div>
+      </section>
+
+      <section id="newSection" hidden>
+        <div class="section-header"><h2>새로 들어온 상품</h2></div>
+        <div class="horizontal-products" id="newProducts"></div>
       </section>
 
       <section id="productsSection">
         <div class="section-header">
-          <h3 id="recommendTitle">맞춤 추천</h3>
-          <a href="#" onclick="filterCategory('전체'); return false;">전체보기</a>
+          <h2 id="gridTitle">전체 상품 <small id="gridCount"></small></h2>
+          <select id="sortSelect" aria-label="정렬">
+            <option value="popular">인기순</option>
+            <option value="new">신상품순</option>
+            <option value="low">낮은 가격순</option>
+            <option value="high">높은 가격순</option>
+          </select>
         </div>
         <div class="product-grid" id="productGrid"></div>
       </section>
+
+      <div id="footer"></div>
     </main>
 
     <nav class="bottom-nav">
@@ -716,17 +718,23 @@
 
     <script src="/app.js"></script>
     <script>
-      const params = new URLSearchParams(location.search);
       const pharmacyCode = pharmacyCodeFromUrl();
+      const NEW_DAYS = 30;
       let pharmacy = null;
+      let mall = null;
       let products = [];
+      let popularIds = [];
       let selectedCategory = '전체';
+      let alertedProducts = new Map();
+      const loggedMisses = new Set();
+      let missTimer;
 
-      $('#meLink').href = withPharmacy('/order-history.html', pharmacyCode);
+      $('#brandLink').href = withPharmacy('/store.html', pharmacyCode);
       $('#myLink').href = withPharmacy('/order-history.html', pharmacyCode);
       $('#cartLink').href = withPharmacy('/cart.html', pharmacyCode);
       $('#orderNavLink').href = withPharmacy('/order.html', pharmacyCode);
       $('#historyNavLink').href = withPharmacy('/order-history.html', pharmacyCode);
+      $('#counselLink').href = withPharmacy('/order-counsel.html', pharmacyCode);
 
       function toast(text) {
         const target = $('#message');
@@ -736,86 +744,132 @@
         window.__toastTimer = window.setTimeout(() => target.classList.remove('show'), 2200);
       }
 
-      function safeCategory(product) {
-        return product.category_name || '추천상품';
-      }
-
-      function salePrice(product) {
-        return Number(product.discount_price || product.price || 0);
-      }
+      const categoryOf = (product) => product.category_name || '기타';
+      const salePrice = (product) => Number(product.discount_price || product.price || 0);
+      const isSoldOut = (product) => product.status === 'SOLD_OUT' || Number(product.stock_quantity) <= 0;
+      const productUrl = (product) => withPharmacy(`/product.html?id=${product.id}`, pharmacyCode);
 
       function discountRate(product) {
         if (!product.discount_price || Number(product.discount_price) >= Number(product.price)) return null;
         return Math.round((1 - Number(product.discount_price) / Number(product.price)) * 100);
       }
 
-      function imagePlaceholder() {
-        return el('span', { class: 'placeholder' }, '상품 이미지');
+      // 등록된 지 30일 이내. 서버 시각은 UTC 'YYYY-MM-DD HH:MM:SS'.
+      function isNew(product) {
+        const created = Date.parse(`${String(product.created_at || '').replace(' ', 'T')}Z`);
+        return Number.isFinite(created) && Date.now() - created < NEW_DAYS * 86400000;
+      }
+
+      function popularRank(product) {
+        const index = popularIds.indexOf(product.id);
+        return index < 0 ? Infinity : index;
       }
 
       function imageBox(product, ...extras) {
         const src = safeUrl(product.thumbnail_url);
+        const placeholder = () => el('span', { class: 'placeholder' }, product.brand || categoryOf(product));
         const image = src
           ? el('img', {
               src,
               alt: product.product_name || '',
               loading: 'lazy',
               referrerpolicy: 'no-referrer',
-              onerror: (event) => event.currentTarget.replaceWith(imagePlaceholder())
+              onerror: (event) => event.currentTarget.replaceWith(placeholder())
             })
-          : imagePlaceholder();
+          : placeholder();
         return el('div', { class: 'img-box' }, ...extras, image);
       }
 
-      function filterCategory(category) {
-        selectedCategory = category;
-        renderCategories();
-        renderProductGrid();
-        scrollToProducts();
+      function priceBlock(product) {
+        const rate = discountRate(product);
+        return el(
+          'div',
+          { class: 'price-wrap' },
+          rate ? el('span', { class: 'discount' }, `${rate}%`) : null,
+          el('span', { class: 'price' }, money(salePrice(product))),
+          rate ? el('span', { class: 'list-price' }, money(product.price)) : null
+        );
+      }
+
+      // 실제 데이터로만 붙는 표시: 판매 순위·신상품·품절.
+      function badges(product) {
+        const rank = popularRank(product);
+        return el(
+          'div',
+          { class: 'badge-wrap' },
+          rank < 3 && el('span', { class: 'tag blue' }, '인기'),
+          isNew(product) && el('span', { class: 'tag dark' }, 'NEW'),
+          isSoldOut(product) && el('span', { class: 'tag red' }, '품절')
+        );
+      }
+
+      function miniCard(product, rank) {
+        return el(
+          'a',
+          { class: 'h-card', href: productUrl(product) },
+          imageBox(product, rank ? el('span', { class: 'rank-badge' }, String(rank)) : null, isSoldOut(product) ? el('div', { class: 'badge-wrap' }, el('span', { class: 'tag red' }, '품절')) : null),
+          el('div', { class: 'card-name' }, product.product_name),
+          priceBlock(product)
+        );
+      }
+
+      function renderStoreCard() {
+        $('#mallSub').textContent = mallSubtitle(pharmacy);
+        $('#storeName').textContent = pharmacy.pharmacy_name;
+        $('#ownerNotice').textContent = mall?.notice || '';
+        $('#ownerNotice').hidden = !mall?.notice;
+        const rows = [
+          ['배송', shippingSummary(mall)],
+          ['주소', pharmacy.address],
+          ['전화', pharmacy.phone]
+        ].filter(([, value]) => value);
+        $('#storeInfo').replaceChildren(...rows.map(([label, value]) => el('div', {}, el('dt', {}, label), el('dd', {}, value))));
+        if (pharmacy.phone) {
+          $('#callLink').href = `tel:${pharmacy.phone.replace(/[^0-9+]/g, '')}`;
+          $('#callLink').hidden = false;
+        }
       }
 
       function renderCategories() {
-        const categories = ['전체', ...new Set(products.map(safeCategory))];
+        const counts = new Map();
+        for (const product of products) counts.set(categoryOf(product), (counts.get(categoryOf(product)) || 0) + 1);
+        const categories = [['전체', products.length], ...[...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))];
         $('#categoryChips').replaceChildren(
-          ...categories.map((category) =>
+          ...categories.map(([category, count]) =>
             el(
               'button',
-              {
-                type: 'button',
-                class: category === selectedCategory ? 'chip active' : 'chip',
-                onclick: () => filterCategory(category)
-              },
-              category
+              { type: 'button', class: category === selectedCategory ? 'chip active' : 'chip', onclick: () => filterCategory(category) },
+              category,
+              el('small', {}, String(count))
             )
           )
         );
       }
 
-      function renderBestProducts() {
-        const best = [...products]
-          .sort((a, b) => Number(b.stock_quantity > 0) - Number(a.stock_quantity > 0) || salePrice(b) - salePrice(a))
-          .slice(0, 5);
+      function renderShelves() {
+        const browsing = !searchQuery() && selectedCategory === '전체';
+        const popular = popularIds.map((id) => products.find((p) => p.id === id)).filter(Boolean).slice(0, 10);
+        $('#popularProducts').replaceChildren(...popular.map((product, index) => miniCard(product, index + 1)));
+        $('#popularSection').hidden = !browsing || popular.length === 0;
 
-        $('#bestProducts').replaceChildren(
-          ...(best.length
-            ? best.map((product, index) =>
-                el(
-                  'article',
-                  { class: 'h-card', onclick: () => addCart(product.id) },
-                  imageBox(product, el('span', { class: 'rank-badge' }, String(index + 1))),
-                  el('h4', {}, product.product_name),
-                  el('div', { class: 'price' }, money(salePrice(product)))
-                )
-              )
-            : [el('p', { class: 'muted', style: 'padding: 0 20px;' }, isCustomerInThisStore()
-                ? '아직 이 약국몰에서 온라인으로 판매하는 상품이 없어요. 약국에 방문해 상담받아 보세요.'
-                : '고객 몰에 보이는 상품이 없습니다. 파트너센터 상품 관리에서 "일반 상품"으로 분류하고 "온라인 판매"를 켠 상품만 고객에게 보입니다.')])
-        );
+        const fresh = products.filter(isNew).sort((a, b) => b.id - a.id).slice(0, 10);
+        $('#newProducts').replaceChildren(...fresh.map((product) => miniCard(product)));
+        // 상품이 모두 새 상품이면(막 연 몰) 전체 목록과 같으므로 따로 보이지 않는다.
+        $('#newSection').hidden = !browsing || fresh.length === 0 || fresh.length === products.length;
       }
 
-      let alertedProducts = new Map();
-      const loggedMisses = new Set();
-      let missTimer;
+      function sorted(list) {
+        const mode = $('#sortSelect').value;
+        const byNew = (a, b) => b.id - a.id;
+        const compare = {
+          popular: (a, b) => popularRank(a) - popularRank(b) || byNew(a, b),
+          new: byNew,
+          low: (a, b) => salePrice(a) - salePrice(b) || byNew(a, b),
+          high: (a, b) => salePrice(b) - salePrice(a) || byNew(a, b)
+        }[mode];
+        // 품절 상품은 정렬과 상관없이 뒤로 보낸다.
+        return [...list].sort((a, b) => Number(isSoldOut(a)) - Number(isSoldOut(b)) || compare(a, b));
+      }
 
       function searchQuery() {
         return $('#storeSearch').value.trim();
@@ -853,18 +907,15 @@
       }
 
       async function requestProduct() {
-        if (!isCustomerInThisStore()) {
-          toast('상품 요청은 이 약국몰 회원만 할 수 있어요. 먼저 로그인해 주세요.');
-          return;
-        }
+        if (!isCustomerInThisStore()) return toast('상품 요청은 이 약국몰 회원만 할 수 있어요.');
         try {
           await api.request('/demand/me/product-requests', {
             method: 'POST',
             body: { product_name: $('#requestName').value, memo: $('#requestMemo').value }
           });
-          toast('요청했어요. 약국 답변은 내역 > 내 정보에서 볼 수 있어요.');
+          toast('요청했어요. 약국 답변은 마이 > 상품 요청에서 볼 수 있어요.');
           $('#storeSearch').value = '';
-          renderProductGrid();
+          renderAll();
         } catch (error) {
           toast(error.message);
         }
@@ -876,16 +927,13 @@
           const { alerts } = await api.request('/demand/me/restock-alerts');
           alertedProducts = new Map(alerts.filter((a) => a.status === 'WAITING').map((a) => [a.product_id, a.id]));
           renderProductGrid();
-        } catch (error) {
+        } catch {
           alertedProducts = new Map();
         }
       }
 
       async function toggleRestockAlert(productId) {
-        if (!isCustomerInThisStore()) {
-          toast('입고 알림은 이 약국몰 회원만 신청할 수 있어요. 먼저 로그인해 주세요.');
-          return;
-        }
+        if (!isCustomerInThisStore()) return toast('입고 알림은 이 약국몰 회원만 신청할 수 있어요.');
         try {
           if (alertedProducts.has(productId)) {
             await api.request(`/demand/me/restock-alerts/${alertedProducts.get(productId)}`, { method: 'DELETE' });
@@ -900,10 +948,8 @@
         }
       }
 
-      function cardButton(product, soldOut) {
-        if (!soldOut) {
-          return el('button', { type: 'button', class: 'add-btn', onclick: () => addCart(product.id) }, '장바구니 담기');
-        }
+      function cardButton(product) {
+        if (!isSoldOut(product)) return el('button', { type: 'button', class: 'add-btn', onclick: () => addCart(product.id) }, '장바구니 담기');
         const on = alertedProducts.has(product.id);
         return el(
           'button',
@@ -912,119 +958,108 @@
         );
       }
 
+      function emptyGridMessage(query) {
+        if (query) return `'${query}' 검색 결과가 ${selectedCategory === '전체' ? '' : `${selectedCategory}에는 `}없어요.`;
+        if (products.length) return '이 카테고리에는 상품이 없어요.';
+        return isCustomerInThisStore()
+          ? '아직 이 몰에서 온라인으로 판매하는 상품이 없어요. 약국에 방문해 약사와 상담해 보세요.'
+          : '고객 몰에 보이는 상품이 없습니다. 파트너센터 상품 관리에서 "일반 상품"으로 분류하고 "온라인 판매"를 켠 상품만 고객에게 보입니다.';
+      }
+
       function renderProductGrid() {
         const query = searchQuery();
-        const inCategory = selectedCategory === '전체'
-          ? products
-          : products.filter((product) => safeCategory(product) === selectedCategory);
-        const visible = query ? inCategory.filter((product) => matchesSearch(product, query)) : inCategory;
+        const inCategory = selectedCategory === '전체' ? products : products.filter((product) => categoryOf(product) === selectedCategory);
+        const visible = sorted(query ? inCategory.filter((product) => matchesSearch(product, query)) : inCategory);
+        $('#gridTitle').firstChild.textContent = query ? '검색 결과 ' : selectedCategory === '전체' ? '전체 상품 ' : `${selectedCategory} `;
+        $('#gridCount').textContent = `${visible.length.toLocaleString()}개`;
 
         if (query && !visible.length && !products.some((product) => matchesSearch(product, query))) {
           logSearchMiss(query);
-          $('#productGrid').replaceChildren(requestBox(query));
-          return;
+          return $('#productGrid').replaceChildren(requestBox(query));
         }
-
-        if (!visible.length) {
-          $('#productGrid').replaceChildren(
-            el('p', { class: 'muted' }, query ? `'${query}' 검색 결과가 이 카테고리에는 없습니다.` : '선택한 카테고리에 상품이 없습니다.')
-          );
-          return;
-        }
+        if (!visible.length) return $('#productGrid').replaceChildren(el('p', { class: 'empty' }, emptyGridMessage(query)));
 
         $('#productGrid').replaceChildren(
-          ...visible.map((product, index) => {
-            const rate = discountRate(product);
-            const soldOut = product.status === 'SOLD_OUT' || Number(product.stock_quantity) <= 0;
-            return el(
+          ...visible.map((product) =>
+            el(
               'article',
               { class: 'v-card' },
-              imageBox(
-                product,
-                el(
-                  'div',
-                  { class: 'badge-wrap' },
-                  index < 2 && el('span', { class: 'tag blue' }, 'BEST'),
-                  salePrice(product) >= 50000 && el('span', { class: 'tag red' }, '무료배송'),
-                  soldOut && el('span', { class: 'tag red' }, '품절')
-                )
-              ),
-              el('div', { class: 'brand' }, product.brand || safeCategory(product)),
-              el('h4', {}, product.product_name),
               el(
-                'div',
-                { class: 'price-wrap' },
-                rate ? el('span', { class: 'discount' }, `${rate}%`) : null,
-                el('span', { class: 'price' }, money(salePrice(product)))
+                'a',
+                { href: productUrl(product) },
+                imageBox(product, badges(product)),
+                el('div', { class: 'card-brand' }, product.brand || categoryOf(product)),
+                el('div', { class: 'card-name' }, product.product_name),
+                priceBlock(product)
               ),
-              cardButton(product, soldOut)
-            );
-          })
+              cardButton(product)
+            )
+          )
         );
       }
 
-      $('#storeSearch').addEventListener('input', () => {
-        if (searchQuery() && selectedCategory !== '전체') {
-          selectedCategory = '전체';
-          renderCategories();
-        }
+      function renderAll() {
+        renderCategories();
+        renderShelves();
         renderProductGrid();
+      }
+
+      function filterCategory(category) {
+        selectedCategory = category;
+        renderAll();
+        $('#productsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+
+      $('#storeSearch').addEventListener('input', () => {
+        if (searchQuery() && selectedCategory !== '전체') selectedCategory = '전체';
+        renderAll();
       });
+      $('#sortSelect').addEventListener('change', renderProductGrid);
 
       function isCustomerInThisStore() {
         const user = currentUser();
         return user?.role === 'CUSTOMER' && pharmacy && Number(user.pharmacy_id) === Number(pharmacy.id);
       }
 
-      async function loadStore() {
-        try {
-          const pharmacyData = await api.request(`/pharmacies/by-code/${encodeURIComponent(pharmacyCode)}`);
-          pharmacy = pharmacyData.pharmacy;
-          document.title = `${pharmacy.pharmacy_name} 쇼핑몰`;
-          $('#pharmacyLogo').textContent = pharmacy.pharmacy_name;
-          $('#heroTag').textContent = `${pharmacy.pharmacy_name} 단독 혜택`;
-          $('#recommendTitle').textContent = `${pharmacy.pharmacy_name} 맞춤 추천`;
-
-          const productData = await api.request(`/products/mall?pharmacyCode=${encodeURIComponent(pharmacyCode)}`);
-          products = productData.products;
-          $('#mallNotice').textContent = productData.notice || '';
-          $('#mallNotice').style.display = productData.online_paused ? '' : 'none';
-          renderCategories();
-          renderBestProducts();
-          renderProductGrid();
-
-          if (isCustomerInThisStore()) {
-            await Promise.all([refreshCartBadge(), loadAlerts()]);
-          } else {
-            $('#cartBadge').textContent = '0';
-          }
-        } catch (error) {
-          if (!handleMallAuthError(error, pharmacyCode)) toast(error.message);
-        }
-      }
-
       async function refreshCartBadge() {
         const data = await api.request('/cart');
-        $('#cartBadge').textContent = data.items.reduce((sum, item) => sum + Number(item.quantity), 0);
+        const count = data.items.reduce((sum, item) => sum + Number(item.quantity), 0);
+        $('#cartBadge').textContent = count > 99 ? '99+' : String(count);
+        $('#cartBadge').hidden = count === 0;
       }
 
       async function addCart(productId) {
-        if (!isCustomerInThisStore()) {
-          toast('약국 계정으로 미리 보는 중에는 장바구니에 담을 수 없어요.');
-          return;
-        }
-
+        if (!isCustomerInThisStore()) return toast('약국 계정으로 미리 보는 중에는 장바구니에 담을 수 없어요.');
         try {
           await api.request('/cart', { method: 'POST', body: { product_id: productId, quantity: 1 } });
-          toast('장바구니에 담았습니다.');
+          toast('장바구니에 담았어요.');
           await refreshCartBadge();
         } catch (error) {
           toast(error.message);
         }
       }
 
-      function scrollToProducts() {
-        $('#productsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      async function loadStore() {
+        try {
+          const data = await api.request(`/pharmacies/by-code/${encodeURIComponent(pharmacyCode)}`);
+          pharmacy = data.pharmacy;
+          mall = data.mall;
+          document.title = mallTitle(pharmacy);
+          renderStoreCard();
+          $('#footer').replaceWith(sellerFooter(data.seller));
+
+          const productData = await api.request(`/products/mall?pharmacyCode=${encodeURIComponent(pharmacyCode)}`);
+          products = productData.products;
+          popularIds = productData.popular_ids || [];
+          if (!popularIds.length) $('#sortSelect').value = 'new';
+          $('#mallNotice').textContent = productData.notice || '';
+          $('#mallNotice').hidden = !productData.online_paused;
+          renderAll();
+
+          if (isCustomerInThisStore()) await Promise.all([refreshCartBadge(), loadAlerts()]);
+        } catch (error) {
+          if (!handleMallAuthError(error, pharmacyCode)) toast(error.message);
+        }
       }
 
       if (requireMallLogin(pharmacyCode)) loadStore();
