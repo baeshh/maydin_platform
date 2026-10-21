@@ -104,7 +104,13 @@
             )
           ),
           el('div', { class: 'sum' }, el('span', {}, '결제 예정'), el('span', {}, money(total + deliveryFee))),
-          el('p', { class: 'muted' }, `상품 ${money(total)} · 배송비 ${money(deliveryFee)}${shippingSummary(mall) ? ` · ${shippingSummary(mall)}` : ''}`)
+          el(
+            'p',
+            { class: 'muted' },
+            `상품 ${money(total)} · 배송비 ${deliveryFee ? money(deliveryFee) : '무료'}${
+              deliveryFee && mall?.free_delivery_min ? ` · ${money(mall.free_delivery_min - total)} 더 담으면 무료배송` : ''
+            }`
+          )
         );
       }
 

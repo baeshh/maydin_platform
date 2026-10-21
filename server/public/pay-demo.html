@@ -6,47 +6,128 @@
     <title>(데모) 결제창</title>
     <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
     <style>
-      :root { --blue:#3182f6; --red:#e03131; --text:#191f28; --sub:#4e5968; --muted:#8b95a1; --bg:#f2f4f6; --line:#e5e8eb; }
+      :root { --blue:#3182f6; --blue-soft:#e8f3ff; --red:#e03131; --text:#191f28; --sub:#4e5968; --muted:#8b95a1; --bg:#f2f4f6; --line:#e5e8eb; }
       * { box-sizing:border-box; margin:0; padding:0; font-family:"Pretendard",system-ui,sans-serif; }
-      body { background:var(--bg); color:var(--text); min-height:100vh; padding:24px 20px 40px; word-break:keep-all; }
-      main { margin:0 auto; max-width:480px; display:grid; gap:14px; }
-      .demo { background:#fff0f0; border:1px solid #ffc9c9; border-radius:16px; color:#c92a2a; font-size:14px; font-weight:700; line-height:1.55; padding:14px 16px; }
-      .card { background:#fff; border:1px solid var(--line); border-radius:20px; padding:20px; }
-      .card h1 { font-size:18px; font-weight:800; margin-bottom:6px; }
-      .amount { font-size:28px; font-weight:800; margin:12px 0 4px; }
-      .muted { color:var(--muted); font-size:13px; line-height:1.5; }
-      button { border:0; border-radius:14px; cursor:pointer; font:inherit; font-weight:800; margin-top:10px; padding:14px; width:100%; }
-      .approve { background:var(--blue); color:#fff; }
-      .decline { background:#fff; border:1px solid var(--line); color:var(--red); }
-      .back { background:#f2f4f6; color:var(--sub); }
-      button:disabled { opacity:.5; }
+      body { background:var(--bg); color:var(--text); min-height:100vh; padding:0 0 120px; word-break:keep-all; }
+      header { align-items:center; background:#fff; border-bottom:1px solid var(--line); display:flex; gap:8px; height:56px; justify-content:space-between; padding:0 20px; position:sticky; top:0; z-index:2; }
+      header strong { font-size:16px; font-weight:800; }
+      .tag { background:#fff0f0; border-radius:999px; color:#c92a2a; font-size:12px; font-weight:800; padding:4px 10px; }
+      main { display:grid; gap:12px; margin:0 auto; max-width:480px; padding:16px; }
+      .demo { background:#fff0f0; border:1px solid #ffc9c9; border-radius:14px; color:#c92a2a; font-size:13px; font-weight:700; line-height:1.55; padding:12px 14px; }
+      .card { background:#fff; border-radius:18px; padding:18px; }
+      .label { color:var(--muted); font-size:13px; font-weight:700; margin-bottom:8px; }
+      .order-name { font-size:16px; font-weight:800; line-height:1.4; }
+      .amount { font-size:28px; font-weight:800; margin-top:4px; }
+      .muted { color:var(--muted); font-size:12px; line-height:1.5; margin-top:6px; }
+      .tabs { background:var(--bg); border-radius:12px; display:grid; gap:4px; grid-template-columns:1fr 1fr; padding:4px; }
+      .tabs button { background:transparent; border:0; border-radius:10px; color:var(--sub); cursor:pointer; font:inherit; font-size:14px; font-weight:800; padding:10px; }
+      .tabs button.active { background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.08); color:var(--text); }
+      .grid { display:grid; gap:8px; grid-template-columns:repeat(3, 1fr); margin-top:12px; }
+      .grid.two { grid-template-columns:repeat(2, 1fr); }
+      .option { background:#fff; border:1px solid var(--line); border-radius:12px; color:var(--text); cursor:pointer; font:inherit; font-size:13px; font-weight:700; padding:12px 6px; }
+      .option.active { background:var(--blue-soft); border-color:var(--blue); color:var(--blue); }
+      select { appearance:none; background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%238b95a1' stroke-width='2'/%3E%3C/svg%3E") no-repeat right 14px center; border:1px solid var(--line); border-radius:12px; font:inherit; font-size:14px; margin-top:12px; padding:12px 14px; width:100%; }
+      select:disabled { background-color:var(--bg); color:var(--muted); }
+      .agree { align-items:flex-start; display:flex; font-size:13px; gap:8px; line-height:1.5; }
+      .agree input { accent-color:var(--blue); height:18px; margin-top:1px; width:18px; }
+      .links { display:flex; justify-content:space-between; }
+      .links button { background:none; border:0; color:var(--muted); cursor:pointer; font:inherit; font-size:13px; text-decoration:underline; }
       #error { color:var(--red); font-size:14px; font-weight:700; }
+      .pay-bar { background:#fff; border-top:1px solid var(--line); bottom:0; left:0; padding:12px 16px calc(12px + env(safe-area-inset-bottom)); position:fixed; right:0; }
+      .pay-bar button { background:var(--blue); border:0; border-radius:14px; color:#fff; cursor:pointer; display:block; font:inherit; font-size:16px; font-weight:800; margin:0 auto; max-width:448px; padding:16px; width:100%; }
+      .pay-bar button:disabled { opacity:.45; }
+      .processing { align-items:center; background:rgba(255,255,255,.96); display:flex; flex-direction:column; gap:14px; inset:0; justify-content:center; position:fixed; z-index:5; }
+      .processing[hidden] { display:none; }
+      .spinner { animation:spin .8s linear infinite; border:4px solid var(--blue-soft); border-radius:50%; border-top-color:var(--blue); height:44px; width:44px; }
+      .processing strong { font-size:17px; }
+      @keyframes spin { to { transform:rotate(360deg); } }
     </style>
   </head>
   <body>
+    <header><strong>MAYDIN 안전결제</strong><span class="tag">데모</span></header>
     <main>
-      <div class="demo">(데모) 결제창입니다. 실제 카드사·결제사로 연결되지 않고 돈이 오가지 않습니다. 이 결제로 접수된 주문은 상품을 내보내면 안 됩니다.</div>
+      <div class="demo">(데모) 결제창입니다. 실제 카드사·결제사로 연결되지 않고 돈이 오가지 않습니다. 주문·재고·매출 기록은 실제처럼 남습니다.</div>
       <section class="card">
-        <h1 id="orderName">결제 정보를 불러오는 중…</h1>
-        <p class="muted" id="orderId"></p>
+        <div class="label">결제 상품</div>
+        <div class="order-name" id="orderName">결제 정보를 불러오는 중…</div>
         <div class="amount" id="amount"></div>
+        <p class="muted" id="orderId"></p>
         <p class="muted" id="expires"></p>
-        <p id="error"></p>
-        <button class="approve" id="approve" type="button" disabled>(데모) 결제 승인</button>
-        <button class="decline" id="decline" type="button" disabled>(데모) 카드 거절 시험</button>
-        <button class="back" id="back" type="button">결제 그만두기</button>
       </section>
+      <section class="card" id="methodCard">
+        <div class="label">결제 수단</div>
+        <div class="tabs">
+          <button class="active" type="button" data-type="CARD">신용·체크카드</button>
+          <button type="button" data-type="EASY_PAY">간편결제</button>
+        </div>
+        <div id="cardPane">
+          <div class="grid" id="cards"></div>
+          <select id="installment" aria-label="할부"></select>
+        </div>
+        <div id="easyPane" hidden>
+          <div class="grid two" id="easyPays"></div>
+        </div>
+      </section>
+      <section class="card">
+        <label class="agree"><input type="checkbox" id="agree" /> <span>주문 상품·금액을 확인했으며 결제에 동의합니다. <b>(데모: 실제 청구 없음)</b></span></label>
+      </section>
+      <p id="error"></p>
+      <div class="links">
+        <button id="back" type="button">결제 그만두기</button>
+        <button id="decline" type="button">(데모) 카드 거절 상황 보기</button>
+      </div>
     </main>
+    <div class="pay-bar"><button id="approve" type="button" disabled>결제하기</button></div>
+    <div class="processing" id="processing" hidden>
+      <div class="spinner"></div>
+      <strong id="processingText">(데모) 승인 요청 중…</strong>
+      <span class="muted">창을 닫지 말고 잠시 기다려 주세요.</span>
+    </div>
     <script src="/app.js"></script>
     <script>
       const pharmacyCode = pharmacyCodeFromUrl();
       const checkoutId = Number(new URLSearchParams(location.search).get('checkout'));
+      const CARDS = ['신한카드', '삼성카드', '현대카드', 'KB국민카드', '롯데카드', '하나카드', '우리카드', 'BC카드', 'NH농협카드'];
+      const EASY_PAYS = ['토스페이', '카카오페이', '네이버페이', '페이코'];
+      const INSTALLMENT_MIN = 50000;
+      const state = { type: 'CARD', company: null, provider: null, amount: 0, ready: false };
       const resultUrl = (params) => {
         const url = new URL(withPharmacy('/pay-result.html', pharmacyCode), location.origin);
         url.searchParams.set('checkout', checkoutId);
         for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
         return url.toString();
       };
+
+      function renderOptions() {
+        $('#cards').replaceChildren(
+          ...CARDS.map((name) => el('button', { class: `option ${state.company === name ? 'active' : ''}`, type: 'button', onclick: () => { state.company = name; renderOptions(); } }, name))
+        );
+        $('#easyPays').replaceChildren(
+          ...EASY_PAYS.map((name) => el('button', { class: `option ${state.provider === name ? 'active' : ''}`, type: 'button', onclick: () => { state.provider = name; renderOptions(); } }, name))
+        );
+        $('#cardPane').hidden = state.type !== 'CARD';
+        $('#easyPane').hidden = state.type !== 'EASY_PAY';
+        document.querySelectorAll('.tabs button').forEach((button) => button.classList.toggle('active', button.dataset.type === state.type));
+        syncPayButton();
+      }
+
+      function chosen() {
+        return state.type === 'CARD' ? Boolean(state.company) : Boolean(state.provider);
+      }
+
+      function syncPayButton() {
+        $('#approve').disabled = !state.ready || !chosen() || !$('#agree').checked;
+        $('#approve').textContent = state.amount ? `${money(state.amount)} 결제하기` : '결제하기';
+      }
+
+      function renderInstallments() {
+        const allowed = state.amount >= INSTALLMENT_MIN;
+        $('#installment').replaceChildren(
+          el('option', { value: '0' }, allowed ? '일시불' : `일시불 (${money(INSTALLMENT_MIN)} 이상부터 할부 가능)`),
+          ...(allowed ? [2, 3, 4, 5, 6, 10, 12].map((m) => el('option', { value: String(m) }, `${m}개월`)) : [])
+        );
+        $('#installment').disabled = !allowed;
+      }
 
       async function load() {
         try {
@@ -56,13 +137,15 @@
             $('#error').textContent = checkout?.fail_message || '';
             return;
           }
+          state.amount = checkout.amount;
+          state.ready = true;
           $('#orderName').textContent = checkout.order_name;
           $('#orderId').textContent = `주문번호 ${checkout.pg_order_id}`;
           $('#amount').textContent = money(checkout.amount);
           const until = new Date(`${checkout.expires_at.replace(' ', 'T')}Z`).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
           $('#expires').textContent = `${until}까지 결제하지 않으면 주문서가 닫힙니다.`;
-          $('#approve').disabled = false;
-          $('#decline').disabled = false;
+          renderInstallments();
+          renderOptions();
         } catch (error) {
           $('#orderName').textContent = '결제 정보를 불러오지 못했습니다.';
           $('#error').textContent = error.message;
@@ -70,18 +153,41 @@
       }
 
       async function pay(scenario) {
-        $('#approve').disabled = true;
-        $('#decline').disabled = true;
+        const method =
+          state.type === 'CARD'
+            ? { type: 'CARD', company: state.company, installment: Number($('#installment').value) || 0 }
+            : { type: 'EASY_PAY', provider: state.provider };
+        $('#error').textContent = '';
+        $('#processingText').textContent = `(데모) ${state.type === 'CARD' ? state.company || '카드사' : state.provider} 승인 요청 중…`;
+        $('#processing').hidden = false;
         try {
-          const auth = await api.request('/payments/demo/authorize', { method: 'POST', body: { checkout_id: checkoutId, scenario } });
+          const [auth] = await Promise.all([
+            api.request('/payments/demo/authorize', { method: 'POST', body: { checkout_id: checkoutId, scenario, method } }),
+            new Promise((resolve) => setTimeout(resolve, 1200))
+          ]);
           location.replace(resultUrl({ paymentKey: auth.paymentKey, orderId: auth.orderId, amount: auth.amount }));
         } catch (error) {
+          $('#processing').hidden = true;
           $('#error').textContent = error.message;
         }
       }
 
+      document.querySelectorAll('.tabs button').forEach((button) =>
+        button.addEventListener('click', () => {
+          state.type = button.dataset.type;
+          renderOptions();
+        })
+      );
+      $('#agree').addEventListener('change', syncPayButton);
       $('#approve').addEventListener('click', () => pay('APPROVE'));
-      $('#decline').addEventListener('click', () => pay('DECLINE'));
+      $('#decline').addEventListener('click', () => {
+        if (!state.ready) return;
+        if (!chosen()) {
+          if (state.type === 'CARD') state.company = CARDS[0];
+          else state.provider = EASY_PAYS[0];
+        }
+        pay('DECLINE');
+      });
       $('#back').addEventListener('click', () =>
         location.replace(resultUrl({ fail: '1', code: 'PAY_PROCESS_CANCELED', message: '결제를 그만두었습니다.' }))
       );

@@ -354,6 +354,7 @@ function migratePayments() {
     );
     CREATE INDEX IF NOT EXISTS idx_pg_demo_payments_order ON pg_demo_payments(order_id);
   `);
+  addColumnIfMissing('pg_demo_payments', 'method_label', 'TEXT');
   addColumnIfMissing('payments', 'payment_key', 'TEXT');
   addColumnIfMissing('payments', 'pg_order_id', 'TEXT');
   addColumnIfMissing('payments', 'payment_mode', 'TEXT');

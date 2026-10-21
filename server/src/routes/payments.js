@@ -124,7 +124,7 @@ router.post('/confirm', requireRole('CUSTOMER'), requirePharmacyScope, async (re
 router.post('/demo/authorize', requireRole('CUSTOMER'), requirePharmacyScope, (req, res) => {
   try {
     const checkout = myCheckout(req, req.body.checkout_id);
-    res.json(payments.demoAuthorize(checkout, String(req.body.scenario || 'APPROVE').toUpperCase()));
+    res.json(payments.demoAuthorize(checkout, String(req.body.scenario || 'APPROVE').toUpperCase(), req.body.method || {}));
   } catch (error) {
     send(res, error);
   }

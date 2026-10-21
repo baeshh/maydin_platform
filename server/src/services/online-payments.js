@@ -303,7 +303,7 @@ function createCheckout({ userId, customer, pharmacyId, body }) {
 
 /* ---------- 데모 결제창 ---------- */
 
-function demoAuthorize(checkout, scenario) {
+function demoAuthorize(checkout, scenario, method) {
   const config = paymentConfig();
   if (config.provider !== 'DEMO' || !config.enabled || checkout.provider !== 'DEMO') {
     throw new PaymentError('(데모) 결제창은 데모 결제 모드에서만 쓸 수 있습니다.', 404, 'DEMO_DISABLED');
@@ -314,7 +314,7 @@ function demoAuthorize(checkout, scenario) {
     throw new PaymentError('결제 시간이 지났습니다. 다시 주문해 주세요.', 410, 'CHECKOUT_EXPIRED');
   }
   try {
-    return demo.authorize({ orderId: checkout.pg_order_id, amount: checkout.amount, orderName: checkout.order_name, scenario });
+    return demo.authorize({ orderId: checkout.pg_order_id, amount: checkout.amount, orderName: checkout.order_name, scenario, method });
   } catch (error) {
     if (error instanceof GatewayError) throw new PaymentError(error.message, error.status, error.code);
     throw error;

@@ -131,6 +131,25 @@ let paidOrder;
   check('다른 회원이 남의 결제 승인 요청 → 404', res.status === 404, res.data);
 }
 
+console.log('[(데모) 결제창에서 고른 결제수단 — 정해진 목록만 기록]');
+{
+  const payWith = async (method) => {
+    await addCart(buyer, goods.id, 1);
+    const created = (await startCheckout(buyer, pickupBody({ allow_duplicate: true }))).data.checkout;
+    const auth = (await api('/payments/demo/authorize', { token: buyer, method: 'POST', body: { checkout_id: created.id, method } })).data;
+    const order = (await confirm(buyer, auth)).data.order;
+    return { order, payment: db.prepare('SELECT payment_method FROM payments WHERE order_id = ?').get(order.id) };
+  };
+  let paid = await payWith({ type: 'CARD', company: '신한카드', installment: 3 });
+  check('카드사·할부를 결제 기록에', paid.payment.payment_method === '(데모) 신한카드 · 3개월', paid.payment);
+  const listed = (await api('/orders', { token: owner })).data.orders.find((o) => o.id === paid.order.id);
+  check('약국 주문 목록에 (데모) 결제 · 결제수단', listed.payment_label === '(데모) 결제 · 신한카드 · 3개월', listed.payment_label);
+  paid = await payWith({ type: 'EASY_PAY', provider: '카카오페이' });
+  check('간편결제 이름 기록', paid.payment.payment_method === '(데모) 카카오페이', paid.payment);
+  paid = await payWith({ type: 'CARD', company: '<b>가짜카드</b>', installment: 99, card_number: '4111111111111111' });
+  check('목록에 없는 값은 버리고 카드번호 같은 값은 받지 않음', paid.payment.payment_method === '(데모) 카드 · 일시불', paid.payment);
+}
+
 console.log('[중복 결제 방지 — 동시 승인 · 같은 장바구니 재결제]');
 {
   const token = await member();

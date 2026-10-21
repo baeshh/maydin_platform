@@ -23,13 +23,16 @@ router.use(authenticate);
 
 const PAYMENT_COLUMNS = `
   (SELECT payment_provider FROM payments WHERE order_id = o.id ORDER BY id ASC LIMIT 1) AS payment_provider,
-  (SELECT payment_mode FROM payments WHERE order_id = o.id ORDER BY id ASC LIMIT 1) AS payment_mode`;
+  (SELECT payment_mode FROM payments WHERE order_id = o.id ORDER BY id ASC LIMIT 1) AS payment_mode,
+  (SELECT payment_method FROM payments WHERE order_id = o.id ORDER BY id ASC LIMIT 1) AS payment_method`;
 
 // 화면에 내보내는 주문. 결제 취소 요청 내부값은 빼고, 데모·테스트 결제인지 알 수 있게 결제 표시를 붙인다.
 function presentOrder(row, role) {
   const { cancel_request, ...order } = stripCounselNote(row, { reveal: role === 'CUSTOMER' });
   if (!ORDER_TYPES.has(order.order_type || 'DELIVERY') || order.sales_channel === 'POS') return order;
-  const paymentLabel = order.order_type !== 'COUNSEL' && order.payment_provider ? providerLabel(order.payment_provider, order.payment_mode) : null;
+  let paymentLabel = order.order_type !== 'COUNSEL' && order.payment_provider ? providerLabel(order.payment_provider, order.payment_mode) : null;
+  // 데모 결제창에서 고른 결제수단(예: "(데모) 신한카드 · 3개월")을 함께 보여 준다.
+  if (paymentLabel && order.payment_mode === 'DEMO' && /^\(데모\) ./.test(order.payment_method || '') && order.payment_method !== '(데모) 카드') paymentLabel = `${paymentLabel} · ${order.payment_method.replace(/^\(데모\) /, '')}`;
   return { ...order, payment_label: paymentLabel, ...availableActions(order, role) };
 }
 
@@ -156,7 +159,7 @@ router.get('/:id', requireRole('CUSTOMER', 'PHARMACY_OWNER', 'ADMIN'), requirePh
   const payments = getAll('SELECT * FROM payments WHERE order_id = @order_id ORDER BY id ASC', { order_id: row.id });
   const delivery = getOne('SELECT * FROM deliveries WHERE order_id = @order_id', { order_id: row.id });
   res.json({
-    order: presentOrder({ ...row, payment_provider: payments[0]?.payment_provider, payment_mode: payments[0]?.payment_mode }, req.user.role),
+    order: presentOrder({ ...row, payment_provider: payments[0]?.payment_provider, payment_mode: payments[0]?.payment_mode, payment_method: payments[0]?.payment_method }, req.user.role),
     items,
     payment: payments[0] || null,
     payments,

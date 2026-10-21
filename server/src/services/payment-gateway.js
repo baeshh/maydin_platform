@@ -81,7 +81,7 @@ function demoPayment(row) {
     status: row.status,
     totalAmount: row.amount,
     balanceAmount: canceled ? 0 : row.amount,
-    method: '(데모) 카드',
+    method: row.method_label || '(데모) 카드',
     approvedAt: row.approved_at,
     receiptUrl: null,
     cancels: canceled ? [{ amount: row.amount, transactionKey: row.cancel_transaction_key, canceledAt: row.canceled_at, reason: row.cancel_reason }] : []
@@ -89,20 +89,31 @@ function demoPayment(row) {
 }
 
 const DEMO_SCENARIOS = new Set(['APPROVE', 'DECLINE', 'TIMEOUT', 'CANCEL_FAIL', 'CANCEL_TIMEOUT']);
+const DEMO_CARDS = ['신한카드', '삼성카드', '현대카드', 'KB국민카드', '롯데카드', '하나카드', '우리카드', 'BC카드', 'NH농협카드'];
+const DEMO_EASY_PAYS = ['토스페이', '카카오페이', '네이버페이', '페이코'];
+
+// 데모 결제창에서 고른 결제수단을 결제 기록에 남길 이름으로 바꾼다. 정해진 목록만 받고, 카드번호 같은 정보는 받지 않는다.
+function demoMethodLabel(method) {
+  if (!method || typeof method !== 'object' || !['CARD', 'EASY_PAY'].includes(method.type)) return null;
+  if (method.type === 'EASY_PAY' && DEMO_EASY_PAYS.includes(method.provider)) return `(데모) ${method.provider}`;
+  const card = DEMO_CARDS.includes(method.company) ? method.company : '카드';
+  const months = Number(method.installment);
+  return `(데모) ${card} · ${Number.isInteger(months) && months >= 2 && months <= 12 ? `${months}개월` : '일시불'}`;
+}
 
 const demo = {
   provider: 'DEMO',
 
   // 결제창에서 고객이 인증을 마친 상태. 같은 주문번호로 이미 승인된 결제가 있으면 결제사처럼 거절한다.
-  authorize({ orderId, amount, orderName, scenario = 'APPROVE' }) {
+  authorize({ orderId, amount, orderName, scenario = 'APPROVE', method }) {
     const normalized = DEMO_SCENARIOS.has(scenario) ? scenario : 'APPROVE';
     const done = getOne("SELECT id FROM pg_demo_payments WHERE order_id = @order_id AND status IN ('DONE', 'CANCELED')", { order_id: orderId });
     if (done) throw new GatewayError('이미 결제된 주문번호입니다.', { code: 'DUPLICATED_ORDER_ID', status: 409 });
     const paymentKey = `demo_${crypto.randomBytes(12).toString('hex')}`;
     run(
-      `INSERT INTO pg_demo_payments (payment_key, order_id, order_name, amount, scenario)
-       VALUES (@payment_key, @order_id, @order_name, @amount, @scenario)`,
-      { payment_key: paymentKey, order_id: orderId, order_name: orderName, amount, scenario: normalized }
+      `INSERT INTO pg_demo_payments (payment_key, order_id, order_name, amount, scenario, method_label)
+       VALUES (@payment_key, @order_id, @order_name, @amount, @scenario, @method_label)`,
+      { payment_key: paymentKey, order_id: orderId, order_name: orderName, amount, scenario: normalized, method_label: demoMethodLabel(method) }
     );
     return { paymentKey, orderId, amount };
   },
