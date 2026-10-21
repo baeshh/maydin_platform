@@ -184,36 +184,95 @@ try {
   const customer = (await api('/products/mfds/search?q=abc', {})).status;
   check('로그인 없이 식약처 검색 불가', customer === 401, customer);
 
-  console.log('[성분 정보 자동 연결 — 이름이 하나로 맞을 때만]');
+  console.log('[성분 자동 매칭 — 제품명·제조사가 하나로 맞을 때만, 약사 승인 전에는 고객에게 안 보임]');
   const wait = () => new Promise((resolve) => setTimeout(resolve, 400));
-  const row = (id) => db.prepare('SELECT mfds_report_no, mfds_link_source FROM products WHERE id = ?').get(id);
-  const exact = (await api('/products', { token: A.owner, method: 'POST', body: { product_name: '다른회사 오메가3', price: 15000, stock_quantity: 3, product_type: 'GENERAL', online_visible: true } })).data.product;
-  const twin = (await api('/products', { token: A.owner, method: 'POST', body: { product_name: '중복 오메가3', price: 15000, stock_quantity: 3, product_type: 'GENERAL', online_visible: true } })).data.product;
-  const drug = (await api('/products', { token: A.owner, method: 'POST', body: { product_name: '다른회사 오메가3 ', price: 15000, stock_quantity: 3, product_type: 'OTC' } })).data.product;
+  const row = (id) => db.prepare('SELECT mfds_report_no, mfds_link_source, mfds_match_basis, mfds_verified_at, mfds_verified_by FROM products WHERE id = ?').get(id);
+  const create = (body) => api('/products', { token: A.owner, method: 'POST', body: { price: 15000, stock_quantity: 3, product_type: 'GENERAL', online_visible: true, ...body } }).then((r) => r.data.product);
+  const exact = await create({ product_name: '다른회사 오메가3' });
+  const twin = await create({ product_name: '중복 오메가3' });
+  const wrongMaker = await create({ product_name: '다른회사 오메가3', brand: '엉뚱식품' });
+  const drug = await create({ product_name: '다른회사 오메가3 ', product_type: 'OTC', online_visible: false });
   await wait();
-  check('등록하면 이름이 하나로 맞는 제품을 자동 연결(AUTO)', row(exact.id).mfds_report_no === '200500300002' && row(exact.id).mfds_link_source === 'AUTO', row(exact.id));
-  check('같은 이름이 여러 업체면 연결 안 함', row(twin.id).mfds_report_no === null, row(twin.id));
-  check('일반의약품은 건강기능식품 정보로 연결 안 함', row(drug.id).mfds_report_no === null, row(drug.id));
-  let detailRes = await api(`/products/mall/${exact.id}?pharmacyCode=${A.code}`, { token: A.owner });
-  check('자동 연결도 고객 상세에 성분 정보', detailRes.data.mfds?.report_no === '200500300002' && /EPA와 DHA/.test(detailRes.data.mfds.standard), detailRes.data.mfds);
-  res = await api(`/products/${exact.id}/mfds/confirm`, { token: A.owner, method: 'POST' });
-  check('약국 확인 → MANUAL', res.status === 200 && row(exact.id).mfds_link_source === 'MANUAL', row(exact.id));
-  await api(`/products/${exact.id}/mfds`, { token: A.owner, method: 'DELETE' });
+  check('제품명이 하나로 맞으면 자동 매칭(미검증)', row(exact.id).mfds_report_no === '200500300002' && row(exact.id).mfds_link_source === 'AUTO' && !row(exact.id).mfds_verified_at, row(exact.id));
+  check('브랜드가 비어 있으면 근거는 "제품명만 일치"', row(exact.id).mfds_match_basis === 'NAME', row(exact.id));
+  check('같은 이름이 여러 업체면 매칭 안 함', row(twin.id).mfds_report_no === null, row(twin.id));
+  check('브랜드(제조사)가 신고 업체와 다르면 매칭 안 함', row(wrongMaker.id).mfds_report_no === null, row(wrongMaker.id));
+  check('일반의약품은 건강기능식품 정보로 매칭 안 함', row(drug.id).mfds_report_no === null, row(drug.id));
+  const mallInfo = async (id) => (await api(`/products/mall/${id}?pharmacyCode=${A.code}`, { token: A.owner })).data;
+  check('미검증 성분 정보는 고객 상세에 안 보임', (await mallInfo(exact.id)).mfds === null);
+  let list = (await api('/products', { token: A.owner })).data.products;
+  check('상품 목록에서 미검증 상태를 알 수 있음', list.find((p) => p.id === exact.id).mfds_verified_at === null && list.find((p) => p.id === exact.id).mfds_report_no === '200500300002');
+
+  res = await api(`/products/${exact.id}/verify?pharmacyId=${A.id}`, { token: admin, method: 'POST', body: { ingredients: true } });
+  check('본사 관리자는 승인 불가(약사만)', res.status === 403, res.data);
+  res = await api(`/products/${exact.id}/verify`, { token: B.owner, method: 'POST', body: { ingredients: true } });
+  check('다른 약국 약사는 승인 불가(404)', res.status === 404, res.data);
+  res = await api(`/products/${exact.id}/verify`, { token: A.owner, method: 'POST', body: {} });
+  check('승인할 항목 없으면 400', res.status === 400, res.data);
+  res = await api(`/products/${exact.id}/verify`, { token: A.owner, method: 'POST', body: { ingredients: true } });
+  check('약사 승인 → 검증 완료', res.status === 200 && res.data.unverified === false && row(exact.id).mfds_verified_at && row(exact.id).mfds_verified_by, { data: res.data, row: row(exact.id) });
+  check('승인 기록(누가·무엇을) 남김', Boolean(db.prepare("SELECT 1 FROM admin_logs WHERE action = 'PRODUCT_VERIFY' AND target_id = ? AND description LIKE '%200500300002%'").get(exact.id)));
+  const approved = await mallInfo(exact.id);
+  check('승인하면 고객 상세에 성분 정보', approved.mfds?.report_no === '200500300002' && /EPA와 DHA/.test(approved.mfds.standard), approved.mfds);
+  res = await api(`/products/${exact.id}/mfds`, { token: A.owner });
+  check('검증한 약사 이름·시각 조회', res.data.verified_by === 'A약사' && Boolean(res.data.verified_at), res.data);
+
   await api(`/products/${exact.id}`, { token: A.owner, method: 'PATCH', body: { brand: '다른식품' } });
+  check('제조사(브랜드)가 바뀌면 재검증 대기', row(exact.id).mfds_report_no === '200500300002' && !row(exact.id).mfds_verified_at, row(exact.id));
+  check('재검증 전에는 고객에게 다시 안 보임', (await mallInfo(exact.id)).mfds === null);
+  await api(`/products/${exact.id}/mfds/confirm`, { token: A.owner, method: 'POST' });
+  check('다시 승인하면 보임', (await mallInfo(exact.id)).mfds?.report_no === '200500300002');
+
+  db.prepare("UPDATE mfds_htfs SET intake_method = '예전 섭취 방법' WHERE report_no = '200500300002'").run();
+  await api(`/products/${twin.id}/mfds`, { token: A.owner, method: 'POST', body: { report_no: '200500300002' } });
+  check('식약처 내용이 바뀌면 그 제품을 쓰는 상품은 재검증 대기', !row(exact.id).mfds_verified_at, row(exact.id));
+  check('약사가 직접 골라 연결하면 바로 검증 완료', row(twin.id).mfds_match_basis === 'MANUAL' && Boolean(row(twin.id).mfds_verified_at), row(twin.id));
+  await api(`/products/${twin.id}/mfds`, { token: A.owner, method: 'DELETE' });
+  db.prepare("UPDATE products SET mfds_link_source = NULL WHERE id = ?").run(twin.id);
+
+  await api(`/products/${exact.id}/mfds`, { token: A.owner, method: 'DELETE' });
+  await api(`/products/${exact.id}`, { token: A.owner, method: 'PATCH', body: { brand: '다른식품 ' } });
   await wait();
-  check('약국이 해제한 상품은 다시 자동 연결 안 함', row(exact.id).mfds_report_no === null && row(exact.id).mfds_link_source === 'REMOVED', row(exact.id));
+  check('약국이 해제한 상품은 다시 자동 매칭 안 함', row(exact.id).mfds_report_no === null && row(exact.id).mfds_link_source === 'REMOVED', row(exact.id));
   await api(`/products/${twin.id}`, { token: A.owner, method: 'PATCH', body: { brand: '다라식품' } });
   await wait();
-  check('브랜드(제조사)를 넣으면 같은 이름 중 그 업체 제품으로 연결', row(twin.id).mfds_report_no === '200600400002', row(twin.id));
-  const batchItem = (await api('/products', { token: A.owner, method: 'POST', body: { product_name: '사진 테스트 오메가3', price: 15000, stock_quantity: 3, product_type: 'UNCLASSIFIED' } })).data.product;
+  check('브랜드(제조사)를 넣으면 같은 이름 중 그 업체 제품으로 매칭', row(twin.id).mfds_report_no === '200600400002' && row(twin.id).mfds_match_basis === 'NAME_COMPANY', row(twin.id));
+  const batchItem = await create({ product_name: '사진 테스트 오메가3', product_type: 'UNCLASSIFIED', online_visible: false });
   await api('/products/bulk-type', { token: A.owner, method: 'POST', body: { ids: [batchItem.id], product_type: 'GENERAL' } });
   await wait();
-  check('일반 상품으로 분류하면 자동 연결', row(batchItem.id).mfds_report_no === '200400200001', row(batchItem.id));
-  db.prepare("UPDATE products SET mfds_report_no = NULL, mfds_link_source = NULL WHERE id = ?").run(batchItem.id);
-  res = await api('/products/mfds/auto-link', { token: A.owner, method: 'POST' });
-  check('한꺼번에 자동 연결 결과(연결·여러 개)', res.status === 200 && res.data.linked.some((p) => p.id === batchItem.id) && Array.isArray(res.data.ambiguous), res.data);
-  res = await api('/products/mfds/auto-link', { token: B.owner, method: 'POST' });
+  check('일반 상품으로 분류하면 자동 매칭', row(batchItem.id).mfds_report_no === '200400200001', row(batchItem.id));
+  db.prepare('UPDATE products SET mfds_report_no = NULL, mfds_link_source = NULL WHERE id = ?').run(batchItem.id);
+  res = await api('/products/auto-match', { token: A.owner, method: 'POST' });
+  check('한꺼번에 자동 매칭 결과(성분·여러 업체·사진)', res.status === 200 && res.data.linked.some((p) => p.id === batchItem.id) && Array.isArray(res.data.ambiguous) && Array.isArray(res.data.photos), res.data);
+  res = await api('/products/auto-match', { token: B.owner, method: 'POST' });
   check('다른 약국 상품은 건드리지 않음', !res.data.linked.some((p) => [exact.id, twin.id, batchItem.id].includes(p.id)), res.data);
+
+  console.log('[사진 자동 매칭 — 같은 바코드의 공유 사진을 미검증으로, 약사 승인 후 공개]');
+  const C = await openPharmacy('C');
+  const imagesOf = async (pharmacy, id) => (await api(`/products/${id}/images`, { token: pharmacy.owner })).data.images;
+  const cItem = await product(C, '사진 테스트 오메가3');
+  await wait();
+  let cImages = await imagesOf(C, cItem.id);
+  check('같은 바코드 상품에 공유 사진 1장이 미검증으로 붙음', cImages.length === 1 && cImages[0].verified === false && cImages[0].match_basis === 'BARCODE' && cImages[0].url === second.url, cImages);
+  const cMall = async () => (await api(`/products/mall/${cItem.id}?pharmacyCode=${C.code}`, { token: C.owner })).data;
+  check('미검증 사진은 고객 상세에 안 보임', (await cMall()).images.length === 0);
+  check('미검증 사진은 목록 대표 사진도 아님', db.prepare('SELECT thumbnail_url FROM products WHERE id = ?').get(cItem.id).thumbnail_url === null);
+  list = (await api('/products', { token: C.owner })).data.products;
+  check('상품 목록에 미검증 사진 수', Number(list.find((p) => p.id === cItem.id).photo_pending) === 1, list.find((p) => p.id === cItem.id));
+
+  await api(`/products/${cItem.id}/images/${cImages[0].id}`, { token: C.owner, method: 'DELETE' });
+  res = await api('/products/auto-match', { token: C.owner, method: 'POST' });
+  check('약국이 지운 자동 사진은 다시 붙이지 않음', !res.data.photos.some((p) => p.id === cItem.id) && (await imagesOf(C, cItem.id)).length === 0, res.data);
+
+  res = await upload(A.owner, aItem.id, await photo('#3c6'));
+  const fresh = res.data.images.at(-1);
+  cImages = await imagesOf(C, cItem.id);
+  check('공유 약국이 새 사진을 올리면 사진 없는 같은 상품에 바로 미검증으로 감', cImages.length === 1 && cImages[0].url === fresh.url && !cImages[0].verified, cImages);
+  res = await api(`/products/${cItem.id}/verify`, { token: C.owner, method: 'POST', body: { image_ids: [cImages[0].id] } });
+  check('약사가 사진 승인', res.status === 200 && res.data.photos === 1 && res.data.photo_pending === 0, res.data);
+  check('승인한 사진은 고객 상세·목록 대표 사진에 보임', (await cMall()).images.length === 1 && db.prepare('SELECT thumbnail_url FROM products WHERE id = ?').get(cItem.id).thumbnail_url === fresh.thumb_url);
+  await api(`/products/${cItem.id}`, { token: C.owner, method: 'PATCH', body: { barcode: '8800000000017' } });
+  check('바코드가 바뀌면 사진도 재검증 대기', (await cMall()).images.length === 0 && (await imagesOf(C, cItem.id))[0].verified === false);
 } finally {
   fake.close();
 }

@@ -625,6 +625,26 @@ function migrateProductMedia() {
   // MANUAL: 약국이 고름 · AUTO: 이름이 하나로 맞아 자동 연결(약국 확인 전) · REMOVED: 약국이 해제(다시 자동 연결 안 함)
   addColumnIfMissing('products', 'mfds_link_source', 'TEXT');
   addColumnIfMissing('products', 'mfds_checked_at', 'TEXT');
+  // NAME_COMPANY: 제품명·제조사 일치 · NAME_BRAND: 제품명·브랜드 일치(신고 업체는 다름) · NAME: 제품명만 일치(브랜드 미입력) · MANUAL: 약국이 골라 연결
+  addColumnIfMissing('products', 'mfds_match_basis', 'TEXT');
+  // 약사(약국 운영자 계정)가 확인한 시각. 비어 있으면 미검증이라 고객 화면에 보이지 않는다.
+  if (addColumnIfMissing('products', 'mfds_verified_at', 'TEXT')) {
+    db.exec("UPDATE products SET mfds_verified_at = COALESCE(mfds_checked_at, CURRENT_TIMESTAMP) WHERE mfds_report_no IS NOT NULL AND COALESCE(mfds_link_source, 'MANUAL') != 'AUTO'");
+  }
+  addColumnIfMissing('products', 'mfds_verified_by', 'INTEGER');
+  // BARCODE · MFDS: 다른 약국 공유 사진을 같은 바코드/신고번호로 자동으로 붙인 사진
+  addColumnIfMissing('product_images', 'match_basis', 'TEXT');
+  if (addColumnIfMissing('product_images', 'verified_at', 'TEXT')) {
+    db.exec('UPDATE product_images SET verified_at = created_at WHERE image_key IS NOT NULL');
+  }
+  addColumnIfMissing('product_images', 'verified_by', 'INTEGER');
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS product_image_rejections (
+      product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      image_key TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (product_id, image_key)
+    );`);
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_product_images_key ON product_images(image_key);
     CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);

@@ -7,8 +7,12 @@ const PRODUCT_TYPE_BADGES = {
   ETC: '<span class="badge red">전문의약품 · 판매 불가</span>',
   UNCLASSIFIED: '<span class="badge orange">분류 전 · 온라인 판매 불가</span>'
 };
+// 자동으로 맞춘 성분(식약처)이나 사진을 약사가 아직 승인하지 않은 상품. 승인 전에는 고객 화면에 보이지 않는다.
+const mfdsPending = (p) => Boolean(p.mfds_report_no) && !p.mfds_verified_at;
+const isUnverified = (p) => p.status !== 'HIDDEN' && (mfdsPending(p) || Number(p.photo_pending) > 0);
 const PRODUCT_FILTERS = {
   all: { label: '전체', match: () => true },
+  unverified: { label: '미검증', match: isUnverified },
   unclassified: { label: '분류 전', match: (p) => p.status !== 'HIDDEN' && p.product_type === 'UNCLASSIFIED' },
   offline: { label: '온라인 판매 꺼짐', match: (p) => p.status !== 'HIDDEN' && p.product_type === 'GENERAL' && !Number(p.online_visible) },
   posOff: { label: 'POS 판매 중지', match: (p) => p.status !== 'HIDDEN' && p.product_type !== 'ETC' && !Number(p.pos_sale_enabled ?? 1) }
@@ -95,6 +99,14 @@ function productMatches(p, q) {
   return [p.product_name, p.category_name, p.brand, p.barcode, p.external_code].some((value) => String(value || '').toLowerCase().includes(q));
 }
 
+function verificationLine(p) {
+  const ingredients = !p.mfds_report_no ? '성분 없음' : p.mfds_verified_at ? '성분 검증됨' : '<b class="text-warn">성분 미검증</b>';
+  const verified = Number(p.photo_verified || 0);
+  const pending = Number(p.photo_pending || 0);
+  const photos = [verified && `사진 ${verified}장`, pending && `<b class="text-warn">사진 미검증 ${pending}장</b>`].filter(Boolean).join(' · ') || '사진 없음';
+  return `${ingredients} · ${photos}`;
+}
+
 const isMallVisible = (p) => p.product_type === 'GENERAL' && Number(p.online_visible) === 1 && p.status !== 'HIDDEN';
 
 // 고객 몰에는 "일반 상품 + 온라인 판매 켬"만 보인다. 몇 개가 왜 안 보이는지 상품 목록 위에 늘 보여 준다.
@@ -113,14 +125,18 @@ function renderMallVisibility() {
     otc && `<span>일반의약품 <b>${otc.toLocaleString()}개</b> · 온라인 판매 불가(매장 판매만)</span>`,
     etc && `<span>전문의약품 <b>${etc.toLocaleString()}개</b> · 판매 불가</span>`
   ].filter(Boolean);
-  const noIngredients = count((p) => isMallVisible(p) && !p.mfds_report_no);
-  const autoLinked = count((p) => p.mfds_report_no && p.mfds_link_source === 'AUTO');
-  if (noIngredients) {
+  const unverified = count(isUnverified);
+  const missing = count((p) => p.product_type === 'GENERAL' && ((!p.mfds_report_no && p.mfds_link_source !== 'REMOVED') || !(Number(p.photo_verified) + Number(p.photo_pending))));
+  if (unverified) {
     reasons.push(
-      `<span>성분 정보(식약처) 없는 판매 상품 <b>${noIngredients.toLocaleString()}개</b> <button class="btn btn-outline btn-sm" type="button" onclick="autoLinkMfds(this)">식약처에서 자동 연결</button></span>`
+      `<span>미검증 제품 <b>${unverified.toLocaleString()}개</b> · 약사가 승인해야 성분·사진이 고객에게 보여요 <button class="btn btn-primary btn-sm" type="button" onclick="showProductFilter('unverified')">미검증만 보기</button></span>`
     );
   }
-  if (autoLinked) reasons.push(`<span>자동 연결된 성분 정보 <b>${autoLinked.toLocaleString()}개</b> · 상품의 '사진·성분'에서 맞는지 확인해 주세요</span>`);
+  if (missing) {
+    reasons.push(
+      `<span>성분 정보나 사진이 없는 일반 상품 <b>${missing.toLocaleString()}개</b> <button class="btn btn-outline btn-sm" type="button" onclick="autoMatchProducts(this)">제조사·제품명으로 자동 매칭</button></span>`
+    );
+  }
   const preview = window.ownerPharmacyCode
     ? `<a class="btn btn-outline btn-sm" href="/store.html?pharmacyCode=${encodeURIComponent(window.ownerPharmacyCode)}" target="_blank" rel="noopener">고객 몰 미리보기</a>`
     : '';
@@ -138,6 +154,7 @@ function renderProductFilters() {
     .map(([key, f]) => `<button class="tab-btn ${productState.filter === key ? 'active' : ''}" type="button" onclick="showProductFilter('${key}')">${f.label} ${counts[key].toLocaleString()}</button>`)
     .join('');
   const bulkActions = {
+    unverified: '<span class="list-meta">상품마다 \'검증하기\'를 눌러 제조사·제품명·사진이 실제 상품과 같은지 확인한 뒤 승인해 주세요.</span>',
     offline: `<button class="btn btn-primary btn-sm" type="button" onclick="publishFilteredProducts()">이 목록 모두 온라인 판매 켜기</button>`,
     unclassified: `<span class="inline-actions">
         <select id="bulkProductType" class="form-control" style="width: 130px; padding: 7px 8px;">
@@ -209,6 +226,7 @@ function renderProductPage() {
                 ${product.brand ? `<div class="list-meta">${h(product.brand)}</div>` : ''}
                 <span class="badge gray">${h(product.category_name || '미분류')}</span>
                 ${PRODUCT_TYPE_BADGES[product.product_type] || ''}
+                ${isUnverified(product) ? '<span class="badge orange">미검증 제품</span>' : ''}
                 ${product.product_type === 'GENERAL' && !Number(product.online_visible) ? '<span class="badge gray">온라인 판매 꺼짐</span>' : ''}
                 ${isMallVisible(product) ? '<span class="badge green">고객 몰에 보임</span>' : ''}
                 ${product.product_type !== 'ETC' && !Number(product.pos_sale_enabled ?? 1) ? '<span class="badge gray">POS 판매 중지</span>' : ''}
@@ -251,12 +269,10 @@ function renderProductPage() {
               <td>
                 <div class="inline-actions">
                   <button class="btn btn-outline btn-sm" type="button" onclick="updateProduct(${Number(product.id)})">저장</button>
-                  <button class="btn btn-outline btn-sm" type="button" onclick="openProductMedia(${Number(product.id)})">사진·성분</button>
+                  <button class="btn ${isUnverified(product) ? 'btn-primary' : 'btn-outline'} btn-sm" type="button" onclick="openProductMedia(${Number(product.id)})">${isUnverified(product) ? '검증하기' : '사진·성분'}</button>
                   <button class="btn btn-danger btn-sm" type="button" onclick="hideProduct(${Number(product.id)})">숨김</button>
                 </div>
-                ${product.mfds_report_no
-                  ? `<div class="list-meta" style="margin-top: 4px;">${product.mfds_link_source === 'AUTO' ? '<span class="badge orange">성분 자동 연결 · 확인 필요</span>' : '성분 정보(식약처) 연결됨'}</div>`
-                  : product.product_type === 'GENERAL' ? '<div class="list-meta" style="margin-top: 4px;">성분 정보 없음</div>' : ''}
+                ${product.product_type === 'GENERAL' ? `<div class="list-meta" style="margin-top: 4px;">${verificationLine(product)}</div>` : ''}
                 <div class="inline-actions" style="margin-top: 6px; flex-wrap: wrap;">
                   <label class="check-chip" title="현장(POS) 판매"><input id="pos-${product.id}" type="checkbox" ${Number(product.pos_sale_enabled ?? 1) ? 'checked' : ''} ${product.product_type === 'ETC' ? 'disabled' : ''} /> POS 판매</label>
                   <label class="check-chip" title="일반 상품만 온라인에서 팔 수 있습니다"><input id="online-${product.id}" type="checkbox" ${product.product_type === 'GENERAL' && Number(product.online_visible) ? 'checked' : ''} ${product.product_type !== 'GENERAL' ? 'disabled' : ''} /> 온라인 판매</label>

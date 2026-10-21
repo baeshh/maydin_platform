@@ -6,6 +6,7 @@ const { ImportError, assertNotSyncing, onlineStockGate } = require('../services/
 const { popularProductIds } = require('../services/mall-policy');
 const mfds = require('../services/mfds');
 const imageService = require('../services/product-images');
+const match = require('../services/product-match');
 const { ImageError, listImages } = imageService;
 const { normalizeProductType, onlineSellableSql, resolveOnlineVisible } = require('../services/product-kind');
 
@@ -179,8 +180,8 @@ router.get('/mall/:id', authenticate, mallPharmacy, (req, res) => {
   const gate = onlineStockGate(req.mallPharmacyId);
   res.json({
     product: publicProduct(product, mallBuffer(gate)),
-    images: listImages(product.id),
-    mfds: mfds.mallRecord(product.mfds_report_no),
+    images: listImages(product.id, { verifiedOnly: true }),
+    mfds: product.mfds_verified_at ? mfds.mallRecord(product.mfds_report_no) : null,
     online_paused: gate.paused,
     notice: gate.message
   });
@@ -192,11 +193,17 @@ const mediaRoute = (handler) => async (req, res) => {
   try {
     res.json(await handler(req));
   } catch (error) {
-    if (error instanceof ImageError || error instanceof mfds.MfdsError) return res.status(error.status).json({ message: error.message });
+    if (error instanceof ImageError || error instanceof mfds.MfdsError || error instanceof match.MatchError) {
+      return res.status(error.status).json({ message: error.message });
+    }
     console.error(error);
     res.status(500).json({ message: '처리 중 오류가 발생했습니다.' });
   }
 };
+
+// 약사(약국 운영자) 계정이 직접 고르거나 올린 것만 바로 검증된 것으로 본다. 본사 관리자가 대신 넣은 것은 미검증으로 남는다.
+const verifierOf = (req) => (req.user.role === 'PHARMACY_OWNER' ? req.user.id : null);
+const pharmacistOnly = requireRole('PHARMACY_OWNER');
 
 /* ---------- 상품 사진 ---------- */
 
@@ -206,7 +213,13 @@ router.post(
   '/:id/images',
   express.raw({ type: ['image/*', 'application/octet-stream'], limit: imageService.MAX_BYTES }),
   mediaRoute(async (req) => ({
-    images: await imageService.uploadImage({ pharmacyId: req.pharmacyId, productId: req.params.id, userId: req.user.id, buffer: req.body })
+    images: await imageService.uploadImage({
+      pharmacyId: req.pharmacyId,
+      productId: req.params.id,
+      userId: req.user.id,
+      verifierId: verifierOf(req),
+      buffer: req.body
+    })
   }))
 );
 
@@ -225,40 +238,73 @@ router.get('/:id/image-suggestions', mediaRoute((req) => ({ suggestions: imageSe
 router.post(
   '/:id/images/shared',
   mediaRoute((req) => ({
-    images: imageService.useSharedImage({ pharmacyId: req.pharmacyId, productId: req.params.id, imageKey: String(req.body.image_key || ''), userId: req.user.id })
+    images: imageService.useSharedImage({
+      pharmacyId: req.pharmacyId,
+      productId: req.params.id,
+      imageKey: String(req.body.image_key || ''),
+      userId: req.user.id,
+      verifierId: verifierOf(req)
+    })
   }))
+);
+
+/* ---------- 자동 매칭과 약사 검증 ---------- */
+
+// 이 약국의 일반 상품 중 성분 정보나 사진이 없는 상품을 한꺼번에 맞춘다. 맞춘 것은 모두 미검증으로 들어간다.
+router.post('/auto-match', mediaRoute((req) => match.autoMatchPharmacy(req.pharmacyId)));
+router.post('/mfds/auto-link', mediaRoute((req) => match.autoMatchPharmacy(req.pharmacyId)));
+
+router.post(
+  '/:id/verify',
+  pharmacistOnly,
+  mediaRoute((req) =>
+    match.verifyProduct({
+      pharmacyId: req.pharmacyId,
+      productId: req.params.id,
+      user: req.user,
+      ingredients: req.body.ingredients === true,
+      imageIds: req.body.image_ids
+    })
+  )
+);
+
+router.post(
+  '/:id/mfds/confirm',
+  pharmacistOnly,
+  mediaRoute((req) => match.verifyProduct({ pharmacyId: req.pharmacyId, productId: req.params.id, user: req.user, ingredients: true }))
 );
 
 /* ---------- 식약처 건강기능식품 신고 정보 ---------- */
 
 router.get('/mfds/search', mediaRoute(async (req) => ({ results: await mfds.searchProducts(req.query.q, req.query.company) })));
 
-// 이 약국의 일반 상품 중 식약처 정보가 없는 상품을 이름으로 한꺼번에 맞춘다(같은 이름이 하나뿐일 때만 연결).
-router.post('/mfds/auto-link', mediaRoute((req) => mfds.autoLinkPharmacy(req.pharmacyId)));
-
-router.post(
-  '/:id/mfds/confirm',
-  mediaRoute((req) => {
-    mfds.confirmLink(req.pharmacyId, req.params.id);
-    return { ok: true };
-  })
-);
-
 router.get(
   '/:id/mfds',
   mediaRoute((req) => {
-    const product = getOne('SELECT mfds_report_no, mfds_link_source FROM products WHERE id = @id AND pharmacy_id = @pharmacy_id', {
-      id: Number(req.params.id),
-      pharmacy_id: req.pharmacyId
-    });
+    const product = getOne(
+      `SELECT p.mfds_report_no, p.mfds_link_source, p.mfds_match_basis, p.mfds_verified_at, u.name AS verified_by_name
+       FROM products p LEFT JOIN users u ON u.id = p.mfds_verified_by
+       WHERE p.id = @id AND p.pharmacy_id = @pharmacy_id`,
+      { id: Number(req.params.id), pharmacy_id: req.pharmacyId }
+    );
     if (!product) throw new mfds.MfdsError('상품을 찾을 수 없습니다.', 404);
-    return { mfds: mfds.cachedRecord(product.mfds_report_no), link_source: product.mfds_link_source };
+    return {
+      mfds: mfds.cachedRecord(product.mfds_report_no),
+      link_source: product.mfds_link_source,
+      match_basis: product.mfds_match_basis,
+      verified_at: product.mfds_verified_at,
+      verified_by: product.verified_by_name || null
+    };
   })
 );
 
 router.post(
   '/:id/mfds',
-  mediaRoute(async (req) => ({ mfds: await mfds.linkProduct(req.pharmacyId, req.params.id, req.body.report_no) }))
+  mediaRoute(async (req) => {
+    const record = await mfds.linkProduct(req.pharmacyId, req.params.id, req.body.report_no, verifierOf(req));
+    imageService.autoAttachPhoto(Number(req.params.id));
+    return { mfds: record, verified: Boolean(verifierOf(req)) };
+  })
 );
 
 router.delete(
@@ -271,7 +317,9 @@ router.delete(
 
 router.get('/', (req, res) => {
   const products = getAll(
-    `SELECT p.*, c.category_name
+    `SELECT p.*, c.category_name,
+            (SELECT COUNT(*) FROM product_images pi WHERE pi.product_id = p.id AND pi.image_key IS NOT NULL AND pi.verified_at IS NULL) AS photo_pending,
+            (SELECT COUNT(*) FROM product_images pi WHERE pi.product_id = p.id AND pi.image_key IS NOT NULL AND pi.verified_at IS NOT NULL) AS photo_verified
      FROM products p
      LEFT JOIN categories c ON c.id = p.category_id
      WHERE p.pharmacy_id = @pharmacy_id
@@ -365,7 +413,7 @@ router.post('/', (req, res) => {
     }
   );
 
-  mfds.autoLinkLater(Number(result.lastInsertRowid));
+  match.autoMatchLater(Number(result.lastInsertRowid));
   res.status(201).json({ product: getOne('SELECT * FROM products WHERE id = @id', { id: result.lastInsertRowid }) });
 });
 
@@ -477,8 +525,8 @@ router.patch('/:id', (req, res) => {
     );
   }
 
-  // 이름·브랜드가 바뀌었거나 일반 상품이 됐으면 식약처 정보를 다시 맞춰 본다(이미 연결된 상품은 그대로).
-  mfds.autoLinkLater(product.id);
+  match.onIdentityChange(product, { product_name: next.product_name, brand, barcode });
+  match.autoMatchLater(product.id);
   res.json({ product: getOne('SELECT * FROM products WHERE id = @id', { id: product.id }) });
 });
 
@@ -543,7 +591,9 @@ router.post('/bulk-type', (req, res) => {
     }
     return result.changes;
   })();
-  if (productType === 'GENERAL') ids.forEach((id) => mfds.autoLinkLater(id));
+  if (productType === 'GENERAL') {
+    getAll(`SELECT id FROM products WHERE pharmacy_id = @pharmacy_id AND id IN (${placeholders})`, params).forEach((p) => match.autoMatchLater(p.id));
+  }
   res.json({ updated });
 });
 
