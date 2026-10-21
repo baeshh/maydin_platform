@@ -233,12 +233,26 @@ router.post(
 
 router.get('/mfds/search', mediaRoute(async (req) => ({ results: await mfds.searchProducts(req.query.q, req.query.company) })));
 
+// 이 약국의 일반 상품 중 식약처 정보가 없는 상품을 이름으로 한꺼번에 맞춘다(같은 이름이 하나뿐일 때만 연결).
+router.post('/mfds/auto-link', mediaRoute((req) => mfds.autoLinkPharmacy(req.pharmacyId)));
+
+router.post(
+  '/:id/mfds/confirm',
+  mediaRoute((req) => {
+    mfds.confirmLink(req.pharmacyId, req.params.id);
+    return { ok: true };
+  })
+);
+
 router.get(
   '/:id/mfds',
   mediaRoute((req) => {
-    const product = getOne('SELECT mfds_report_no FROM products WHERE id = @id AND pharmacy_id = @pharmacy_id', { id: Number(req.params.id), pharmacy_id: req.pharmacyId });
+    const product = getOne('SELECT mfds_report_no, mfds_link_source FROM products WHERE id = @id AND pharmacy_id = @pharmacy_id', {
+      id: Number(req.params.id),
+      pharmacy_id: req.pharmacyId
+    });
     if (!product) throw new mfds.MfdsError('상품을 찾을 수 없습니다.', 404);
-    return { mfds: mfds.cachedRecord(product.mfds_report_no) };
+    return { mfds: mfds.cachedRecord(product.mfds_report_no), link_source: product.mfds_link_source };
   })
 );
 
@@ -351,6 +365,7 @@ router.post('/', (req, res) => {
     }
   );
 
+  mfds.autoLinkLater(Number(result.lastInsertRowid));
   res.status(201).json({ product: getOne('SELECT * FROM products WHERE id = @id', { id: result.lastInsertRowid }) });
 });
 
@@ -462,6 +477,8 @@ router.patch('/:id', (req, res) => {
     );
   }
 
+  // 이름·브랜드가 바뀌었거나 일반 상품이 됐으면 식약처 정보를 다시 맞춰 본다(이미 연결된 상품은 그대로).
+  mfds.autoLinkLater(product.id);
   res.json({ product: getOne('SELECT * FROM products WHERE id = @id', { id: product.id }) });
 });
 
@@ -526,6 +543,7 @@ router.post('/bulk-type', (req, res) => {
     }
     return result.changes;
   })();
+  if (productType === 'GENERAL') ids.forEach((id) => mfds.autoLinkLater(id));
   res.json({ updated });
 });
 

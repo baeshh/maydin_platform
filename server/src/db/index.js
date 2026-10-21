@@ -622,6 +622,9 @@ function migrateProductMedia() {
   // 내가 올린 사진을 같은 상품(바코드·신고번호)을 파는 다른 MAYDIN 약국이 쓰도록 허락하는지. 기본은 허락 안 함.
   addColumnIfMissing('pharmacies', 'share_product_photos', 'INTEGER NOT NULL DEFAULT 0');
   addColumnIfMissing('products', 'mfds_report_no', 'TEXT');
+  // MANUAL: 약국이 고름 · AUTO: 이름이 하나로 맞아 자동 연결(약국 확인 전) · REMOVED: 약국이 해제(다시 자동 연결 안 함)
+  addColumnIfMissing('products', 'mfds_link_source', 'TEXT');
+  addColumnIfMissing('products', 'mfds_checked_at', 'TEXT');
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_product_images_key ON product_images(image_key);
     CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);

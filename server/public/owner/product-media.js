@@ -89,11 +89,16 @@ function renderProductMedia() {
 
 function mfdsSectionHtml(product, results) {
   const linked = mediaState.mfds;
+  const auto = product.mfds_link_source === 'AUTO';
   const current = product.mfds_report_no
     ? `<div class="mfds-linked">
-        <div><strong>연결됨</strong> · 신고번호 ${h(product.mfds_report_no)}${linked ? ` · ${h(linked.product_name)} (${h(linked.company || '')})` : ''}</div>
+        <div><strong>${auto ? '자동 연결됨 · 확인 필요' : '연결됨'}</strong> · 신고번호 ${h(product.mfds_report_no)}${linked ? ` · ${h(linked.product_name)} (${h(linked.company || '')})` : ''}</div>
         ${linked?.main_function ? `<div class="list-meta" style="margin-top: 4px;">${h(linked.main_function)}</div>` : ''}
-        <button class="muted-link danger" type="button" onclick="unlinkMfds()">연결 해제</button>
+        ${auto ? '<p class="list-meta" style="margin-top: 6px;">상품명이 식약처 신고 제품명과 하나로 맞아 자동으로 연결했습니다. 실제 판매하는 제품(제조사·용량)과 같은지 확인해 주세요.</p>' : ''}
+        <div class="inline-actions" style="margin-top: 6px;">
+          ${auto ? '<button class="btn btn-primary btn-sm" type="button" onclick="confirmMfds()">맞습니다</button>' : ''}
+          <button class="muted-link danger" type="button" onclick="unlinkMfds()">${auto ? '다른 제품이에요 (연결 해제)' : '연결 해제'}</button>
+        </div>
       </div>`
     : '<p class="list-meta">연결하면 고객 상품 상세에 식약처 신고 내용(기능성·섭취 방법·주의사항·보관 방법)이 짧게 보입니다.</p>';
   const list = results === null
@@ -212,6 +217,7 @@ async function linkMfds(reportNo) {
   try {
     const { mfds } = await api.request(`/products/${mediaState.product.id}/mfds`, { method: 'POST', body: { report_no: reportNo } });
     mediaState.product.mfds_report_no = mfds.report_no;
+    mediaState.product.mfds_link_source = 'MANUAL';
     mediaState.mfds = mfds;
     mediaState.results = null;
     mediaState.changed = true;
@@ -224,11 +230,40 @@ async function linkMfds(reportNo) {
   renderProductMedia();
 }
 
+async function confirmMfds() {
+  try {
+    await api.request(`/products/${mediaState.product.id}/mfds/confirm`, { method: 'POST' });
+    mediaState.product.mfds_link_source = 'MANUAL';
+    mediaState.changed = true;
+    showToast('식약처 정보를 확인했습니다.');
+  } catch (error) {
+    showToast(error.message);
+  }
+  renderProductMedia();
+}
+
+// 식약처 정보가 없는 일반 상품을 이름으로 한꺼번에 맞춘다. 같은 이름이 여러 제품이면 연결하지 않는다.
+async function autoLinkMfds(button) {
+  if (button) button.disabled = true;
+  try {
+    const result = await api.request('/products/mfds/auto-link', { method: 'POST' });
+    const parts = [`${result.linked.length}개 연결`];
+    if (result.ambiguous.length) parts.push(`${result.ambiguous.length}개는 같은 이름 제품이 여러 개라 직접 골라야 함(${result.ambiguous.slice(0, 3).map((p) => p.product_name).join(', ')}${result.ambiguous.length > 3 ? ' 등' : ''})`);
+    if (result.not_found.length) parts.push(`${result.not_found.length}개는 식약처 건강기능식품에서 찾지 못함`);
+    showToast(`식약처 자동 연결: ${parts.join(' · ')}. 직접 고르려면 상품의 '사진·성분'을 눌러 주세요.`);
+    loadOwner();
+  } catch (error) {
+    showToast(error.message);
+    if (button) button.disabled = false;
+  }
+}
+
 async function unlinkMfds() {
   if (!confirm('식약처 정보 연결을 해제할까요? 고객 상세 화면에서 신고 정보가 사라집니다.')) return;
   try {
     await api.request(`/products/${mediaState.product.id}/mfds`, { method: 'DELETE' });
     mediaState.product.mfds_report_no = null;
+    mediaState.product.mfds_link_source = 'REMOVED';
     mediaState.mfds = null;
     mediaState.changed = true;
   } catch (error) {

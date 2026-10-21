@@ -113,11 +113,19 @@ function renderMallVisibility() {
     otc && `<span>일반의약품 <b>${otc.toLocaleString()}개</b> · 온라인 판매 불가(매장 판매만)</span>`,
     etc && `<span>전문의약품 <b>${etc.toLocaleString()}개</b> · 판매 불가</span>`
   ].filter(Boolean);
+  const noIngredients = count((p) => isMallVisible(p) && !p.mfds_report_no);
+  const autoLinked = count((p) => p.mfds_report_no && p.mfds_link_source === 'AUTO');
+  if (noIngredients) {
+    reasons.push(
+      `<span>성분 정보(식약처) 없는 판매 상품 <b>${noIngredients.toLocaleString()}개</b> <button class="btn btn-outline btn-sm" type="button" onclick="autoLinkMfds(this)">식약처에서 자동 연결</button></span>`
+    );
+  }
+  if (autoLinked) reasons.push(`<span>자동 연결된 성분 정보 <b>${autoLinked.toLocaleString()}개</b> · 상품의 '사진·성분'에서 맞는지 확인해 주세요</span>`);
   const preview = window.ownerPharmacyCode
     ? `<a class="btn btn-outline btn-sm" href="/store.html?pharmacyCode=${encodeURIComponent(window.ownerPharmacyCode)}" target="_blank" rel="noopener">고객 몰 미리보기</a>`
     : '';
   return `<div class="mall-visibility ${visible ? '' : 'is-empty'}">
-    <div class="mall-visibility-head"><strong>고객 몰에 보이는 상품 ${visible.toLocaleString()}개</strong>${reasons.length ? ` <span class="list-meta">· 안 보이는 상품 ${(live.length - visible).toLocaleString()}개</span>` : ''}<span style="flex: 1;"></span>${preview}</div>
+    <div class="mall-visibility-head"><strong>고객 몰에 보이는 상품 ${visible.toLocaleString()}개</strong>${live.length > visible ? ` <span class="list-meta">· 안 보이는 상품 ${(live.length - visible).toLocaleString()}개</span>` : ''}<span style="flex: 1;"></span>${preview}</div>
     ${reasons.length ? `<div class="mall-visibility-reasons">${reasons.join('')}</div>` : ''}
     ${visible ? '' : '<p class="list-meta">고객 몰이 비어 있습니다. 건강기능식품·웰니스 제품은 "일반 상품"으로 분류하고 온라인 판매를 켜 주세요.</p>'}
   </div>`;
@@ -246,7 +254,9 @@ function renderProductPage() {
                   <button class="btn btn-outline btn-sm" type="button" onclick="openProductMedia(${Number(product.id)})">사진·성분</button>
                   <button class="btn btn-danger btn-sm" type="button" onclick="hideProduct(${Number(product.id)})">숨김</button>
                 </div>
-                ${product.mfds_report_no ? '<div class="list-meta" style="margin-top: 4px;">식약처 정보 연결됨</div>' : ''}
+                ${product.mfds_report_no
+                  ? `<div class="list-meta" style="margin-top: 4px;">${product.mfds_link_source === 'AUTO' ? '<span class="badge orange">성분 자동 연결 · 확인 필요</span>' : '성분 정보(식약처) 연결됨'}</div>`
+                  : product.product_type === 'GENERAL' ? '<div class="list-meta" style="margin-top: 4px;">성분 정보 없음</div>' : ''}
                 <div class="inline-actions" style="margin-top: 6px; flex-wrap: wrap;">
                   <label class="check-chip" title="현장(POS) 판매"><input id="pos-${product.id}" type="checkbox" ${Number(product.pos_sale_enabled ?? 1) ? 'checked' : ''} ${product.product_type === 'ETC' ? 'disabled' : ''} /> POS 판매</label>
                   <label class="check-chip" title="일반 상품만 온라인에서 팔 수 있습니다"><input id="online-${product.id}" type="checkbox" ${product.product_type === 'GENERAL' && Number(product.online_visible) ? 'checked' : ''} ${product.product_type !== 'GENERAL' ? 'disabled' : ''} /> 온라인 판매</label>

@@ -209,6 +209,71 @@
         word-break: keep-all;
       }
 
+      .ingredient-list {
+        display: grid;
+        gap: 10px;
+        list-style: none;
+        margin: 0 0 18px;
+        padding: 0;
+      }
+
+      .ingredient-list li {
+        background: #f7f8fa;
+        border-radius: 14px;
+        display: grid;
+        gap: 4px;
+        padding: 12px 14px;
+      }
+
+      .ingredient-list strong {
+        color: #1b64da;
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      .ingredient-list span {
+        color: #333d4b;
+        font-size: 14px;
+        line-height: 1.6;
+        word-break: keep-all;
+      }
+
+      .detail.mfds h3 {
+        font-size: 14px;
+        font-weight: 800;
+        margin: 4px 0 10px;
+      }
+
+      .detail.mfds .contents dl,
+      .detail.mfds .safety dl {
+        gap: 8px 12px;
+        grid-template-columns: minmax(96px, 38%) 1fr;
+      }
+
+      .detail.mfds .contents dt,
+      .detail.mfds .safety dt {
+        color: #333d4b;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .detail.mfds .contents dd,
+      .detail.mfds .safety dd {
+        margin: 0;
+      }
+
+      .detail.mfds .safety {
+        margin-top: 14px;
+      }
+
+      .detail.mfds .safety summary {
+        color: #4e5968;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 700;
+        margin-bottom: 10px;
+      }
+
       .detail.mfds .source {
         color: #8b95a1;
         font-size: 12px;
@@ -526,21 +591,79 @@
         if (count) count.textContent = `${index + 1} / ${document.querySelectorAll('.gallery-dots button').length}`;
       }
 
+      // "[EPA 및 DHA 함유유지] 혈중 중성지질 개선…" → 원료별 기능성. 괄호가 없으면 통째로 한 줄.
+      function functionalIngredients(text) {
+        const parts = String(text || '')
+          .split(/(?=\[[^\]]+\])/)
+          .map((part) => part.trim())
+          .filter(Boolean);
+        return parts.map((part) => {
+          const match = part.match(/^\[([^\]]+)\]\s*([\s\S]*)$/);
+          return match ? { name: match[1].trim(), effect: match[2].trim() } : { name: null, effect: part };
+        });
+      }
+
+      // 기준 및 규격에서 성분 함량 줄과 안전 기준(성상·중금속·미생물·붕해 등) 줄을 나눈다. 글자는 신고된 그대로 둔다.
+      const SAFETY_ITEMS = /성상|납|카드뮴|수은|비소|대장균|세균|살모넬라|황색포도상구균|붕해|붕괴|이물|수분|산가|과산화물|아플라톡신|잔류|용매|에탄올|메탄올|벤조피렌|크기|사용기준/;
+      function standardLines(text) {
+        const lines = String(text || '')
+          .split(/\n|(?=\s\(?\d{1,2}[.)]\s)/)
+          .map((line) => line.replace(/^\s*\(?\d{1,2}[.)]\s*/, '').trim())
+          .filter(Boolean);
+        const rows = lines.map((line) => {
+          const index = line.indexOf(':');
+          return index > 0 ? { name: line.slice(0, index).trim(), value: line.slice(index + 1).trim() } : { name: line, value: '' };
+        });
+        return {
+          contents: rows.filter((row) => !SAFETY_ITEMS.test(row.name)),
+          safety: rows.filter((row) => SAFETY_ITEMS.test(row.name))
+        };
+      }
+
       // 식약처 건강기능식품 신고 내용. 고친 문구 없이 신고된 그대로 보여 준다.
       function mfdsSection() {
         if (!mfds) return null;
+        const functional = functionalIngredients(mfds.main_function);
+        const { contents, safety } = standardLines(mfds.standard);
+        const ingredients = el(
+          'section',
+          { class: 'detail mfds' },
+          el('h2', {}, '성분 · 기능성'),
+          functional.length
+            ? el(
+                'ul',
+                { class: 'ingredient-list' },
+                ...functional.map((item) => el('li', {}, item.name ? el('strong', {}, item.name) : null, el('span', {}, item.effect)))
+              )
+            : null,
+          contents.length
+            ? el(
+                'div',
+                { class: 'contents' },
+                el('h3', {}, '성분 함량 (표시량 기준)'),
+                el('dl', {}, ...contents.flatMap((row) => [el('dt', {}, row.name), el('dd', {}, row.value || '-')]))
+              )
+            : null,
+          safety.length
+            ? el(
+                'details',
+                { class: 'safety' },
+                el('summary', {}, `안전 기준 ${safety.length}개 (성상·중금속·미생물 등)`),
+                el('dl', {}, ...safety.flatMap((row) => [el('dt', {}, row.name), el('dd', {}, row.value || '-')]))
+              )
+            : null
+        );
         const rows = [
-          ['주된 기능성', mfds.main_function],
           ['섭취 방법', mfds.intake_method],
           ['섭취 시 주의사항', mfds.intake_caution],
           ['보관 방법', mfds.storage],
           ['소비기한', mfds.shelf_life]
         ].filter(([, value]) => value);
         const updated = String(mfds.fetched_at || '').slice(0, 10);
-        return el(
+        const usage = el(
           'section',
           { class: 'detail mfds' },
-          el('h2', {}, '식약처 신고 정보'),
+          el('h2', {}, '섭취 방법 · 주의사항'),
           el('dl', {}, ...rows.flatMap(([label, value]) => [el('dt', {}, label), el('dd', {}, value)])),
           el(
             'p',
@@ -550,6 +673,7 @@
             `출처: ${mfds.source}${updated ? ` (${updated} 기준)` : ''}. 실제 제품 포장의 표시 사항을 우선해 주세요.`
           )
         );
+        return { ingredients, usage };
       }
 
       function deliveryLine() {
@@ -559,6 +683,7 @@
       }
 
       function renderPage() {
+        const mfdsParts = mfdsSection();
         const rate = discountRate(product);
         const soldOut = isSoldOut(product);
         const rows = [
@@ -567,7 +692,7 @@
           product.supply_days ? ['사용 기간', `1개 기준 약 ${product.supply_days}일분`] : null,
           ['판매', pharmacy.pharmacy_name]
         ].filter(Boolean);
-        $('#page').replaceChildren(
+        $('#page').replaceChildren(...[
           heroImage(),
           el(
             'section',
@@ -584,15 +709,18 @@
             el('span', { class: soldOut ? 'stock out' : 'stock ok' }, soldOut ? '품절' : '구매 가능')
           ),
           el('section', { class: 'info' }, el('dl', {}, ...rows.flatMap(([label, value]) => [el('dt', {}, label), el('dd', label === '배송' ? { id: 'deliveryLine' } : {}, value)]))),
-          el(
-            'section',
-            { class: 'detail' },
-            el('h2', {}, '상품 설명'),
-            product.description ? el('p', {}, product.description) : el('p', { class: 'muted' }, mfds ? '약국이 따로 적은 설명은 없어요. 아래 식약처 신고 정보를 참고해 주세요.' : '등록된 상품 설명이 없어요. 궁금한 점은 약국에 문의해 주세요.')
-          ),
-          mfdsSection(),
+          mfdsParts?.ingredients,
+          product.description || !mfdsParts
+            ? el(
+                'section',
+                { class: 'detail' },
+                el('h2', {}, '약국 설명'),
+                product.description ? el('p', {}, product.description) : el('p', { class: 'muted' }, '성분 정보가 아직 등록되지 않았어요. 궁금한 점은 약국에 문의해 주세요.')
+              )
+            : null,
+          mfdsParts?.usage,
           sellerFooter(window.__seller)
-        );
+        ].filter(Boolean));
         renderBuyBar();
       }
 

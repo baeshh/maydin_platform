@@ -141,9 +141,12 @@ const fake = createServer((req, res) => {
     REGIST_DT: '20040101'
   };
   const other = { ...item, STTEMNT_NO: '200500300002', PRDUCT: '다른회사 오메가3', ENTRPS: '다른식품' };
+  const twinA = { ...item, STTEMNT_NO: '200600400001', PRDUCT: '중복 오메가3', ENTRPS: '가나제약' };
+  const twinB = { ...item, STTEMNT_NO: '200600400002', PRDUCT: '중복 오메가3', ENTRPS: '다라식품' };
+  const all = [item, other, twinA, twinB];
   let items = [];
-  if (url.searchParams.get('STTEMNT_NO')) items = [item, other].filter((i) => i.STTEMNT_NO === url.searchParams.get('STTEMNT_NO'));
-  else if (url.searchParams.get('Prduct')) items = [other, item];
+  if (url.searchParams.get('STTEMNT_NO')) items = all.filter((i) => i.STTEMNT_NO === url.searchParams.get('STTEMNT_NO'));
+  else if (url.searchParams.get('Prduct')) items = all.filter((i) => i.PRDUCT.includes(url.searchParams.get('Prduct').trim().split(' ').pop()));
   res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify({ header: { resultCode: '00', resultMsg: 'NORMAL SERVICE.' }, body: { totalCount: items.length, items: items.map((i) => ({ item: i })) } }));
 });
@@ -152,7 +155,7 @@ try {
   let res = await api(`/products/mfds/search?q=${encodeURIComponent('오')}`, { token: A.owner });
   check('한 글자 검색 400', res.status === 400, res.data);
   res = await api(`/products/mfds/search?q=${encodeURIComponent('오메가3')}&company=${encodeURIComponent('테스트제약')}`, { token: A.owner });
-  check('제품명 검색 · 같은 제조사 먼저', res.status === 200 && res.data.results[0]?.report_no === '200400200001' && res.data.results.length === 2, res.data);
+  check('제품명 검색 · 같은 제조사 먼저', res.status === 200 && res.data.results[0]?.report_no === '200400200001' && res.data.results.length >= 2, res.data);
   check('인증키를 서버에서만 붙임', calls.at(-1)?.serviceKey === 'test-mfds-key' && !JSON.stringify(res.data).includes('test-mfds-key'), calls.at(-1));
   res = await api(`/products/${aItem.id}/mfds`, { token: A.owner, method: 'POST', body: { report_no: '200400200001' } });
   check('신고번호로 연결', res.status === 200 && res.data.mfds.main_function.includes('혈행'), res.data);
@@ -180,6 +183,37 @@ try {
   check('해제하면 고객 상세에서 사라짐', (await api(`/products/mall/${aItem.id}?pharmacyCode=${A.code}`, { token: A.owner })).data.mfds === null);
   const customer = (await api('/products/mfds/search?q=abc', {})).status;
   check('로그인 없이 식약처 검색 불가', customer === 401, customer);
+
+  console.log('[성분 정보 자동 연결 — 이름이 하나로 맞을 때만]');
+  const wait = () => new Promise((resolve) => setTimeout(resolve, 400));
+  const row = (id) => db.prepare('SELECT mfds_report_no, mfds_link_source FROM products WHERE id = ?').get(id);
+  const exact = (await api('/products', { token: A.owner, method: 'POST', body: { product_name: '다른회사 오메가3', price: 15000, stock_quantity: 3, product_type: 'GENERAL', online_visible: true } })).data.product;
+  const twin = (await api('/products', { token: A.owner, method: 'POST', body: { product_name: '중복 오메가3', price: 15000, stock_quantity: 3, product_type: 'GENERAL', online_visible: true } })).data.product;
+  const drug = (await api('/products', { token: A.owner, method: 'POST', body: { product_name: '다른회사 오메가3 ', price: 15000, stock_quantity: 3, product_type: 'OTC' } })).data.product;
+  await wait();
+  check('등록하면 이름이 하나로 맞는 제품을 자동 연결(AUTO)', row(exact.id).mfds_report_no === '200500300002' && row(exact.id).mfds_link_source === 'AUTO', row(exact.id));
+  check('같은 이름이 여러 업체면 연결 안 함', row(twin.id).mfds_report_no === null, row(twin.id));
+  check('일반의약품은 건강기능식품 정보로 연결 안 함', row(drug.id).mfds_report_no === null, row(drug.id));
+  let detailRes = await api(`/products/mall/${exact.id}?pharmacyCode=${A.code}`, { token: A.owner });
+  check('자동 연결도 고객 상세에 성분 정보', detailRes.data.mfds?.report_no === '200500300002' && /EPA와 DHA/.test(detailRes.data.mfds.standard), detailRes.data.mfds);
+  res = await api(`/products/${exact.id}/mfds/confirm`, { token: A.owner, method: 'POST' });
+  check('약국 확인 → MANUAL', res.status === 200 && row(exact.id).mfds_link_source === 'MANUAL', row(exact.id));
+  await api(`/products/${exact.id}/mfds`, { token: A.owner, method: 'DELETE' });
+  await api(`/products/${exact.id}`, { token: A.owner, method: 'PATCH', body: { brand: '다른식품' } });
+  await wait();
+  check('약국이 해제한 상품은 다시 자동 연결 안 함', row(exact.id).mfds_report_no === null && row(exact.id).mfds_link_source === 'REMOVED', row(exact.id));
+  await api(`/products/${twin.id}`, { token: A.owner, method: 'PATCH', body: { brand: '다라식품' } });
+  await wait();
+  check('브랜드(제조사)를 넣으면 같은 이름 중 그 업체 제품으로 연결', row(twin.id).mfds_report_no === '200600400002', row(twin.id));
+  const batchItem = (await api('/products', { token: A.owner, method: 'POST', body: { product_name: '사진 테스트 오메가3', price: 15000, stock_quantity: 3, product_type: 'UNCLASSIFIED' } })).data.product;
+  await api('/products/bulk-type', { token: A.owner, method: 'POST', body: { ids: [batchItem.id], product_type: 'GENERAL' } });
+  await wait();
+  check('일반 상품으로 분류하면 자동 연결', row(batchItem.id).mfds_report_no === '200400200001', row(batchItem.id));
+  db.prepare("UPDATE products SET mfds_report_no = NULL, mfds_link_source = NULL WHERE id = ?").run(batchItem.id);
+  res = await api('/products/mfds/auto-link', { token: A.owner, method: 'POST' });
+  check('한꺼번에 자동 연결 결과(연결·여러 개)', res.status === 200 && res.data.linked.some((p) => p.id === batchItem.id) && Array.isArray(res.data.ambiguous), res.data);
+  res = await api('/products/mfds/auto-link', { token: B.owner, method: 'POST' });
+  check('다른 약국 상품은 건드리지 않음', !res.data.linked.some((p) => [exact.id, twin.id, batchItem.id].includes(p.id)), res.data);
 } finally {
   fake.close();
 }
