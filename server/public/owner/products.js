@@ -129,7 +129,7 @@ function renderMallVisibility() {
   const missing = count((p) => p.product_type === 'GENERAL' && ((!p.mfds_report_no && p.mfds_link_source !== 'REMOVED') || !(Number(p.photo_verified) + Number(p.photo_pending))));
   if (unverified) {
     reasons.push(
-      `<span>미검증 제품 <b>${unverified.toLocaleString()}개</b> · 약사가 승인해야 성분·사진이 고객에게 보여요 <button class="btn btn-primary btn-sm" type="button" onclick="showProductFilter('unverified')">미검증만 보기</button></span>`
+      `<span>미검증 제품 <b>${unverified.toLocaleString()}개</b> · 자동으로 붙은 사진은 바로 보이고, 성분 정보는 약사가 승인해야 보여요 <button class="btn btn-primary btn-sm" type="button" onclick="showProductFilter('unverified')">미검증만 보기</button></span>`
     );
   }
   if (missing) {

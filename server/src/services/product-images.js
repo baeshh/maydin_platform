@@ -1,12 +1,15 @@
 const crypto = require('crypto');
 const { getAll, getOne, run, transaction } = require('../db');
 const store = require('./media-store');
+const webImages = require('./web-images');
 
 const MAX_IMAGES = 10;
 const MAX_BYTES = 10 * 1024 * 1024;
 const FULL_SIZE = 1200;
 const THUMB_SIZE = 480;
 const INPUT_FORMATS = new Set(['jpeg', 'png', 'webp', 'heif', 'avif']);
+const WEB_SEARCH_DAYS = 30;
+const httpUrl = (value) => (/^https?:\/\//i.test(String(value || '')) ? String(value).slice(0, 1000) : null);
 
 class ImageError extends Error {
   constructor(message, status = 400) {
@@ -26,6 +29,8 @@ function publicImage(row) {
     source: row.source,
     match_basis: row.match_basis || null,
     verified: Boolean(row.verified_at),
+    source_url: row.source_url || null,
+    source_title: row.source_title || null,
     width: row.width,
     height: row.height,
     sort_order: row.sort_order
@@ -41,24 +46,20 @@ function ownedProduct(pharmacyId, productId) {
   return product;
 }
 
-// 고객 화면에는 약사가 확인한 사진만 보낸다.
-function listImages(productId, { verifiedOnly = false } = {}) {
-  return getAll(
-    `SELECT * FROM product_images WHERE product_id = @id AND image_key IS NOT NULL ${verifiedOnly ? 'AND verified_at IS NOT NULL' : ''} ORDER BY sort_order, id`,
-    { id: productId }
-  ).map(publicImage);
+// 자동으로 붙은 사진도 바로 보여 주되, 약사가 확인한 사진을 앞에 둔다.
+const IMAGE_ORDER = 'ORDER BY verified_at IS NULL, sort_order, id';
+
+function listImages(productId) {
+  return getAll(`SELECT * FROM product_images WHERE product_id = @id AND image_key IS NOT NULL ${IMAGE_ORDER}`, { id: productId }).map(publicImage);
 }
 
 function productImages(pharmacyId, productId) {
   return listImages(ownedProduct(pharmacyId, productId).id);
 }
 
-// 확인된 첫 번째 사진의 작은 사진을 목록용 대표 사진(thumbnail_url)으로 쓴다. 사진이 없으면 약국이 직접 넣은 주소를 그대로 둔다.
+// 첫 번째 사진(확인된 사진 우선)의 작은 사진을 목록용 대표 사진(thumbnail_url)으로 쓴다. 사진이 없으면 약국이 직접 넣은 주소를 그대로 둔다.
 function syncThumbnail(productId) {
-  const first = getOne(
-    'SELECT image_key FROM product_images WHERE product_id = @id AND image_key IS NOT NULL AND verified_at IS NOT NULL ORDER BY sort_order, id LIMIT 1',
-    { id: productId }
-  );
+  const first = getOne(`SELECT image_key FROM product_images WHERE product_id = @id AND image_key IS NOT NULL ${IMAGE_ORDER} LIMIT 1`, { id: productId });
   if (first) {
     run('UPDATE products SET thumbnail_url = @url, updated_at = CURRENT_TIMESTAMP WHERE id = @id', { id: productId, url: mediaUrl(thumbKey(first.image_key)) });
   } else {
@@ -66,7 +67,7 @@ function syncThumbnail(productId) {
   }
 }
 
-function addRow(product, { key, source, width, height, userId, verifierId = null, basis = null }) {
+function addRow(product, { key, source, width, height, userId, verifierId = null, basis = null, sourceUrl = null, sourceTitle = null }) {
   const count = getOne('SELECT COUNT(*) AS n FROM product_images WHERE product_id = @id AND image_key IS NOT NULL', { id: product.id }).n;
   if (count >= MAX_IMAGES) throw new ImageError(`사진은 상품마다 ${MAX_IMAGES}장까지 올릴 수 있습니다.`);
   if (getOne('SELECT 1 AS found FROM product_images WHERE product_id = @id AND image_key = @key', { id: product.id, key })) {
@@ -74,9 +75,10 @@ function addRow(product, { key, source, width, height, userId, verifierId = null
   }
   const next = getOne('SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM product_images WHERE product_id = @id', { id: product.id }).n;
   run(
-    `INSERT INTO product_images (product_id, image_url, image_key, source, match_basis, pharmacy_id, created_by, width, height, sort_order, verified_at, verified_by)
+    `INSERT INTO product_images (product_id, image_url, image_key, source, match_basis, pharmacy_id, created_by, width, height, sort_order,
+                                 verified_at, verified_by, source_url, source_title)
      VALUES (@product_id, @url, @key, @source, @basis, @pharmacy_id, @user_id, @width, @height, @sort_order,
-             CASE WHEN @verifier IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END, @verifier)`,
+             CASE WHEN @verifier IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END, @verifier, @source_url, @source_title)`,
     {
       product_id: product.id,
       url: mediaUrl(key),
@@ -88,7 +90,9 @@ function addRow(product, { key, source, width, height, userId, verifierId = null
       width,
       height,
       sort_order: next,
-      verifier: verifierId
+      verifier: verifierId,
+      source_url: sourceUrl,
+      source_title: sourceTitle ? String(sourceTitle).slice(0, 200) : null
     }
   );
   syncThumbnail(product.id);
@@ -96,8 +100,7 @@ function addRow(product, { key, source, width, height, userId, verifierId = null
 
 // 사진을 받아 방향을 바로잡고(EXIF 회전), 위치 등 메타데이터를 지운 WebP 두 크기로 저장한다.
 // 약사(약국 운영자) 계정이 직접 찍어 올린 사진은 바로 검증된 사진으로 본다.
-async function uploadImage({ pharmacyId, productId, userId, verifierId = null, buffer }) {
-  const product = ownedProduct(pharmacyId, productId);
+async function processImage(buffer) {
   if (!Buffer.isBuffer(buffer) || !buffer.length) throw new ImageError('사진 파일을 보내 주세요.');
   if (buffer.length > MAX_BYTES) throw new ImageError('사진은 10MB 이하로 올려 주세요.', 413);
   const sharp = require('sharp');
@@ -114,7 +117,13 @@ async function uploadImage({ pharmacyId, productId, userId, verifierId = null, b
   const key = `products/${crypto.createHash('sha256').update(full.data).digest('hex')}.webp`;
   await store.putObject(key, full.data);
   await store.putObject(thumbKey(key), thumb);
-  transaction(() => addRow(product, { key, source: 'UPLOAD', width: full.info.width, height: full.info.height, userId, verifierId }))();
+  return { key, width: full.info.width, height: full.info.height };
+}
+
+async function uploadImage({ pharmacyId, productId, userId, verifierId = null, buffer }) {
+  const product = ownedProduct(pharmacyId, productId);
+  const { key, width, height } = await processImage(buffer);
+  transaction(() => addRow(product, { key, source: 'UPLOAD', width, height, userId, verifierId }))();
   if (verifierId) shareToOtherPharmacies(product.id);
   return listImages(product.id);
 }
@@ -126,8 +135,12 @@ async function deleteImage({ pharmacyId, productId, imageId }) {
   transaction(() => {
     run('DELETE FROM product_images WHERE id = @id', { id: row.id });
     // 자동으로 붙은 사진을 약국이 지웠으면 같은 사진을 다시 붙이지 않는다.
-    if (row.source === 'SHARED' && row.image_key) {
-      run('INSERT OR IGNORE INTO product_image_rejections (product_id, image_key) VALUES (@product_id, @key)', { product_id: product.id, key: row.image_key });
+    if (['SHARED', 'WEB'].includes(row.source) && row.image_key) {
+      run('INSERT OR IGNORE INTO product_image_rejections (product_id, image_key, source_url) VALUES (@product_id, @key, @url)', {
+        product_id: product.id,
+        key: row.image_key,
+        url: row.source === 'WEB' ? row.source_url : null
+      });
     }
     syncThumbnail(product.id);
   })();
@@ -212,6 +225,53 @@ function autoAttachPhoto(productId) {
   return { status: 'ATTACHED', basis: pick.match_basis };
 }
 
+// 공유 사진도 없으면 구글 이미지 검색에서 제품명·브랜드가 가장 잘 맞는 사진 한 장을 미검증으로 붙인다.
+// 같은 상품은 30일에 한 번만 검색한다(상품명·브랜드·바코드가 바뀌면 다시).
+async function attachWebPhoto(productId, want) {
+  if (!webImages.enabled()) return { status: 'SKIPPED' };
+  const product = getOne(
+    `SELECT id, pharmacy_id, product_type, status,
+            photo_searched_at IS NOT NULL AND photo_searched_at > datetime('now', '-${WEB_SEARCH_DAYS} days') AS searched
+     FROM products WHERE id = @id`,
+    { id: productId }
+  );
+  if (!product || product.product_type !== 'GENERAL' || product.status === 'HIDDEN') return { status: 'SKIPPED' };
+  if (product.searched) return { status: 'SEARCHED' };
+  if (getOne('SELECT 1 AS found FROM product_images WHERE product_id = @id AND image_key IS NOT NULL', { id: product.id })) return { status: 'HAS_PHOTO' };
+  const rejected = getAll('SELECT image_key, source_url FROM product_image_rejections WHERE product_id = @id', { id: product.id });
+  const found = await webImages.findProductPhoto(want, { skipUrls: new Set(rejected.map((r) => r.source_url).filter(Boolean)) });
+  run('UPDATE products SET photo_searched_at = CURRENT_TIMESTAMP WHERE id = @id', { id: product.id });
+  if (!found) return { status: 'NOT_FOUND' };
+  let image;
+  try {
+    image = await processImage(found.buffer);
+  } catch {
+    return { status: 'NOT_FOUND' };
+  }
+  if (rejected.some((r) => r.image_key === image.key)) return { status: 'NOT_FOUND' };
+  const added = transaction(() => {
+    if (getOne('SELECT 1 AS found FROM product_images WHERE product_id = @id AND image_key IS NOT NULL', { id: product.id })) return false;
+    addRow(product, {
+      key: image.key,
+      source: 'WEB',
+      basis: 'WEB',
+      width: image.width,
+      height: image.height,
+      userId: null,
+      sourceUrl: httpUrl(found.candidate.page) || httpUrl(found.candidate.original),
+      sourceTitle: found.candidate.title
+    });
+    return true;
+  })();
+  return added ? { status: 'ATTACHED', basis: 'WEB' } : { status: 'HAS_PHOTO' };
+}
+
+async function autoFillPhoto(productId, want) {
+  const shared = autoAttachPhoto(productId);
+  if (shared.status !== 'NOT_FOUND') return shared;
+  return attachWebPhoto(productId, want);
+}
+
 // 약사가 사진을 올리거나 확인하면, 같은 상품을 파는 다른 약국 중 사진이 없는 곳에 미검증 후보로 바로 보낸다.
 function shareToOtherPharmacies(productId) {
   const source = getOne(
@@ -253,6 +313,7 @@ module.exports = {
   ImageError,
   MAX_BYTES,
   autoAttachPhoto,
+  autoFillPhoto,
   deleteImage,
   listImages,
   makePrimary,

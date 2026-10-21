@@ -639,6 +639,11 @@ function migrateProductMedia() {
     db.exec('UPDATE product_images SET verified_at = created_at WHERE image_key IS NOT NULL');
   }
   addColumnIfMissing('product_images', 'verified_by', 'INTEGER');
+  // WEB: 구글 이미지 검색으로 찾아 붙인 사진. 사진이 있던 페이지 주소와 제목을 남긴다(저작권 확인·교체용).
+  addColumnIfMissing('product_images', 'source_url', 'TEXT');
+  addColumnIfMissing('product_images', 'source_title', 'TEXT');
+  // 웹 사진을 마지막으로 찾아본 시각. 같은 상품을 계속 다시 검색하지 않게 한다(검색 횟수 제한).
+  addColumnIfMissing('products', 'photo_searched_at', 'TEXT');
   db.exec(`
     CREATE TABLE IF NOT EXISTS product_image_rejections (
       product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
@@ -646,6 +651,7 @@ function migrateProductMedia() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (product_id, image_key)
     );`);
+  addColumnIfMissing('product_image_rejections', 'source_url', 'TEXT');
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_product_images_key ON product_images(image_key);
     CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);

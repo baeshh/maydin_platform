@@ -9,6 +9,16 @@ class MatchError extends Error {
   }
 }
 
+function photoQuery(productId) {
+  const product = getOne(
+    `SELECT p.product_name, p.brand, m.product_name AS mfds_name, m.company
+     FROM products p LEFT JOIN mfds_htfs m ON m.report_no = p.mfds_report_no WHERE p.id = @id`,
+    { id: productId }
+  );
+  if (!product) return { name: '' };
+  return { name: String(product.mfds_name || product.product_name || '').trim(), brand: product.brand || null, company: product.company || null };
+}
+
 // 성분(식약처)과 사진을 자동으로 맞춘다. 자동으로 맞춘 것은 모두 미검증이고, 약사가 승인해야 고객에게 보인다.
 async function autoMatchProduct(productId) {
   let ingredients;
@@ -17,8 +27,13 @@ async function autoMatchProduct(productId) {
   } catch {
     ingredients = { status: 'ERROR' };
   }
-  // 성분이 연결되면 같은 신고번호의 공유 사진도 찾을 수 있으니 사진은 그 뒤에 맞춘다.
-  const photo = images.autoAttachPhoto(productId);
+  // 성분이 연결되면 같은 신고번호의 공유 사진도 찾을 수 있고, 신고 제품명·업체명으로 사진을 더 정확히 찾을 수 있어 사진은 그 뒤에 맞춘다.
+  let photo;
+  try {
+    photo = await images.autoFillPhoto(productId, photoQuery(productId));
+  } catch {
+    photo = { status: 'ERROR' };
+  }
   return { ingredients, photo };
 }
 
@@ -52,7 +67,10 @@ async function autoMatchPharmacy(pharmacyId, limit = 200) {
 function onIdentityChange(before, after) {
   const changed = (key) => String(before[key] ?? '').trim() !== String(after[key] ?? '').trim();
   const nameChanged = changed('product_name') || changed('brand') || changed('barcode');
-  if (nameChanged) mfds.markRecheck(before.id);
+  if (nameChanged) {
+    mfds.markRecheck(before.id);
+    run('UPDATE products SET photo_searched_at = NULL WHERE id = @id', { id: before.id });
+  }
   if (changed('barcode')) images.markRecheck(before.id);
   return nameChanged;
 }

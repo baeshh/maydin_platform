@@ -124,8 +124,35 @@ console.log('[공유 사진 — 같은 바코드, 올린 약국이 허락했을 
 
 console.log('[식약처 건강기능식품 정보 — 검색·연결·고객 상세]');
 const calls = [];
+const imageHits = [];
+const webPhotos = {
+  '/img/lutein-a.jpg': await sharp({ create: { width: 800, height: 800, channels: 3, background: '#e8a33d' } }).jpeg().toBuffer(),
+  '/img/lutein-b.jpg': await sharp({ create: { width: 700, height: 700, channels: 3, background: '#4a8fe7' } }).jpeg().toBuffer()
+};
 const fake = createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
+  if (url.pathname.startsWith('/img/')) {
+    imageHits.push(url.pathname);
+    if (!webPhotos[url.pathname]) return res.writeHead(404).end();
+    res.writeHead(200, { 'Content-Type': 'image/jpeg' });
+    return res.end(webPhotos[url.pathname]);
+  }
+  if (url.pathname === '/search.json') {
+    calls.push(Object.fromEntries(url.searchParams));
+    const local = `http://127.0.0.1:${process.env.MFDS_FAKE_PORT}`;
+    const q = url.searchParams.get('q') || '';
+    const results = q.includes('루테인')
+      ? [
+          { title: '눈건강제약 웹사진 루테인 골드 60캡슐', link: 'http://169.254.169.254/latest/meta-data/', source: 'meta', original: 'http://169.254.169.254/latest/meta-data/p.jpg', original_width: 1000, original_height: 1000 },
+          { title: '눈건강제약 웹사진 루테인 골드 후기', link: 'https://blog.naver.com/someone/1', source: '블로그', original: `${local}/img/lutein-a.jpg`, original_width: 900, original_height: 900 },
+          { title: '전혀 다른 비타민', link: 'https://shop.example.com/x', source: 'shop', original: `${local}/img/lutein-a.jpg`, original_width: 900, original_height: 900 },
+          { title: '[눈건강제약] 웹사진 루테인 골드 60캡슐', link: 'https://shop.example.com/lutein', source: '예시몰', original: `${local}/img/lutein-a.jpg`, original_width: 800, original_height: 800 },
+          { title: '눈건강제약 웹사진 루테인 골드', link: 'https://store.example.com/lutein', source: '예시스토어', original: `${local}/img/lutein-b.jpg`, original_width: 700, original_height: 700 }
+        ]
+      : [];
+    res.setHeader('Content-Type', 'application/json');
+    return res.end(JSON.stringify({ images_results: results }));
+  }
   calls.push(Object.fromEntries(url.searchParams));
   const item = {
     STTEMNT_NO: '200400200001',
@@ -255,8 +282,8 @@ try {
   let cImages = await imagesOf(C, cItem.id);
   check('같은 바코드 상품에 공유 사진 1장이 미검증으로 붙음', cImages.length === 1 && cImages[0].verified === false && cImages[0].match_basis === 'BARCODE' && cImages[0].url === second.url, cImages);
   const cMall = async () => (await api(`/products/mall/${cItem.id}?pharmacyCode=${C.code}`, { token: C.owner })).data;
-  check('미검증 사진은 고객 상세에 안 보임', (await cMall()).images.length === 0);
-  check('미검증 사진은 목록 대표 사진도 아님', db.prepare('SELECT thumbnail_url FROM products WHERE id = ?').get(cItem.id).thumbnail_url === null);
+  check('자동으로 붙은 사진도 고객 상세에 바로 보임(미검증 표시)', (await cMall()).images.length === 1 && (await cMall()).images[0].verified === false);
+  check('목록 대표 사진도 바로 채움', db.prepare('SELECT thumbnail_url FROM products WHERE id = ?').get(cItem.id).thumbnail_url === cImages[0].thumb_url);
   list = (await api('/products', { token: C.owner })).data.products;
   check('상품 목록에 미검증 사진 수', Number(list.find((p) => p.id === cItem.id).photo_pending) === 1, list.find((p) => p.id === cItem.id));
 
@@ -272,7 +299,47 @@ try {
   check('약사가 사진 승인', res.status === 200 && res.data.photos === 1 && res.data.photo_pending === 0, res.data);
   check('승인한 사진은 고객 상세·목록 대표 사진에 보임', (await cMall()).images.length === 1 && db.prepare('SELECT thumbnail_url FROM products WHERE id = ?').get(cItem.id).thumbnail_url === fresh.thumb_url);
   await api(`/products/${cItem.id}`, { token: C.owner, method: 'PATCH', body: { barcode: '8800000000017' } });
-  check('바코드가 바뀌면 사진도 재검증 대기', (await cMall()).images.length === 0 && (await imagesOf(C, cItem.id))[0].verified === false);
+  check('바코드가 바뀌면 사진도 재검증 대기(고객에게는 계속 보임)', (await cMall()).images.length === 1 && (await imagesOf(C, cItem.id))[0].verified === false);
+
+  console.log('[사진 자동 매칭 — 공유 사진이 없으면 구글 이미지 검색에서 가장 잘 맞는 사진]');
+  const webItem = await create({ product_name: '웹사진 루테인 골드', brand: '눈건강제약' });
+  await wait();
+  await wait();
+  let webImagesNow = await imagesOf(A, webItem.id);
+  const search = calls.findLast((c) => c.engine === 'google_images' && c.q.includes('루테인'));
+  check('제품명·브랜드로 구글 이미지 검색(키는 서버에서만)', search?.q === '눈건강제약 웹사진 루테인 골드' && search.api_key === 'test-serp-key' && search.gl === 'kr', search);
+  check(
+    '제목이 맞는 쇼핑몰 사진을 골라 저장(블로그·다른 상품 제외)',
+    webImagesNow.length === 1 && webImagesNow[0].source === 'WEB' && webImagesNow[0].source_url === 'https://shop.example.com/lutein' && !webImagesNow[0].verified,
+    webImagesNow
+  );
+  check('내부망(메타데이터) 주소 사진은 받지 않음', !imageHits.some((p) => p.includes('meta')), imageHits);
+  const webMall = (await api(`/products/mall/${webItem.id}?pharmacyCode=${A.code}`, { token: A.owner })).data;
+  check('고객 상세에 바로 보임', webMall.images.length === 1 && webMall.images[0].verified === false, webMall.images);
+  check('목록 대표 사진도 채움', db.prepare('SELECT thumbnail_url FROM products WHERE id = ?').get(webItem.id).thumbnail_url === webImagesNow[0].thumb_url);
+  const searches = () => calls.filter((c) => c.engine === 'google_images').length;
+  const before = searches();
+  await api('/products/auto-match', { token: A.owner, method: 'POST' });
+  check('사진이 있으면 다시 검색하지 않음', searches() === before, searches());
+
+  await api(`/products/${webItem.id}/images/${webImagesNow[0].id}`, { token: A.owner, method: 'DELETE' });
+  res = await api('/products/auto-match', { token: A.owner, method: 'POST' });
+  check('30일 안에는 같은 상품을 다시 검색하지 않음(검색 횟수 아끼기)', searches() === before && (await imagesOf(A, webItem.id)).length === 0, searches());
+  db.prepare('UPDATE products SET photo_searched_at = NULL WHERE id = ?').run(webItem.id);
+  res = await api('/products/auto-match', { token: A.owner, method: 'POST' });
+  webImagesNow = await imagesOf(A, webItem.id);
+  check('약국이 지운 사진은 빼고 다음 후보를 붙임', res.data.photos.some((p) => p.id === webItem.id && p.basis === 'WEB') && webImagesNow[0]?.source_url === 'https://store.example.com/lutein', { result: res.data.photos, images: webImagesNow });
+  res = await api(`/products/${webItem.id}/verify`, { token: A.owner, method: 'POST', body: { image_ids: [webImagesNow[0].id] } });
+  check('약사가 웹 사진도 승인', res.status === 200 && (await imagesOf(A, webItem.id))[0].verified === true, res.data);
+
+  const webService = require('../src/services/web-images.js');
+  check(
+    '내부 주소 판별(메타데이터·사설망·IPv6 사설·매핑 주소)',
+    webService.isBlockedAddress('169.254.169.254', 4) && webService.isBlockedAddress('10.0.0.5', 4) && webService.isBlockedAddress('fd00::1', 6) &&
+      webService.isBlockedAddress('::ffff:192.168.0.1', 6) && !webService.isBlockedAddress('8.8.8.8', 4)
+  );
+  const blockedDownload = await webService.download('http://169.254.169.254/latest/meta-data/').catch((error) => error.code);
+  check('메타데이터 주소로 직접 받기도 거절', blockedDownload === 'BLOCKED_ADDRESS', blockedDownload);
 } finally {
   fake.close();
 }

@@ -47,6 +47,10 @@ const env = {
   MFDS_SERVICE_KEY: 'test-mfds-key'
 };
 env.MFDS_API_BASE = `http://127.0.0.1:${env.MFDS_FAKE_PORT}/1471000/HtfsInfoService03`;
+// 구글 이미지 검색(SerpApi)과 사진 서버도 같은 가짜 서버가 맡는다. 테스트에서만 127.0.0.1 사진을 받게 허용한다.
+env.SERPAPI_KEY = 'test-serp-key';
+env.SERPAPI_BASE = `http://127.0.0.1:${env.MFDS_FAKE_PORT}`;
+env.WEB_IMAGE_ALLOW_HOSTS = '127.0.0.1';
 const base = `http://127.0.0.1:${env.PORT}`;
 
 const init = spawnSync(process.execPath, ['src/db/init.js'], { cwd: serverDir, env, encoding: 'utf8' });

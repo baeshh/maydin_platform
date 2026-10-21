@@ -127,6 +127,12 @@
         position: relative;
       }
 
+      .img-note {
+        color: #8b95a1;
+        font-size: 12px;
+        margin: 8px 20px 0;
+      }
+
       .gallery-track {
         display: flex;
         overflow-x: auto;
@@ -580,9 +586,11 @@
             el('div', { class: 'hero-img' }, el('img', { src, alt: `${product.product_name} 사진 ${index + 1}`, loading: index ? 'lazy' : 'eager', referrerpolicy: 'no-referrer', onerror: (e) => e.currentTarget.replaceWith(placeholder()) }))
           )
         );
-        if (urls.length === 1) return track;
+        // 약국이 아직 확인하지 않은 자동 사진(공유·웹 검색)이 있으면 참고 이미지라고 알린다.
+        const note = images.some((img) => !img.verified) ? el('p', { class: 'img-note' }, '참고 이미지예요. 실제 제품의 포장·용량과 다를 수 있어요.') : null;
+        if (urls.length === 1) return el('div', {}, track, note);
         const dots = el('div', { class: 'gallery-dots' }, ...urls.map((_, index) => el('button', { type: 'button', 'aria-label': `사진 ${index + 1}`, class: index ? '' : 'on', onclick: () => track.scrollTo({ left: index * track.clientWidth, behavior: 'smooth' }) })));
-        return el('div', { class: 'gallery' }, track, dots, el('span', { class: 'gallery-count', id: 'galleryCount' }, `1 / ${urls.length}`));
+        return el('div', {}, el('div', { class: 'gallery' }, track, dots, el('span', { class: 'gallery-count', id: 'galleryCount' }, `1 / ${urls.length}`)), note);
       }
 
       function markSlide(index) {

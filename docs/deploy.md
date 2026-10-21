@@ -48,8 +48,10 @@ SSM으로 명령을 보낼 때는 root로 실행되므로 `sudo -iu ubuntu bash 
 | 서버 권한 | `maydin-ec2` 인라인 정책 `product-media-s3`: `products/*` 읽기·쓰기·삭제, `products/` 범위 목록(없는 사진을 404로 받기 위해) |
 | 운영 `.env` | `MEDIA_BUCKET`, `MEDIA_REGION`, `MFDS_SERVICE_KEY`(공공데이터포털 식약처_건강기능식품정보, 개발계정 하루 10,000건 · 2028-10-20까지) |
 | 제공 | 사진은 `/media/products/<sha256>.webp`(1200px)·`_480.webp`(목록용)로 서버가 S3에서 읽어 준다 |
+| 웹 사진(선택) | `SERPAPI_KEY`가 있으면 공유 사진이 없는 일반 상품에 구글 이미지 검색(SerpApi `google_images`)에서 가장 잘 맞는 사진 한 장을 미검증으로 붙인다. 상품마다 30일에 한 번만 검색(무료 요금제 월 250회). 내부망 주소 사진은 받지 않는다 |
 
-`MEDIA_BUCKET`이 없으면(개발·테스트) `server/uploads/media`에 저장한다. 식약처 키는 저장소에 넣지 않는다.
+`MEDIA_BUCKET`이 없으면(개발·테스트) `server/uploads/media`에 저장한다. 식약처·SerpApi 키는 저장소에 넣지 않는다.
+웹 사진은 판매자·제조사에 권리가 있는 사진이라 데모 기간용이다. 정식 오픈 전에 약국 촬영·공유 사진이나 제조사 허락을 받은 사진으로 바꾼다(파트너센터에 출처 링크가 남는다).
 
 ## Node · DB 라이브러리
 

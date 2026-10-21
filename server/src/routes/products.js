@@ -180,7 +180,7 @@ router.get('/mall/:id', authenticate, mallPharmacy, (req, res) => {
   const gate = onlineStockGate(req.mallPharmacyId);
   res.json({
     product: publicProduct(product, mallBuffer(gate)),
-    images: listImages(product.id, { verifiedOnly: true }),
+    images: listImages(product.id),
     mfds: product.mfds_verified_at ? mfds.mallRecord(product.mfds_report_no) : null,
     online_paused: gate.paused,
     notice: gate.message
@@ -302,7 +302,7 @@ router.post(
   '/:id/mfds',
   mediaRoute(async (req) => {
     const record = await mfds.linkProduct(req.pharmacyId, req.params.id, req.body.report_no, verifierOf(req));
-    imageService.autoAttachPhoto(Number(req.params.id));
+    match.autoMatchLater(Number(req.params.id));
     return { mfds: record, verified: Boolean(verifierOf(req)) };
   })
 );

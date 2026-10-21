@@ -7,7 +7,7 @@ const MATCH_BASIS_TEXT = {
   NAME: '제품명이 식약처 신고 제품명과 같아 자동으로 맞췄습니다. 브랜드(제조사)가 비어 있어 업체명은 확인하지 못했습니다.',
   MANUAL: '약국에서 직접 골라 연결했습니다.'
 };
-const PHOTO_BASIS_TEXT = { BARCODE: '같은 바코드 상품의 공유 사진', MFDS: '같은 식약처 신고번호 상품의 공유 사진' };
+const PHOTO_BASIS_TEXT = { BARCODE: '같은 바코드 상품의 공유 사진', MFDS: '같은 식약처 신고번호 상품의 공유 사진', WEB: '구글 이미지 검색에서 찾은 사진' };
 
 const normName = (value) => String(value || '').toLowerCase().replace(/\(주\)|주식회사|\(구\)|[\s·,()[\]+&/-]/g, '');
 
@@ -84,7 +84,7 @@ function renderVerifyBar() {
   const items = [ingredients && '성분 정보', photos && `사진 ${photos}장`].filter(Boolean).join(' · ');
   return `<div class="verify-bar">
     <span class="badge orange">미검증 제품</span>
-    <span style="flex: 1; min-width: 200px;">자동으로 맞춘 항목: <b>${items}</b>. 실제 상품과 제조사·제품명·포장이 같은지 아래에서 확인하고 승인해 주세요. 승인 전에는 고객 화면에 보이지 않습니다.</span>
+    <span style="flex: 1; min-width: 200px;">자동으로 맞춘 항목: <b>${items}</b>. 실제 상품과 제조사·제품명·포장이 같은지 아래에서 확인하고 승인해 주세요. 사진은 승인 전에도 고객 화면에 '참고 이미지'로 보이고, 성분 정보는 승인해야 보입니다.</span>
     <button class="btn btn-primary btn-sm" type="button" onclick="verifyMedia({ all: true })">확인했어요 · 모두 승인</button>
   </div>`;
 }
@@ -102,12 +102,15 @@ function renderProductMedia() {
                 ? index === 0 ? '<span class="badge green">대표</span>' : `<button class="muted-link" type="button" onclick="setPrimaryImage(${Number(img.id)})">대표로</button>`
                 : `<span class="badge orange">미검증</span><button class="btn btn-primary btn-sm" type="button" onclick="verifyMedia({ imageIds: [${Number(img.id)}] })">승인</button>`}
               ${img.source === 'SHARED' ? `<span class="list-meta">${h(PHOTO_BASIS_TEXT[img.match_basis] || '공유 사진')}</span>` : ''}
+              ${img.source === 'WEB'
+                ? `<span class="list-meta">${h(PHOTO_BASIS_TEXT.WEB)}${img.source_url ? ` · <a href="${h(img.source_url)}" target="_blank" rel="noopener noreferrer">출처</a>` : ''} · 저작권 확인 필요</span>`
+                : ''}
               <button class="muted-link danger" type="button" onclick="removeProductImage(${Number(img.id)}, ${img.verified ? 'false' : 'true'})">${img.verified ? '삭제' : '다른 상품이에요(삭제)'}</button>
             </figcaption>
           </figure>`
         )
         .join('')}</div>`
-    : '<p class="list-meta">아직 사진이 없습니다. 같은 바코드로 다른 MAYDIN 약국이 공유한 사진이 생기면 자동으로 붙고, 승인하면 보입니다. 직접 찍으려면 상품 정면이 잘 보이게, 밝은 곳에서 배경을 단순하게 찍어 주세요.</p>';
+    : '<p class="list-meta">아직 사진이 없습니다. 다른 MAYDIN 약국의 공유 사진이나 구글 이미지 검색에서 맞는 사진을 찾으면 자동으로 붙습니다. 직접 찍으려면 상품 정면이 잘 보이게, 밝은 곳에서 배경을 단순하게 찍어 주세요.</p>';
 
   const shared = suggestions.length
     ? `<div class="media-section">
